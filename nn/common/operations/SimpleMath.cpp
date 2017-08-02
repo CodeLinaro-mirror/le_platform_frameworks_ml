@@ -14,14 +14,27 @@
  * limitations under the License.
  */
 
-//TODO change to: package android.hardware.neuralnetworks@1.0;
-package android.ml.neuralnetworks@1.0;
+// Contains the implementation of the operations.
 
-import IEvent;
+#define LOG_TAG "Operations"
 
-interface IRequest {
-    // TODO Define inputs and outputs
-    execute(vec<int32_t> inputsAndOutputs) generates(IEvent event);
+#include "Operations.h"
+#include "OperationsUtils.h"
 
-    releaseTempMemory();
-};
+namespace android {
+namespace nn {
+
+bool addTensorsFloat32Prepare(const Shape& in1, const Shape& in2, Shape* out) {
+    return SameShape(in1, in2) && SetShape(in1, out);
+}
+
+bool addTensorsFloat32(const float* in1, const float* in2, float* out, const Shape& shape) {
+    uint32_t count = getNumberOfElements(shape);
+    for (size_t i = 0; i < count; i++) {
+        *(out++) = *(in1++) + *(in2++);
+    }
+    return true;
+}
+
+} // namespace nn
+} // namespace android
