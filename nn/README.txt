@@ -15,64 +15,34 @@ limitations under the License.
 
 This directory contains files for the Android Neural Networks API.
 
-The design document for the NN API can be found at
-https://goto.google.com/android-nnapi-design-doc
-
 CONTENTS OF THIS DIRECTORY
 
 ./runtime: Implementation of the NN API runtime.
-./runtime/include: Header files that the rest of the framework can use.
-./runtime/src: Source code and internal header files.
-./runtime/doc: Documentation.
+           Includes source code and internal header files.
+./runtime/include: The header files that an external developer would use.
+                   These will be packaged with the NDK.  Includes a
+                   C++ wrapper around the C API to make it easier to use.
 ./runtime/test: Test files.
 
-./driver: Files useful to build drivers.
-./driver/utils/src: Code useful to build drivers.
-./driver/utils/include: C header files to be included by drivers.
-./driver/doc: Documentation.
-./driver/test/sample: Sample driver that uses the CPU to execute queries.
-                      NOT TO BE SHIPPED.  Only to be used as a testing and
-                      learning tool.
+./sample_driver: Sample driver that uses the CPU to execute queries.
+                 NOT TO BE SHIPPED.  Only to be used as a testing and
+                 learning tool.
 
-./c_api: Produces the files that will be packaged with the NDK.
-./c_api/include: The header files that an external developer would use.
-                 These should be packaged with the NDK.
-./c_api/src: The source code and internal header files that define the
-             library external developers will use. This directory can be used
-             to produce both regular and support lib variants.
-./c_api/doc: Documentation.
-./c_api/test: Test files.
-
-./cpp_api: C++ wrapper around the C API to make it easier to use.
-./cpp_api/include: The header files that an external developer would use.
-                   These should be packaged with the NDK.
-./cpp_api/src: The source code and internal header files that define the
-               library external developers will use.
-./cpp_api/doc: Documentation.
-./cpp_api/test: Test files.
-
-./common: Contains files that can be useful for the multiple components (runtime/driver/api)
-./common/include: The files that can be included by these components.
-./common/src: The source code.
-./common/test: Test files.
-
-./java_api: In future versions, this will include the Java version of the NN API.
-./java_api/android/ml/nn: The Java files.
-./java_api/jni/: The JNI files that interface to the C/C++ API.
-
-./tools: Tools used to develop the API, i.e. not external developer tools
-./tools/benchmark: To test performance.
-
-./models: Contains definition and tests for the baseline models.
-
-./hardware/interfaces/neuralnetworks/1.0: Definition of the HAL and VTS tests.
-    TODO: This location is temporary.  Needs to be moved to
-    /hardware/interfaces/neuralnetworks/1.0 when we have tests for all the
-    HAL entry points. This is required by the Treble team.
-./hardware/interfaces/neuralnetworks/1.0/vts: The VTS tests.
+./common: Contains files that can be useful for multiple components,
+          e.g. runtime, driver, or tests.  Includes source code and
+          internal header files.
+./common/include: Header files to be used by the components using common.
+./common/operations: CPU implementation of the operations.
 
 RELATED DIRECTORIES
 
-/test/vts-testcase/hal/ml/nn: Configures the VTS tests
+/hardware/interfaces/neuralnetworks: Definition of the HAL.
+/hardware/interfaces/neuralnetworks/*/vts: The VTS tests.
+/test/vts-testcase/hal/neuralnetworks: Configuration for the VTS tests
 
+THE FOLLOWING SUBDIRECTORIES ARE EXPECTED IN LATER RELEASES:
+
+./tools: Tools used to develop the API, i.e. not external developer tools
+./tools/benchmark: To test performance.
+./models: Contains definition and tests for the baseline models.
 /cts/tests/tests/ml/nn: The CTS tests

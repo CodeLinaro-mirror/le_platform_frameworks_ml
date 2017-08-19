@@ -14,9 +14,25 @@
  * limitations under the License.
  */
 
-//TODO change to: package android.hardware.neuralnetworks@1.0;
-package android.ml.neuralnetworks@1.0;
+#include "Manager.h"
+#include "NeuralNetworksWrapper.h"
+//#include "SampleDriver.h"
+#include "Utils.h"
 
-interface IEvent {
-    wait() generates(int32_t status);
-};
+#include <gtest/gtest.h>
+
+using namespace android::nn::wrapper;
+
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+
+    // Test with the installed drivers.
+    int n1 = RUN_ALL_TESTS();
+
+    // Test with the CPU driver only.
+    nnAssert(ANeuralNetworksInitialize() == ANEURALNETWORKS_NO_ERROR);
+    android::nn::DeviceManager::get()->setUseCpuOnly(true);
+    int n2 = RUN_ALL_TESTS();
+    ANeuralNetworksShutdown();
+    return n1 | n2;
+}
