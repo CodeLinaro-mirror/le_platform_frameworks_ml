@@ -15,6 +15,7 @@
  */
 
 subdirs = [
+    "cache",
     "common",
     "runtime",
     "sample_driver",
