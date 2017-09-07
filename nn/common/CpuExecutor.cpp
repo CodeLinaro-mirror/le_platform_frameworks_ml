@@ -18,11 +18,32 @@
 
 #include "CpuExecutor.h"
 
+#include "EmbeddingLookup.h"
+#include "HashtableLookup.h"
+#include "LSHProjection.h"
+#include "LSTM.h"
 #include "NeuralNetworks.h"
 #include "Operations.h"
+#include "RNN.h"
+#include "SVDF.h"
 
 namespace android {
 namespace nn {
+
+bool RunTimePoolInfo::set(const hidl_memory& hidlMemory) {
+    memory = mapMemory(hidlMemory);
+    if (memory == nullptr) {
+        LOG(ERROR) << "Can't map shared memory.";
+        return false;
+    }
+    memory->update();
+    buffer = reinterpret_cast<uint8_t*>(static_cast<void*>(memory->getPointer()));
+    if (buffer == nullptr) {
+        LOG(ERROR) << "Can't access shared memory.";
+        return false;
+    }
+    return true;
+}
 
 // If we don't have a buffer, allocate it.
 static bool allocateIfNeeded(RunTimeOperandInfo* info, const Shape& shape) {
@@ -42,7 +63,7 @@ static bool allocateIfNeeded(RunTimeOperandInfo* info, const Shape& shape) {
 
 template <typename T>
 static T getScalarData(RunTimeOperandInfo& info) {
-    T * data = reinterpret_cast<T*>(info.buffer);
+    T* data = reinterpret_cast<T*>(info.buffer);
     return data[0];
 }
 
@@ -115,10 +136,10 @@ bool CpuExecutor::setRunTimeOperandInfo(uint32_t operandIndex,
     if (dimensions.size() > 0) {
         to.dimensions = dimensions;
     }
-    if (location.poolIndex == static_cast<uint32_t>(LocationValues::LOCATION_AT_RUN_TIME)) {
+    if (location.poolIndex == RUN_TIME) {
         to.buffer = nullptr;
         to.numberOfUsesLeft = useCount;
-    } else if (location.poolIndex == static_cast<uint32_t>(LocationValues::LOCATION_SAME_BLOCK)) {
+    } else if (location.poolIndex == SAME_BLOCK) {
         to.buffer = const_cast<uint8_t*>(&mModel->operandValues[location.offset]);
         to.numberOfUsesLeft = 0;
     } else {
@@ -142,8 +163,7 @@ void CpuExecutor::freeNoLongerUsedOperands(const std::vector<uint32_t>& inputs) 
         if (info.numberOfUsesLeft == 0) {
             continue;
         }
-        nnAssert(mModel->operands[i].location.poolIndex ==
-                 static_cast<uint32_t>(LocationValues::LOCATION_AT_RUN_TIME));
+        nnAssert(mModel->operands[i].location.poolIndex == RUN_TIME);
         info.numberOfUsesLeft--;
         if (info.numberOfUsesLeft == 0) {
             nnAssert(info.buffer != nullptr);
@@ -175,6 +195,10 @@ int CpuExecutor::executeOperation(const Operation& operation) {
     };
 
     switch (operation.opTuple.operationType) {
+        case OperationType::OEM_OPERATION: {
+            LOG(ERROR) << "OEM operation not supported for CPU execution";
+            success = false;
+        } break;
         case OperationType::ADD: {
             if (!parameterCountIs(3, 1)) {
                 return ANEURALNETWORKS_BAD_DATA;
@@ -187,10 +211,12 @@ int CpuExecutor::executeOperation(const Operation& operation) {
             Shape outShape = out.shape();
 
             if (operation.opTuple.operandType == OperandType::TENSOR_FLOAT32) {
-                success = addPrepare(in1.shape(), in2.shape(), &outShape) &&
+                success = addMulPrepare(in1.shape(), in2.shape(), &outShape) &&
                           allocateIfNeeded(&out, outShape) &&
                           addFloat32(reinterpret_cast<const float*>(in1.buffer),
+                                     in1.shape(),
                                      reinterpret_cast<const float*>(in2.buffer),
+                                     in2.shape(),
                                      activation,
                                      reinterpret_cast<float*>(out.buffer),
                                      outShape);
@@ -208,10 +234,12 @@ int CpuExecutor::executeOperation(const Operation& operation) {
             Shape outShape = out.shape();
 
             if (operation.opTuple.operandType == OperandType::TENSOR_FLOAT32) {
-                success = mulPrepare(in1.shape(), in2.shape(), &outShape) &&
+                success = addMulPrepare(in1.shape(), in2.shape(), &outShape) &&
                           allocateIfNeeded(&out, outShape) &&
                           mulFloat32(reinterpret_cast<const float*>(in1.buffer),
+                                     in1.shape(),
                                      reinterpret_cast<const float*>(in2.buffer),
+                                     in2.shape(),
                                      activation,
                                      reinterpret_cast<float*>(out.buffer),
                                      outShape);
@@ -809,6 +837,30 @@ int CpuExecutor::executeOperation(const Operation& operation) {
                                           blockSize,
                                           output.buffer,
                                           outShape);
+        } break;
+        case OperationType::EMBEDDING_LOOKUP: {
+            EmbeddingLookup lookup(operation, mOperands);
+            success = lookup.Eval();
+        } break;
+        case OperationType::HASHTABLE_LOOKUP: {
+            HashtableLookup lookup(operation, mOperands);
+            success = lookup.Eval();
+        } break;
+        case OperationType::LSH_PROJECTION: {
+            LSHProjection lsh(operation, mOperands);
+            success = lsh.Eval();
+        } break;
+        case OperationType::LSTM: {
+            LSTMCell lstm_cell(operation, mOperands);
+            success = lstm_cell.Eval();
+        } break;
+        case OperationType::RNN: {
+            RNN rnn_cell(operation, mOperands);
+            success = rnn_cell.Eval();
+        } break;
+        case OperationType::SVDF: {
+            SVDF svdf(operation, mOperands);
+            success = svdf.Eval();
         } break;
         default:
             nnAssert(false);

@@ -33,7 +33,9 @@ cc_library {
     host_supported: false,
 
     srcs: [
+        "Event.cpp",
         "Manager.cpp",
+        "Memory.cpp",
         "ModelBuilder.cpp",
         "NeuralNetworks.cpp",
         "RequestBuilder.cpp",
@@ -62,6 +64,10 @@ cc_library {
 
     static_libs: [
         "libneuralnetworks_common",
+    ],
+
+    shared_libs: [
+        "libtextclassifier_hash"
     ],
 
     header_libs: [

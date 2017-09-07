@@ -17,8 +17,13 @@
 #ifndef ANDROID_ML_NN_COMMON_OPERATIONS_H
 #define ANDROID_ML_NN_COMMON_OPERATIONS_H
 
-#include <cstdint>
+#include "android/log.h"
+
 #include <stddef.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <vector>
 
 namespace android {
@@ -31,22 +36,54 @@ enum PaddingScheme {
     kPaddingSame = 1,
     kPaddingValid = 2,
 };
+
 enum ActivationFn {
     kActivationNone = 0,
-    kActivationRelu = 1,
-    kActivationRelu1 = 2,
-    kActivationRelu6 = 3,
+    kActivationRelu,
+    kActivationRelu1,
+    kActivationRelu6,
+    kActivationTanh,
+    kActivationSignBit,
+    kActivationSigmoid,
 };
 
-bool addPrepare(const Shape& in1, const Shape& in2, Shape* out1);
-bool addFloat32(const float* in1, const float* in2,
-                int32_t activation,
-                float* out, const Shape& shape);
+class ActivationFunctor {
+ public:
+  explicit ActivationFunctor(ActivationFn act) : act_(act) {}
 
-bool mulPrepare(const Shape& in1, const Shape& in2, Shape* out1);
-bool mulFloat32(const float* in1, const float* in2,
+  float operator()(float a) const {
+    switch (act_) {
+      case kActivationNone:
+        return a;
+      case kActivationRelu:
+        return a < 0.f ? 0.f : a;
+      case kActivationRelu6:
+        return std::max(0.f, std::min(a, 6.f));
+      case kActivationTanh:
+        return std::tanh(a);
+      case kActivationSigmoid:
+        return 1.0f / (1.0f + std::exp(-a));
+      default:
+        __android_log_print(ANDROID_LOG_ERROR, "NN API",
+                            "Invalid enum value for activation function: 0x%0X",
+                            act_);
+        exit(1);
+    }
+  }
+
+ private:
+  ActivationFn act_;
+};
+
+bool addMulPrepare(const Shape& in1, const Shape& in2, Shape* out1);
+bool addFloat32(const float* in1, const Shape& shape1,
+                const float* in2, const Shape& shape2,
                 int32_t activation,
-                float* out, const Shape& shape);
+                float* out, const Shape& shapeOut);
+bool mulFloat32(const float* in1, const Shape& shape1,
+                const float* in2, const Shape& shape2,
+                int32_t activation,
+                float* out, const Shape& shapeOut);
 
 bool floorPrepare(const Shape& input, Shape* output);
 bool floorFloat32(const float* inputData,

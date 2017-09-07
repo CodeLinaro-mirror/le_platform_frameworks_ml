@@ -29,7 +29,13 @@ cc_library_static {
 
     srcs: [
         "CpuExecutor.cpp",
+        "EmbeddingLookup.cpp",
+        "HashtableLookup.cpp",
+        "LSHProjection.cpp",
+        "LSTM.cpp",
         "OperationsUtils.cpp",
+        "RNN.cpp",
+        "SVDF.cpp",
         "Utils.cpp",
         "operations/Activation.cpp",
         "operations/Concatenation.cpp",
@@ -46,6 +52,7 @@ cc_library_static {
         "libhidlbase",
         "libhidltransport",
         "libhidlmemory",
+        "libtextclassifier_hash",
         "liblog",
         "libutils",
         "android.hardware.neuralnetworks@1.0",
@@ -56,11 +63,12 @@ cc_library_static {
         "libneuralnetworks_headers",
         "libgemmlowp",
         "libfixedpoint",
+        "libtextclassifier_hash_headers",
         "libeigen",
     ],
 
-
     cflags: [
+        "-DNAMESPACE_FOR_HASH_FUNCTIONS=farmhash",
         "-Werror",
         "-Wall",
         "-Wextra",
@@ -68,4 +76,94 @@ cc_library_static {
         "-Wno-unused-variable",
     ],
 
+}
+
+cc_test {
+    name: "embedding_lookup_test",
+    srcs: [
+        "EmbeddingLookupTest.cpp",
+    ],
+    shared_libs: [
+        "liblog",
+        "libneuralnetworks",
+    ],
+    static_libs: [
+        "libgmock",
+        "libneuralnetworks_common",
+    ],
+}
+
+cc_test {
+    name: "hashtable_lookup_test",
+    srcs: [
+        "HashtableLookupTest.cpp",
+    ],
+    shared_libs: [
+        "liblog",
+        "libneuralnetworks",
+    ],
+    static_libs: [
+        "libgmock",
+        "libneuralnetworks_common",
+    ],
+}
+
+cc_test {
+    name: "lsh_projection_test",
+    srcs: [
+        "LSHProjectionTest.cpp",
+    ],
+    shared_libs: [
+        "libneuralnetworks",
+    ],
+    static_libs: [
+        "libgmock",
+        "libneuralnetworks_common",
+    ],
+}
+
+cc_test {
+    name: "lstm_test",
+    srcs: [
+        "LSTMTest.cpp",
+    ],
+    shared_libs: [
+        "liblog",
+        "libneuralnetworks",
+    ],
+    static_libs: [
+        "libgmock",
+        "libneuralnetworks_common",
+    ],
+}
+
+cc_test {
+    name: "rnn_test",
+    srcs: [
+        "RNNTest.cpp",
+    ],
+    static_libs: [
+        "libgmock",
+        "libneuralnetworks_common",
+    ],
+    header_libs: [
+        "libneuralnetworks_headers",
+    ],
+    shared_libs: [
+        "libneuralnetworks",
+    ],
+}
+
+cc_test {
+    name: "svdf_test",
+    srcs: [
+        "SVDFTest.cpp",
+    ],
+    shared_libs: [
+        "libneuralnetworks",
+    ],
+    static_libs: [
+        "libgmock",
+        "libneuralnetworks_common",
+    ],
 }

@@ -15,10 +15,9 @@
  */
 
 subdirs = [
-    "cache",
     "common",
+    "driver",
     "runtime",
-    "sample_driver",
 ]
 
 cc_defaults {

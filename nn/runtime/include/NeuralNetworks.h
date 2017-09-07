@@ -19,9 +19,13 @@
 
 // TODO Before submitting to NDK, fix all the TODOs in here.
 
-// TODO Change this to 27 or better __ANDROID_API_O_MR1__
-#if __ANDROID_API__ >= __ANDROID_API_O__
+#if __ANDROID_API__ >= __ANDROID_API_O_MR1__
 
+// TODO These may be useful when we broaden the shared memory support
+//     but would be available only for system apps.
+//#include <android/hardware_buffer.h>
+//#include <hardware/gralloc.h>
+//#include <android/hidl/memory/1.0/IMemory.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/cdefs.h>
@@ -31,76 +35,105 @@ __BEGIN_DECLS
 /**
  * Operand types.
  *
- * [TODO: Make sure these are compatible with TensorFlow Lite.]
+ * The type of operands that can be added to a model.
+ *
+ * Although we define many types, most operators accept just a few
+ * types.  Most used are ANEURALNETWORKS_TENSOR_FLOAT32,
+ * ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, and ANEURALNETWORKS_INT32.
  */
 enum {
-    ANEURALNETWORKS_FLOAT16 = 0,
-    ANEURALNETWORKS_FLOAT32 = 1,
-    ANEURALNETWORKS_INT8 = 2,
-    ANEURALNETWORKS_UINT8 = 3,
-    ANEURALNETWORKS_INT16 = 4,
-    ANEURALNETWORKS_UINT16 = 5,
-    ANEURALNETWORKS_INT32 = 6,
-    ANEURALNETWORKS_UINT32 = 7,
-    ANEURALNETWORKS_TENSOR_FLOAT16 = 8,
-    ANEURALNETWORKS_TENSOR_FLOAT32 = 9,
-    ANEURALNETWORKS_TENSOR_QUANT8_ASYMM = 10,
+    // The following entries are used to declare scalars.
+    ANEURALNETWORKS_FLOAT16 = 0,  // A 16 bit floating point scalar value.
+    ANEURALNETWORKS_FLOAT32 = 1,  // A 32 bit floating point scalar value.
+    ANEURALNETWORKS_INT8 = 2,     // A signed 8 bit integer scalar value.
+    ANEURALNETWORKS_UINT8 = 3,    // An unsigned 8 bit integer scalar value.
+    ANEURALNETWORKS_INT16 = 4,    // A signed 16 bit integer scalar value.
+    ANEURALNETWORKS_UINT16 = 5,   // An unsigned 16 bit integer scalar value.
+    ANEURALNETWORKS_INT32 = 6,    // A signed 32 bit integer scalar value.
+    ANEURALNETWORKS_UINT32 = 7,   // An unsigned 32 bit integer scalar value.
 
-    ANEURALNETWORKS_NUMBER_DATA_TYPES = 11
+    // The following entries are used to declare tensors.
+    ANEURALNETWORKS_TENSOR_FLOAT16 = 8,  // A tensor of 16 bit floating point values.
+    ANEURALNETWORKS_TENSOR_FLOAT32 = 9,  // A tensor of 32 bit floating point values.
+    ANEURALNETWORKS_TENSOR_INT32 = 10,   // A tensor of 32 bit integer values.
+    /* A tensor of 8 bit integers that represent real numbers.
+     *
+     * Attached to this tensor are two numbers that can be used to convert
+     * the 8 bit integer to the real value and vice versa.  These two numbers are:
+     * - scale: a 32 bit floating point value
+     * - zero_value: an 32 bit integer
+     *
+     * The formula is:
+     * real_value = (integer_value - zero_value) * scale.
+     */
+    ANEURALNETWORKS_TENSOR_QUANT8_ASYMM = 11,
 };
 
 /**
  * Operation types.
  *
- * [TODO: Make sure these are compatible with TensorFlow Lite.]
+ * The type of operations that can be added to a model.
  */
 enum {
-    ANEURALNETWORKS_AVERAGE_POOL = 0,
-    ANEURALNETWORKS_CONCATENATION = 1,
-    ANEURALNETWORKS_CONV = 2,
-    ANEURALNETWORKS_DEPTHWISE_CONV = 3,
-    ANEURALNETWORKS_MAX_POOL = 4,
-    ANEURALNETWORKS_L2_POOL = 5,
-    ANEURALNETWORKS_DEPTH_TO_SPACE = 6,
-    ANEURALNETWORKS_SPACE_TO_DEPTH = 7,
-    ANEURALNETWORKS_LOCAL_RESPONSE_NORMALIZATION = 8,
-    ANEURALNETWORKS_SOFTMAX = 9,
-    ANEURALNETWORKS_RESHAPE = 10,
-    ANEURALNETWORKS_SPLIT = 11,
-    ANEURALNETWORKS_FAKE_QUANT = 12,
-    ANEURALNETWORKS_ADD = 13,
-    ANEURALNETWORKS_FULLY_CONNECTED = 14,
-    ANEURALNETWORKS_CAST = 15,
-    ANEURALNETWORKS_MUL = 16,
-    ANEURALNETWORKS_L2_NORMALIZATION = 17,
+    /* OEM specific operation.
+     *
+     * This operation is OEM specific. It should only be used for OEM applications.
+     */
+    ANEURALNETWORKS_OEM_OPERATION = 0,
+    /* Adds two tensors.
+     *
+     * Takes two input tensors of identical type and compatible dimensions.  The output
+     * is the sum of both input tensors, optionally modified by an activation function.
+     *
+     * TODO: Do we accept any number of dimensions? TENSOR_FLOAT16, TENSOR_FLOAT32, TENSOR_INT32,
+     *       TENSOR_QUANT8_ASYMM?
+     * TODO: Define "broadcast requirements" and have a link for Broadcast.
+     * TODO: Define "fused activation" and have a link for FusedActivation.
+     *
+     * Inputs:
+     * 0: A tensor.
+     * 1: A tensor of the same type as input0.  It should have the same shape too or satisfy
+     *    broadcast requirements.  See Broadcast.
+     * 2: An optional INT32? value.  Specifies the activation to invoke on the result of each
+     *    addition.  See FusedActivation.
+     *
+     * Ouputs:
+     * 0: The sum, a tensor of the same type and shape as input0.
+     */
+    ANEURALNETWORKS_ADD = 1,
+    // TODO Document all the other ops.
+    ANEURALNETWORKS_AVERAGE_POOL = 2,
+    ANEURALNETWORKS_CAST = 3,
+    ANEURALNETWORKS_CONCATENATION = 4,
+    ANEURALNETWORKS_CONV = 5,
+    ANEURALNETWORKS_DEPTHWISE_CONV = 6,
+    ANEURALNETWORKS_DEPTH_TO_SPACE = 7,
+    ANEURALNETWORKS_DEQUANTIZE = 8,
+    ANEURALNETWORKS_EMBEDDING_LOOKUP = 9,
+    ANEURALNETWORKS_FAKE_QUANT = 10,
+    ANEURALNETWORKS_FLOOR = 11,
+    ANEURALNETWORKS_FULLY_CONNECTED = 12,
+    ANEURALNETWORKS_GATHER = 13,
+    ANEURALNETWORKS_HASHTABLE_LOOKUP = 14,
+    ANEURALNETWORKS_L2_NORMALIZATION = 15,
+    ANEURALNETWORKS_L2_POOL = 16,
+    ANEURALNETWORKS_LOCAL_RESPONSE_NORMALIZATION = 17,
     ANEURALNETWORKS_LOGISTIC = 18,
-    ANEURALNETWORKS_RELU = 19,
-    ANEURALNETWORKS_RELU6 = 20,
-    ANEURALNETWORKS_RELU1 = 21,
-    ANEURALNETWORKS_TANH = 22,
-    ANEURALNETWORKS_DEQUANTIZE = 23,
-    ANEURALNETWORKS_FLOOR = 24,
-    ANEURALNETWORKS_GATHER = 25,
-    ANEURALNETWORKS_RESIZE_BILINEAR = 26,
-    ANEURALNETWORKS_LSH_PROJECTION = 27,
-    ANEURALNETWORKS_LSTM = 28,
-    ANEURALNETWORKS_SVDF = 29,
-    ANEURALNETWORKS_RNN = 30,
-    ANEURALNETWORKS_N_GRAM = 31,
-    ANEURALNETWORKS_LOOKUP = 32,
-
-    ANEURALNETWORKS_NUMBER_OPERATION_TYPES = 33
-};
-
-/**
- * Baseline models.
- */
-enum {
-    ANEURALNETWORKS_INCEPTION_SMALL_20_20 = 0,
-    ANEURALNETWORKS_INCEPTION_LARGE_20_20 = 1,
-    ANEURALNETWORKS_MOBILE_NETS_100_100 = 2,
-
-    ANEURALNETWORKS_NUMBER_BASELINE_MODELS = 3
+    ANEURALNETWORKS_LSH_PROJECTION = 19,
+    ANEURALNETWORKS_LSTM = 20,
+    ANEURALNETWORKS_MAX_POOL = 21,
+    ANEURALNETWORKS_MUL = 22,
+    ANEURALNETWORKS_RELU = 23,
+    ANEURALNETWORKS_RELU1 = 24,
+    ANEURALNETWORKS_RELU6 = 25,
+    ANEURALNETWORKS_RESHAPE = 26,
+    ANEURALNETWORKS_RESIZE_BILINEAR = 27,
+    ANEURALNETWORKS_RNN = 28,
+    ANEURALNETWORKS_SOFTMAX = 29,
+    ANEURALNETWORKS_SPACE_TO_DEPTH = 30,
+    ANEURALNETWORKS_SPLIT = 31,
+    ANEURALNETWORKS_SVDF = 32,
+    ANEURALNETWORKS_TANH = 33,
 };
 
 /**
@@ -122,8 +155,6 @@ enum {
      * processing successive frames coming from the camera.
      */
     ANEURALNETWORKS_PREFER_SUSTAINED_SPEED = 2,
-
-    ANEURALNETWORKS_NUMBER_PREFERENCES = 3
 };
 
 /**
@@ -136,15 +167,29 @@ enum {
     ANEURALNETWORKS_UNEXPECTED_NULL = 3,
     ANEURALNETWORKS_BAD_DATA = 4,
     ANEURALNETWORKS_OP_FAILED = 5,
-    ANEURALNETWORKS_NOT_IMPLEMENTED = 6 // TODO remove
+    ANEURALNETWORKS_UNMAPPABLE = 5,
 };
 
-// The maximum number of operands and operations that a model may have.
-const uint32_t MAX_NUMBER_OF_OPERANDS = 0xFFFFFFFE;
-const uint32_t MAX_NUMBER_OF_OPERATIONS = 0xFFFFFFFE;
-
-// TODO use real declaration
-typedef struct AHardwareBuffer AHardwareBuffer;
+/**
+ * ANeuralNetworksMemory is an opaque type that represents memory.
+ *
+ * This type is used to represent shared memory, AHardwareBuffer, and similar
+ * memories.
+ *
+ * By using shared memory, a program can efficiently communicate to the
+ * runtime and drivers the tensors that define a model.  See
+ * {@Link ANeuralNetworksModel_setOperandValueFromMemory}.  An application
+ * should typically create one shared memory object that contains every tensor
+ * needed to define a model.  {@Link ANeuralNetworksMemory_createFromFd} can be
+ * used to create shared memory from a file handle.  {@link ANeuralNetworksMemory_createShared}
+ * can be used to directly created shared memory.
+ *
+ * Memory objects can also be used to specify the input and output arguments of
+ * a request.  See {@Link ANeuralNetworksRequest_setInputFromMemory}
+ * and {@Link ANeuralNetworksRequest_setOutputFromMemory}.  This is a typical
+ * usage for hardware buffers.  See {@Link ANeuralNetworksMemory_createFromHardwareBuffer}.
+ */
+typedef struct ANeuralNetworksMemory ANeuralNetworksMemory;
 
 /**
  * ANeuralNetworksRequest is an opaque type that can be used to apply a machine
@@ -154,9 +199,11 @@ typedef struct AHardwareBuffer AHardwareBuffer;
  *    <li>Create a new request instance by calling the
  *        {@link ANeuralNetworksRequest_create} function.</li>
  *    <li>Associate data to the model inputs with
- *        {@link ANeuralNetworksRequest_setInput}.</li>
+ *        {@link ANeuralNetworksRequest_setInput} or
+ *        {@Link ANeuralNetworksRequest_setInputFromMemory}.</li>
  *    <li>Associate output buffers to the model outputs with
- *        {@link ANeuralNetworksRequest_setOutput}.</li>
+ *        {@link ANeuralNetworksRequest_setOutput} or
+ *        {@Link ANeuralNetworksRequest_setOutputFromMemory}.</li>
  *    <li>Apply the model with {@link ANeuralNetworksRequest_startCompute}.</li>
  *    <li>Wait for the request to complete with {@link
  * ANeuralNetworksRequest_wait}.</li> <li>Repeat the previous steps as often as
@@ -243,7 +290,7 @@ typedef uint32_t ANeuralNetworksOperationType;
  *
  * This function is thread safe.
  *
- * @return NO_ERROR if successful, else [?]
+ * @return ANEURALNETWORKS_NO_ERROR if successful.
  */
 int ANeuralNetworksInitialize();
 
@@ -269,6 +316,59 @@ int ANeuralNetworksInitialize();
 void ANeuralNetworksShutdown();
 
 /**
+ * Creates a shared memory object.
+ *
+ * Creates a shared memory region of the specified size in bytes.
+ * See {@link ANeuralNetworksMemory} for a description on how to use
+ * this shared memory.
+ *
+ * @param size The requested size in bytes.
+ * @param memory The memory object to be created.
+ *               Set to NULL if unsuccessful.
+ *
+ * @return ANEURALNETWORKS_NO_ERROR if the request completed normally.
+ */
+int ANeuralNetworksMemory_createShared(size_t size, ANeuralNetworksMemory** memory);
+
+/* TODO Should we also have from Surface, IONBuffer, ashmem and:
+int ANeuralNetworksMemory_createFromHidlMemory(android::hardware::hidl_memory hidlMemory,
+                                               ANeuralNetworksMemory** memory);
+int ANeuralNetworksMemory_createFromFd(int fd, ANeuralNetworksMemory** memory);
+int ANeuralNetworksMemory_createFromGrallocBuffer(buffer_handle_t buffer,
+                                                  ANeuralNetworksMemory** memory);
+int ANeuralNetworksMemory_createFromHardwareBuffer(AHardwareBuffer* buffer,
+                                                   ANeuralNetworksMemory** memory);
+*/
+
+/**
+ * Returns pointer to the memory.
+ *
+ * Returns a pointer to the underlying memory.  Not all memories represented by
+ * {@Link ANeuralNetworksMemory} can return a CPU addressable pointer, so be sure to
+ * check the return value.
+ *
+ * @param memory The memory object we are inquiring about.
+ * @param buffer A pointer to where the buffer pointer is returned.  *buffer is set
+ *               to NULL in case of error.
+ *
+ * @return ANEURALNETWORKS_NO_ERROR if the request completed normally.
+ *         ANEURALNETWORKS_UNMAPPABLE is returned if the memory can't be accessed
+ *         directly by the CPU.  Other error codes are possible.
+ */
+int ANeuralNetworksMemory_getPointer(ANeuralNetworksMemory* memory, uint8_t** buffer);
+
+/**
+ * Delete a shared memory object.
+ *
+ * Destroys the object used by the run time to keep track of the shared memory.
+ * This will free the underlying actual shared memory if no other code has open
+ * handles to this memory.  [TODO verify]
+ *
+ * @param memory The memory object to be freed.
+ */
+void ANeuralNetworksMemory_free(ANeuralNetworksMemory* memory);
+
+/**
  * Create an empty {@link ANeuralNetworksModel}.
  *
  * <p>This only creates the object.  Computation is performed once
@@ -286,11 +386,9 @@ void ANeuralNetworksShutdown();
  * @param model The {@link ANeuralNetworksModel} to be created.
  *              Set to NULL if unsuccessful.
  *
- * @return NO_ERROR if successful, [?] otherwise.
+ * @return ANEURALNETWORKS_NO_ERROR if successful.
  */
 int ANeuralNetworksModel_create(ANeuralNetworksModel** model);
-
-int ANeuralNetworksModel_createBaselineModel(ANeuralNetworksModel** model, uint32_t modelId);
 
 /**
  * Destroy a model.
@@ -309,9 +407,11 @@ void ANeuralNetworksModel_free(ANeuralNetworksModel* model);
  * The order in which the operands are added is important. The first one added
  * to a model will have the index value 0, the second 1, etc.  These indexes are
  * used as operand identifiers in {@link ANeuralNetworksModel_addOperation},
- * {@link ANeuralNetworksRequest_setInput}, {@link
- * ANeuralNetworksRequest_setOutput}, and {@link
- * ANeuralNetworksRequest_setOperandValue}.
+ * {@link ANeuralNetworksRequest_setInput},
+ * {@Link ANeuralNetworksRequest_setInputFromMemory},
+ * {@link ANeuralNetworksRequest_setOutput},
+ * {@Link ANeuralNetworksRequest_setOutputFromMemory} and
+ * {@link ANeuralNetworksRequest_setOperandValue}.
  *
  * To build a model that can accomodate inputs of various sizes, as you may want
  * to do for a CNN, set the size of the dimensions that will vary at run time to
@@ -328,7 +428,7 @@ void ANeuralNetworksModel_free(ANeuralNetworksModel* model);
  * @param type The {@link ANeuralNetworksOperandType} that describes the shape
  * of the operand.
  *
- * @return NO_ERROR if successful, [?] otherwise.
+ * @return ANEURALNETWORKS_NO_ERROR if successful.
  */
 int ANeuralNetworksModel_addOperand(ANeuralNetworksModel* model,
                                     const ANeuralNetworksOperandType* type);
@@ -336,13 +436,52 @@ int ANeuralNetworksModel_addOperand(ANeuralNetworksModel* model,
 /**
  * Sets an operand to a constant value.
  *
- * This value can't be changed when a request is executed.
+ * For scalar values, the content of buffer is copied into the model.
+ *
+ * For tensor values, a pointer to the buffer is stored within the model.
+ * The application is responsible for not changing the content of this region
+ * until all requests using this model have completed.  As the data may
+ * be copied during processing, modifying the data after this call yields
+ * undefined results.
  *
  * A model can't be modified once a request has been created for it by
  * {@link ANeuralNetworksRequest_create}.
+ *
+ * @param model The model to be modified.
+ * @param index The index of the model operand we're setting.
+ * @param buffer A pointer to the data to use.
+ * @param length The size in bytes of the data value.
+ *
+ * @return ANEURALNETWORKS_NO_ERROR if successful.
  */
 int ANeuralNetworksModel_setOperandValue(ANeuralNetworksModel* model, int32_t index,
                                          const void* buffer, size_t length);
+
+/**
+ * Sets an operand to a value stored in a memory object.
+ *
+ * The content of the memory is not copied.  A reference to that memory is stored
+ * inside the model.  The application is responsible for not changing the content
+ * of the memory region until all requests using this model have completed.
+ * As the data may be copied during processing, modifying the data after this call
+ * yields undefined results.
+ *
+ * A model can't be modified once a request has been created for it by
+ * {@link ANeuralNetworksRequest_create}.
+ *
+ * @param model The model to be modified.
+ * @param index The index of the model operand we're setting.
+ * @param buffer A pointer to the data to use.
+ * @param memory The memory containing the data.
+ * @param offset This specifies the location of the data whithin the memory.
+ *               The offset is in bytes from the start of memory.
+ * @param length The size in bytes of the data value.
+ *
+ * @return ANEURALNETWORKS_NO_ERROR if successful.
+ */
+int ANeuralNetworksModel_setOperandValueFromMemory(ANeuralNetworksModel* model, int32_t index,
+                                                   const ANeuralNetworksMemory* memory,
+                                                   uint32_t offset, size_t length);
 
 /**
  * Add an operation to a model.
@@ -362,28 +501,12 @@ int ANeuralNetworksModel_setOperandValue(ANeuralNetworksModel* model, int32_t in
  * A model can't be modified once a request has been created for it by
  * {@link ANeuralNetworksRequest_create}.
  *
- * @return NO_ERROR if successful, [?] otherwise.
+ * @return ANEURALNETWORKS_NO_ERROR if successful.
  */
 int ANeuralNetworksModel_addOperation(ANeuralNetworksModel* model,
                                       ANeuralNetworksOperationType type,
                                       ANeuralNetworksIntList* inputs,
                                       ANeuralNetworksIntList* outputs);
-
-/** Adds a submodel.
- *
- * [TODO] This makes a copy. The submodel is modified afterwards, no change.
- * How about the data?
- *
- * The operands specified by inputs and outputs must have been
- * previously added by calls to {@link ANeuralNetworksModel_addOperand}.
- *
- * A model can't be modified once a request has been created for it by
- * {@link ANeuralNetworksRequest_create}.
- */
-int ANeuralNetworksModel_addSubModel(ANeuralNetworksModel* model,
-                                     const ANeuralNetworksModel* submodel,
-                                     ANeuralNetworksIntList* inputs,
-                                     ANeuralNetworksIntList* outputs);
 
 /**
  * Specfifies which operands will be the model's inputs and outputs.
@@ -405,15 +528,6 @@ int ANeuralNetworksModel_setInputsAndOutputs(ANeuralNetworksModel* model,
                                              ANeuralNetworksIntList* outputs);
 
 /**
- * If the model is one of the baseline models, set its ID so that it can be
- * easily recognized by the drivers.
- *
- * A model can't be modified once a request has been created for it by
- * {@link ANeuralNetworksRequest_create}.
- */
-int ANeuralNetworksModel_setBaselineId(ANeuralNetworksModel* model, uint32_t baseLineId);
-
-/**
  * Create a {@link ANeuralNetworksRequest} to apply the given model.
  * This only creates the object.  Computation is only performed once
  * {@link ANeuralNetworksRequest_startCompute} is invoked.
@@ -425,7 +539,8 @@ int ANeuralNetworksModel_setBaselineId(ANeuralNetworksModel* model, uint32_t bas
  * @param model The {@link ANeuralNetworksModel} to be evaluated.
  * @param request The newly created object or NULL if unsuccessful.
  *
- * @return NO_ERROR if successful, BAD_DATA if the model is invalid.
+ * @return ANEURALNETWORKS_NO_ERROR if successful, ANEURALNETWORKS_BAD_DATA
+ *         if the model is invalid.
  */
 int ANeuralNetworksRequest_create(ANeuralNetworksModel* model, ANeuralNetworksRequest** request);
 
@@ -458,7 +573,7 @@ void ANeuralNetworksRequest_free(ANeuralNetworksRequest* request);
  *                  {@link PREFER_SINGLE_FAST_ANSWER}, or
  *                  {@link PREFER_SUSTAINED_SPEED}.
  *
- * @return NO_ERROR if successful.
+ * @return ANEURALNETWORKS_NO_ERROR if successful.
  */
 int ANeuralNetworksRequest_setPreference(ANeuralNetworksRequest* request, uint32_t preference);
 
@@ -480,18 +595,18 @@ int ANeuralNetworksRequest_setPreference(ANeuralNetworksRequest* request, uint32
  * @param buffer The buffer containing the data.
  * @param length The length in bytes of the buffer.
  *
- * @return NO_ERROR if successful, BAD_DATA if the name is not recognized
- *         or the buffer is too small for the input.
+ * @return ANEURALNETWORKS_NO_ERROR if successful, ANEURALNETWORKS_BAD_DATA if the
+ *         name is not recognized or the buffer is too small for the input.
  */
 int ANeuralNetworksRequest_setInput(ANeuralNetworksRequest* request, int32_t index,
                                     const ANeuralNetworksOperandType* type, const void* buffer,
                                     size_t length);
 
 /**
- * Associate a hardware buffer with an input of the model of the
+ * Associate part of a memory object with an input of the model of the
  * {@link ANeuralNetworksRequest}.
  *
- * <p>The provided buffer must outlive the request.</p>
+ * <p>The provided shared memory must outlive the request.</p>
  *
  * This function is thread safe.
  *
@@ -502,16 +617,18 @@ int ANeuralNetworksRequest_setInput(ANeuralNetworksRequest* request, int32_t ind
  *             have the same value as specified in the model.
  *             [TODO: We know the dimensions may change.  Anything else?  Base
  * type?]
- * @param buffer The buffer containing the data.
- * [TODO Would it be useful to have a rect param?]
+ * @param memory The memory containing the data.
+ * @param offset This specifies the location of the data whithin the memory.
+ *               The offset is in bytes from the start of memory.
+ * @param length The size in bytes of the data value.
  *
- * @return NO_ERROR if successful, BAD_DATA if the name is not recognized
- *         or the buffer is too small for the input.
+ * @return ANEURALNETWORKS_NO_ERROR if successful, ANEURALNETWORKS_BAD_DATA if the
+ *         name is not recognized or the buffer is too small for the input.
  */
-int ANeuralNetworksRequest_setInputFromHardwareBuffer(ANeuralNetworksRequest* request,
-                                                      int32_t index,
-                                                      const ANeuralNetworksOperandType* type,
-                                                      const AHardwareBuffer* buffer);
+int ANeuralNetworksRequest_setInputFromMemory(ANeuralNetworksRequest* request, int32_t index,
+                                              const ANeuralNetworksOperandType* type,
+                                              const ANeuralNetworksMemory* memory, uint32_t offset,
+                                              uint32_t length);
 
 /**
  * Associate a user buffer with an output of the model of the
@@ -528,21 +645,21 @@ int ANeuralNetworksRequest_setInputFromHardwareBuffer(ANeuralNetworksRequest* re
  *             have the same value as specified in the model.
  *             [TODO: We know the dimensions may change.  Anything else?  Base
  * type?]
- * @param buffer The buffer where the data will be written.
+ * @param buffer The buffer where the data is to be written.
  * @param length The length in bytes of the buffer.
  *
- * @return NO_ERROR if successful, BAD_DATA if the name is not recognized
- *         or the buffer is too small for the output.
+ * @return ANEURALNETWORKS_NO_ERROR if successful, ANEURALNETWORKS_BAD_DATA if the
+ *         name is not recognized or the buffer is too small for the output.
  */
 int ANeuralNetworksRequest_setOutput(ANeuralNetworksRequest* request, int32_t index,
                                      const ANeuralNetworksOperandType* type, void* buffer,
                                      size_t length);
 
 /**
- * Associate a hardware buffer with an output of the model of the
+ * Associate part of a memory object with an output of the model of the
  * {@link ANeuralNetworksRequest}.
  *
- * <p>The provided buffer must outlive the request.</p>
+ * <p>The provided shared memory must outlive the request.</p>
  *
  * @param request The request to be modified.
  * @param index The index of the model operand we're associating the input to.
@@ -551,29 +668,31 @@ int ANeuralNetworksRequest_setOutput(ANeuralNetworksRequest* request, int32_t in
  *             have the same value as specified in the model.
  *             [TODO: We know the dimensions may change.  Anything else?  Base
  * type?]
- * @param buffer The buffer containing the data.
- * [todo Would it be useful to have a rect param?]
+ * @param memory The memory where the data is to be stored.
+ * @param offset This specifies the location of the data whithin the memory.
+ *               The offset is in bytes from the start of memory.
+ * @param length The length in bytes of the data value.
  *
- * @return NO_ERROR if successful, BAD_DATA if the name is not recognized
- *         or the buffer is too small for the output.
+ * @return ANEURALNETWORKS_NO_ERROR if successful, ANEURALNETWORKS_BAD_DATA if the
+ *         name is not recognized or the buffer is too small for the output.
  */
-int ANeuralNetworksRequest_setOutputFromHardwareBuffer(ANeuralNetworksRequest* request,
-                                                       int32_t index,
-                                                       const ANeuralNetworksOperandType* type,
-                                                       const AHardwareBuffer* buffer);
+int ANeuralNetworksRequest_setOutputFromMemory(ANeuralNetworksRequest* request, int32_t index,
+                                               const ANeuralNetworksOperandType* type,
+                                               const ANeuralNetworksMemory* memory, uint32_t offset,
+                                               uint32_t length);
 
 /**
- * Queue the request for execution.
+ * Schedule the request for execution.
  *
- * <p>Puts the request in a queue for execution. Once the model has been
+ * <p>Schedules the request for execution. Once the model has been
  * applied and the outputs are ready to be consumed, the returned event will be
  * signaled. Use {@link ANeuralNetworksRequest_wait} to wait for that event.
  * </p>
  *
- * Multiple requests can be queued and executed concurrently. The runtime makes
+ * Multiple requests can be scheduled and executed concurrently. The runtime makes
  * no guarantee on the ordering of the completion of the requests.  If it's
- * important to the application, the application should enforces the ordering by
- * using the return events.
+ * important to the application, the application should enforce the ordering by
+ * using the returned events.
  *
  * ANeuralNetworksRequest_wait must be called to recuperate the resources used
  * by the event.
@@ -582,9 +701,10 @@ int ANeuralNetworksRequest_setOutputFromHardwareBuffer(ANeuralNetworksRequest* r
  *
  * @param request The request to be modified.
  * @param event The event that will be signaled on completion.
- *              [TODO define the functions to create/delete events]
+ *              [TODO define the functions to create/delete events?
+ *                    or startCompute creates, and free deletes?]
  *
- * @return NO_ERROR if successful, BAD_DATA if callback is NULL.
+ * @return ANEURALNETWORKS_NO_ERROR if successful.
  */
 int ANeuralNetworksRequest_startCompute(ANeuralNetworksRequest* request,
                                         ANeuralNetworksEvent** event);
@@ -598,7 +718,7 @@ int ANeuralNetworksRequest_startCompute(ANeuralNetworksRequest* request,
  *
  * This function is thread safe.
  *
- * @return NO_ERROR if the request completed normally.
+ * @return ANEURALNETWORKS_NO_ERROR if the request completed normally.
  */
 int ANeuralNetworksEvent_wait(ANeuralNetworksEvent* event);
 
@@ -612,6 +732,6 @@ void ANeuralNetworksEvent_free(ANeuralNetworksEvent* event);
 
 __END_DECLS
 
-#endif //  __ANDROID_API__ >= 27
+#endif  //  __ANDROID_API__ >= 27
 
-#endif // ANDROID_ML_NN_RUNTIME_NEURAL_NETWORKS_H
+#endif  // ANDROID_ML_NN_RUNTIME_NEURAL_NETWORKS_H
