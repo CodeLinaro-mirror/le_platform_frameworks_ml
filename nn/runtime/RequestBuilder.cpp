@@ -18,6 +18,7 @@
 
 #include "RequestBuilder.h"
 
+#include "CompilationBuilder.h"
 #include "CpuExecutor.h"
 #include "HalInterfaces.h"
 #include "Manager.h"
@@ -38,7 +39,7 @@ int ModelArgumentInfo::setFromPointer(const Operand& operand,
         return n;
     }
     state = ModelArgumentInfo::POINTER;
-    locationAndDimension.location = {.poolIndex = RUN_TIME, .offset = 0, .length = length};
+    locationAndDimension.location = {.poolIndex = 0, .offset = 0, .length = length};
     buffer = data;
     return ANEURALNETWORKS_NO_ERROR;
 }
@@ -73,11 +74,11 @@ int ModelArgumentInfo::updateDimensionInfo(const Operand& operand,
     return ANEURALNETWORKS_NO_ERROR;
 }
 
-RequestBuilder::RequestBuilder(const ModelBuilder* model)
-    : mModel(model),
-      mInputs(model->inputCount()),
-      mOutputs(model->outputCount()),
-      mMemories(model->getMemories()) {
+RequestBuilder::RequestBuilder(const CompilationBuilder* compilation) :
+        mModel(compilation->mModel),
+        mInputs(mModel->inputCount()),
+        mOutputs(mModel->outputCount()),
+        mMemories(mModel->getMemories()) {
     LOG(DEBUG) << "RequestBuilder::RequestBuilder";
     for (auto& p : mInputs) {
         p.state = ModelArgumentInfo::UNSPECIFIED;
@@ -106,6 +107,9 @@ int RequestBuilder::setInputFromMemory(uint32_t index, const ANeuralNetworksOper
                    << count;
         return ANEURALNETWORKS_BAD_DATA;
     }
+    if (!memory->validateSize(offset, length)) {
+        return ANEURALNETWORKS_BAD_DATA;
+    }
     uint32_t poolIndex = mMemories.add(memory);
     return mInputs[index].setFromMemory(mModel->getInputOperand(index), type, poolIndex, offset,
                                         length);
@@ -127,6 +131,9 @@ int RequestBuilder::setOutputFromMemory(uint32_t index, const ANeuralNetworksOpe
     if (index >= count) {
         LOG(ERROR) << "ANeuralNetworksRequest_setOutputFromMemory bad index " << index << " "
                    << count;
+        return ANEURALNETWORKS_BAD_DATA;
+    }
+    if (!memory->validateSize(offset, length)) {
         return ANEURALNETWORKS_BAD_DATA;
     }
     uint32_t poolIndex = mMemories.add(memory);
@@ -195,7 +202,7 @@ int RequestBuilder::allocatePointerArgumentsToPool(std::vector<ModelArgumentInfo
 }
 
 static void copyLocationAndDimension(const std::vector<ModelArgumentInfo>& argumentInfos,
-                                     hidl_vec<InputOutputInfo>* ioInfos) {
+                                     hidl_vec<RequestArgument>* ioInfos) {
     size_t count = argumentInfos.size();
     ioInfos->resize(count);
     for (size_t i = 0; i < count; i++) {
@@ -308,7 +315,7 @@ static void asyncStartComputeOnCpu(const Model& model, const Request& request,
     event->notify(executionStatus);
 }
 
-int RequestBuilder::startComputeOnCpu([[maybe_unused]] const Model& model, sp<Event>* event) {
+int RequestBuilder::startComputeOnCpu(const Model& model, sp<Event>* event) {
     // TODO: use a thread pool
 
     // Prepare the event for asynchronous execution. The sp<Event> object is

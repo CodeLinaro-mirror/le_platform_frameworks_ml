@@ -17,6 +17,7 @@
 #include "NeuralNetworksWrapper.h"
 
 #include <gtest/gtest.h>
+#include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -96,6 +97,7 @@ TEST_F(MemoryTest, TestAllocatedMemory) {
     model.addOperation(ANEURALNETWORKS_ADD, {b, e, f}, {d});
     model.setInputsAndOutputs({c}, {d});
     ASSERT_TRUE(model.isValid());
+    model.finish();
 
     // Test the two node model.
     constexpr uint32_t offsetForMatrix1 = 20;
@@ -110,7 +112,10 @@ TEST_F(MemoryTest, TestAllocatedMemory) {
     ASSERT_EQ(actual.getPointer(&data), Result::NO_ERROR);
     memset(data, 0, offsetForActual + sizeof(Matrix3x4));
 
-    Request request2(&model);
+    Compilation compilation2(&model);
+    ASSERT_EQ(compilation2.compile(), Result::NO_ERROR);
+
+    Request request2(&compilation2);
     ASSERT_EQ(request2.setInputFromMemory(0, &input, offsetForMatrix1, sizeof(Matrix3x4)),
               Result::NO_ERROR);
     ASSERT_EQ(request2.setOutputFromMemory(0, &actual, offsetForActual, sizeof(Matrix3x4)),
@@ -121,11 +126,9 @@ TEST_F(MemoryTest, TestAllocatedMemory) {
     ASSERT_EQ(CompareMatrices(expected3, *reinterpret_cast<Matrix3x4*>(data + offsetForActual)), 0);
 }
 
-/*
-// TODO Enable this test once we figure out how to pass fd across the HAL
 TEST_F(MemoryTest, TestFd) {
     // Create a file that contains matrix2 and matrix3.
-    char path[] = "/tmp/TestMemoryXXXXXX";
+    char path[] = "/data/local/tmp/TestMemoryXXXXXX";
     int fd = mkstemp(path);
     const uint32_t offsetForMatrix2 = 20;
     const uint32_t offsetForMatrix3 = 200;
@@ -136,7 +139,7 @@ TEST_F(MemoryTest, TestFd) {
     write(fd, matrix3, sizeof(matrix3));
     fsync(fd);
 
-    Memory weights(fd);
+    Memory weights(offsetForMatrix3 + sizeof(matrix3), PROT_READ, fd);
     ASSERT_TRUE(weights.isValid());
 
     Model model;
@@ -150,18 +153,21 @@ TEST_F(MemoryTest, TestFd) {
     auto e = model.addOperand(&matrixType);
     auto f = model.addOperand(&scalarType);
 
-    model.setOperandValueFromMemory(e, weights, offsetForMatrix2, sizeof(Matrix3x4));
-    model.setOperandValueFromMemory(a, weights, offsetForMatrix3, sizeof(Matrix3x4));
+    model.setOperandValueFromMemory(e, &weights, offsetForMatrix2, sizeof(Matrix3x4));
+    model.setOperandValueFromMemory(a, &weights, offsetForMatrix3, sizeof(Matrix3x4));
     model.setOperandValue(f, &activation, sizeof(activation));
     model.addOperation(ANEURALNETWORKS_ADD, {a, c, f}, {b});
     model.addOperation(ANEURALNETWORKS_ADD, {b, e, f}, {d});
     model.setInputsAndOutputs({c}, {d});
     ASSERT_TRUE(model.isValid());
+    model.finish();
 
     // Test the three node model.
     Matrix3x4 actual;
     memset(&actual, 0, sizeof(actual));
-    Request request2(&model);
+    Compilation compilation2(&model);
+    ASSERT_EQ(compilation2.compile(), Result::NO_ERROR);
+    Request request2(&compilation2);
     ASSERT_EQ(request2.setInput(0, matrix1, sizeof(Matrix3x4)), Result::NO_ERROR);
     ASSERT_EQ(request2.setOutput(0, actual, sizeof(Matrix3x4)), Result::NO_ERROR);
     ASSERT_EQ(request2.compute(), Result::NO_ERROR);
@@ -170,6 +176,5 @@ TEST_F(MemoryTest, TestFd) {
     close(fd);
     unlink(path);
 }
-*/
 
 }  // end namespace

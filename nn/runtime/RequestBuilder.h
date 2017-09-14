@@ -30,6 +30,7 @@ using ::android::hardware::neuralnetworks::V1_0::implementation::Event;
 namespace android {
 namespace nn {
 
+class CompilationBuilder;
 class Memory;
 class ModelBuilder;
 
@@ -45,7 +46,7 @@ struct ModelArgumentInfo {
     //   locationAndDimension.location.{poolIndex, offset, length} is valid.
     //   locationAndDimension.dimension is valid.
     enum { POINTER, MEMORY, UNSPECIFIED } state;
-    InputOutputInfo locationAndDimension;
+    RequestArgument locationAndDimension;
     void* buffer;
 
     int setFromPointer(const Operand& operand, const ANeuralNetworksOperandType* type, void* buffer,
@@ -57,9 +58,7 @@ struct ModelArgumentInfo {
 
 class RequestBuilder {
 public:
-    RequestBuilder(const ModelBuilder* model);
-
-    void setPreference(uint32_t preference) { mPreference = preference; }
+    RequestBuilder(const CompilationBuilder* compilation);
 
     int setInput(uint32_t index, const ANeuralNetworksOperandType* type, const void* buffer,
                  uint32_t length);
@@ -79,13 +78,11 @@ private:
     int startComputeOnCpu(const Model& model, sp<Event>* event);
 
     const ModelBuilder* mModel;
-    // Whether the application prefers to go fast or use low power for this request.
-    uint32_t mPreference = ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER;
 
     // The information we'll send to the driver about the inputs and outputs.
     // Note that we build this in two steps:
     // 1. As the arguments are specified, set the corresponding mInputs or mOutputs element.
-    //    If set from a pointer, don't set the location in the InputOutputInfo but store it
+    //    If set from a pointer, don't set the location in the RequestArgument but store it
     //    instead in mInputBuffers or mOutputBuffers.
     // 2. Once we have all the inputs and outputs, if needed, allocate shared memory for
     //    the m*Buffers entries.  Copy the input values into the shared memory.

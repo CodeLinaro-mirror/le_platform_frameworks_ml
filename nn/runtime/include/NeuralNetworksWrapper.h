@@ -99,13 +99,39 @@ inline void Shutdown() {
 
 class Memory {
 public:
-    // TODO Also have constructors for file descriptor, gralloc buffers, etc.
     Memory(size_t size) {
         mValid = ANeuralNetworksMemory_createShared(size, &mMemory) == ANEURALNETWORKS_NO_ERROR;
     }
+    Memory(size_t size, int protect, int fd) {
+        mValid = ANeuralNetworksMemory_createFromFd(size, protect, fd, &mMemory) ==
+                         ANEURALNETWORKS_NO_ERROR;
+    }
+
     ~Memory() { ANeuralNetworksMemory_free(mMemory); }
     Result getPointer(uint8_t** buffer) {
         return static_cast<Result>(ANeuralNetworksMemory_getPointer(mMemory, buffer));
+    }
+
+    // Disallow copy semantics to ensure the runtime object can only be freed
+    // once. Copy semantics could be enabled if some sort of reference counting
+    // or deep-copy system for runtime objects is added later.
+    Memory(const Memory&) = delete;
+    Memory& operator=(const Memory&) = delete;
+
+    // Move semantics to remove access to the runtime object from the wrapper
+    // object that is being moved. This ensures the runtime object will be
+    // freed only once.
+    Memory(Memory&& other) {
+        *this = std::move(other);
+    }
+    Memory& operator=(Memory&& other) {
+        if (this != &other) {
+            mMemory = other.mMemory;
+            mValid = other.mValid;
+            other.mMemory = nullptr;
+            other.mValid = false;
+        }
+        return *this;
     }
 
     ANeuralNetworksMemory* get() const { return mMemory; }
@@ -123,6 +149,32 @@ public:
         ANeuralNetworksModel_create(&mModel);
     }
     ~Model() { ANeuralNetworksModel_free(mModel); }
+
+    // Disallow copy semantics to ensure the runtime object can only be freed
+    // once. Copy semantics could be enabled if some sort of reference counting
+    // or deep-copy system for runtime objects is added later.
+    Model(const Model&) = delete;
+    Model& operator=(const Model&) = delete;
+
+    // Move semantics to remove access to the runtime object from the wrapper
+    // object that is being moved. This ensures the runtime object will be
+    // freed only once.
+    Model(Model&& other) {
+        *this = std::move(other);
+    }
+    Model& operator=(Model&& other) {
+        if (this != &other) {
+            mModel = other.mModel;
+            mNextOperandId = other.mNextOperandId;
+            mValid = other.mValid;
+            other.mModel = nullptr;
+            other.mNextOperandId = 0;
+            other.mValid = false;
+        }
+        return *this;
+    }
+
+    int finish() { return ANeuralNetworksModel_finish(mModel); }
 
     uint32_t addOperand(const OperandType* type) {
         if (ANeuralNetworksModel_addOperand(mModel, &(type->operandType)) !=
@@ -188,6 +240,27 @@ private:
 class Event {
 public:
     ~Event() { ANeuralNetworksEvent_free(mEvent); }
+
+    // Disallow copy semantics to ensure the runtime object can only be freed
+    // once. Copy semantics could be enabled if some sort of reference counting
+    // or deep-copy system for runtime objects is added later.
+    Event(const Event&) = delete;
+    Event& operator=(const Event&) = delete;
+
+    // Move semantics to remove access to the runtime object from the wrapper
+    // object that is being moved. This ensures the runtime object will be
+    // freed only once.
+    Event(Event&& other) {
+        *this = std::move(other);
+    }
+    Event& operator=(Event&& other) {
+        if (this != &other) {
+            mEvent = other.mEvent;
+            other.mEvent = nullptr;
+        }
+        return *this;
+    }
+
     Result wait() { return static_cast<Result>(ANeuralNetworksEvent_wait(mEvent)); }
     void set(ANeuralNetworksEvent* newEvent) {
         ANeuralNetworksEvent_free(mEvent);
@@ -198,10 +271,58 @@ private:
     ANeuralNetworksEvent* mEvent = nullptr;
 };
 
+class Compilation {
+public:
+    Compilation(const Model* model) {
+        int result = ANeuralNetworksCompilation_create(model->getHandle(), &mCompilation);
+        if (result != 0) {
+            // TODO Handle the error
+        }
+    }
+
+    ~Compilation() { ANeuralNetworksCompilation_free(mCompilation); }
+
+    Compilation(const Compilation&) = delete;
+    Compilation& operator=(const Compilation &) = delete;
+
+    Compilation(Compilation&& other) {
+        *this = std::move(other);
+    }
+    Compilation& operator=(Compilation&& other) {
+        if (this != &other) {
+            mCompilation = other.mCompilation;
+            other.mCompilation = nullptr;
+        }
+        return *this;
+    }
+
+    Result setPreference(ExecutePreference preference) {
+        return static_cast<Result>(ANeuralNetworksCompilation_setPreference(
+                    mCompilation, static_cast<uint32_t>(preference)));
+    }
+
+    // TODO startCompile
+
+    Result compile() {
+        Result result = static_cast<Result>(ANeuralNetworksCompilation_start(mCompilation));
+        if (result != Result::NO_ERROR) {
+            return result;
+        }
+        // TODO how to manage the lifetime of compilations when multiple waiters
+        // is not clear.
+        return static_cast<Result>(ANeuralNetworksCompilation_wait(mCompilation));
+    }
+
+    ANeuralNetworksCompilation* getHandle() const { return mCompilation; }
+
+private:
+    ANeuralNetworksCompilation* mCompilation = nullptr;
+};
+
 class Request {
 public:
-    Request(const Model* model) {
-        int result = ANeuralNetworksRequest_create(model->getHandle(), &mRequest);
+    Request(const Compilation* compilation) {
+        int result = ANeuralNetworksRequest_create(compilation->getHandle(), &mRequest);
         if (result != 0) {
             // TODO Handle the error
         }
@@ -209,9 +330,24 @@ public:
 
     ~Request() { ANeuralNetworksRequest_free(mRequest); }
 
-    Result setPreference(ExecutePreference preference) {
-        return static_cast<Result>(ANeuralNetworksRequest_setPreference(
-                    mRequest, static_cast<uint32_t>(preference)));
+    // Disallow copy semantics to ensure the runtime object can only be freed
+    // once. Copy semantics could be enabled if some sort of reference counting
+    // or deep-copy system for runtime objects is added later.
+    Request(const Request&) = delete;
+    Request& operator=(const Request&) = delete;
+
+    // Move semantics to remove access to the runtime object from the wrapper
+    // object that is being moved. This ensures the runtime object will be
+    // freed only once.
+    Request(Request&& other) {
+        *this = std::move(other);
+    }
+    Request& operator=(Request&& other) {
+        if (this != &other) {
+            mRequest = other.mRequest;
+            other.mRequest = nullptr;
+        }
+        return *this;
     }
 
     Result setInput(uint32_t index, const void* buffer, size_t length,
@@ -253,7 +389,9 @@ public:
         }
         // TODO how to manage the lifetime of events when multiple waiters is not
         // clear.
-        return static_cast<Result>(ANeuralNetworksEvent_wait(event));
+        result = static_cast<Result>(ANeuralNetworksEvent_wait(event));
+        ANeuralNetworksEvent_free(event);
+        return result;
     }
 
 private:
