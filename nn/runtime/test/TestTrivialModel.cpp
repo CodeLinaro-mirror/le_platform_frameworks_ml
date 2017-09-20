@@ -23,6 +23,7 @@ using namespace android::nn::wrapper;
 namespace {
 
 typedef float Matrix3x4[3][4];
+typedef float Matrix4[4];
 
 class TrivialTest : public ::testing::Test {
 protected:
@@ -33,12 +34,20 @@ protected:
     const Matrix3x4 matrix2 = {{100.f, 200.f, 300.f, 400.f},
                                {500.f, 600.f, 700.f, 800.f},
                                {900.f, 1000.f, 1100.f, 1200.f}};
+    const Matrix4 matrix2b = {100.f, 200.f, 300.f, 400.f};
     const Matrix3x4 matrix3 = {{20.f, 30.f, 40.f, 50.f},
                                {21.f, 22.f, 23.f, 24.f},
                                {31.f, 32.f, 33.f, 34.f}};
     const Matrix3x4 expected2 = {{101.f, 202.f, 303.f, 404.f},
                                  {505.f, 606.f, 707.f, 808.f},
                                  {909.f, 1010.f, 1111.f, 1212.f}};
+    const Matrix3x4 expected2b = {{101.f, 202.f, 303.f, 404.f},
+                                  {105.f, 206.f, 307.f, 408.f},
+                                  {109.f, 210.f, 311.f, 412.f}};
+    const Matrix3x4 expected2c = {{100.f, 400.f, 900.f, 1600.f},
+                                  {500.f, 1200.f, 2100.f, 3200.f},
+                                  {900.f, 2000.f, 3300.f, 4800.f}};
+
     const Matrix3x4 expected3 = {{121.f, 232.f, 343.f, 454.f},
                                  {526.f, 628.f, 730.f, 832.f},
                                  {940.f, 1042.f, 1144.f, 1246.f}};
@@ -51,7 +60,7 @@ protected:
 void CreateAddTwoTensorModel(Model* model) {
     OperandType matrixType(Type::TENSOR_FLOAT32, {3, 4});
     OperandType scalarType(Type::INT32, {});
-    int32_t activation(0);
+    int32_t activation(ANEURALNETWORKS_FUSED_NONE);
     auto a = model->addOperand(&matrixType);
     auto b = model->addOperand(&matrixType);
     auto c = model->addOperand(&matrixType);
@@ -60,6 +69,7 @@ void CreateAddTwoTensorModel(Model* model) {
     model->addOperation(ANEURALNETWORKS_ADD, {a, b, d}, {c});
     model->setInputsAndOutputs({a, b}, {c});
     ASSERT_TRUE(model->isValid());
+    model->finish();
 }
 
 // Create a model that can add three tensors using a two node graph,
@@ -67,7 +77,7 @@ void CreateAddTwoTensorModel(Model* model) {
 void CreateAddThreeTensorModel(Model* model, const Matrix3x4 bias) {
     OperandType matrixType(Type::TENSOR_FLOAT32, {3, 4});
     OperandType scalarType(Type::INT32, {});
-    int32_t activation(0);
+    int32_t activation(ANEURALNETWORKS_FUSED_NONE);
     auto a = model->addOperand(&matrixType);
     auto b = model->addOperand(&matrixType);
     auto c = model->addOperand(&matrixType);
@@ -80,11 +90,12 @@ void CreateAddThreeTensorModel(Model* model, const Matrix3x4 bias) {
     model->addOperation(ANEURALNETWORKS_ADD, {b, e, f}, {d});
     model->setInputsAndOutputs({c, a}, {d});
     ASSERT_TRUE(model->isValid());
+    model->finish();
 }
 
 // Check that the values are the same. This works only if dealing with integer
 // value, otherwise we should accept values that are similar if not exact.
-int CompareMatrices(const Matrix3x4 expected, const Matrix3x4 actual) {
+int CompareMatrices(const Matrix3x4& expected, const Matrix3x4& actual) {
     int errors = 0;
     for (int i = 0; i < 3; i++) {
         for (int j = 0; j < 4; j++) {
@@ -98,7 +109,6 @@ int CompareMatrices(const Matrix3x4 expected, const Matrix3x4 actual) {
     return errors;
 }
 
-// TODO convert this test to a gtest format
 TEST_F(TrivialTest, AddTwo) {
     Model modelAdd2;
     CreateAddTwoTensorModel(&modelAdd2);
@@ -106,7 +116,9 @@ TEST_F(TrivialTest, AddTwo) {
     // Test the one node model.
     Matrix3x4 actual;
     memset(&actual, 0, sizeof(actual));
-    Request request(&modelAdd2);
+    Compilation compilation(&modelAdd2);
+    compilation.compile();
+    Request request(&compilation);
     ASSERT_EQ(request.setInput(0, matrix1, sizeof(Matrix3x4)), Result::NO_ERROR);
     ASSERT_EQ(request.setInput(1, matrix2, sizeof(Matrix3x4)), Result::NO_ERROR);
     ASSERT_EQ(request.setOutput(0, actual, sizeof(Matrix3x4)), Result::NO_ERROR);
@@ -118,10 +130,12 @@ TEST_F(TrivialTest, AddThree) {
     Model modelAdd3;
     CreateAddThreeTensorModel(&modelAdd3, matrix3);
 
-    // Test the two node model.
+    // Test the three node model.
     Matrix3x4 actual;
     memset(&actual, 0, sizeof(actual));
-    Request request2(&modelAdd3);
+    Compilation compilation2(&modelAdd3);
+    compilation2.compile();
+    Request request2(&compilation2);
     ASSERT_EQ(request2.setInput(0, matrix1, sizeof(Matrix3x4)), Result::NO_ERROR);
     ASSERT_EQ(request2.setInput(1, matrix2, sizeof(Matrix3x4)), Result::NO_ERROR);
     ASSERT_EQ(request2.setOutput(0, actual, sizeof(Matrix3x4)), Result::NO_ERROR);
@@ -130,12 +144,78 @@ TEST_F(TrivialTest, AddThree) {
 
     // Test it a second time to make sure the model is reusable.
     memset(&actual, 0, sizeof(actual));
-    Request request3(&modelAdd3);
+    Compilation compilation3(&modelAdd3);
+    compilation3.compile();
+    Request request3(&compilation3);
     ASSERT_EQ(request3.setInput(0, matrix1, sizeof(Matrix3x4)), Result::NO_ERROR);
     ASSERT_EQ(request3.setInput(1, matrix1, sizeof(Matrix3x4)), Result::NO_ERROR);
     ASSERT_EQ(request3.setOutput(0, actual, sizeof(Matrix3x4)), Result::NO_ERROR);
     ASSERT_EQ(request3.compute(), Result::NO_ERROR);
     ASSERT_EQ(CompareMatrices(expected3b, actual), 0);
+}
+
+TEST_F(TrivialTest, BroadcastAddTwo) {
+    Model modelBroadcastAdd2;
+    // activation: NONE.
+    int32_t activation_init[] = {ANEURALNETWORKS_FUSED_NONE};
+    OperandType scalarType(Type::INT32, {1});
+    auto activation = modelBroadcastAdd2.addOperand(&scalarType);
+    modelBroadcastAdd2.setOperandValue(activation, activation_init, sizeof(int32_t) * 1);
+
+    OperandType matrixType(Type::TENSOR_FLOAT32, {1, 1, 3, 4});
+    OperandType matrixType2(Type::TENSOR_FLOAT32, {4});
+
+    auto a = modelBroadcastAdd2.addOperand(&matrixType);
+    auto b = modelBroadcastAdd2.addOperand(&matrixType2);
+    auto c = modelBroadcastAdd2.addOperand(&matrixType);
+    modelBroadcastAdd2.addOperation(ANEURALNETWORKS_ADD, {a, b, activation}, {c});
+    modelBroadcastAdd2.setInputsAndOutputs({a, b}, {c});
+    ASSERT_TRUE(modelBroadcastAdd2.isValid());
+    modelBroadcastAdd2.finish();
+
+    // Test the one node model.
+    Matrix3x4 actual;
+    memset(&actual, 0, sizeof(actual));
+    Compilation compilation(&modelBroadcastAdd2);
+    compilation.compile();
+    Request request(&compilation);
+    ASSERT_EQ(request.setInput(0, matrix1, sizeof(Matrix3x4)), Result::NO_ERROR);
+    ASSERT_EQ(request.setInput(1, matrix2b, sizeof(Matrix4)), Result::NO_ERROR);
+    ASSERT_EQ(request.setOutput(0, actual, sizeof(Matrix3x4)), Result::NO_ERROR);
+    ASSERT_EQ(request.compute(), Result::NO_ERROR);
+    ASSERT_EQ(CompareMatrices(expected2b, actual), 0);
+}
+
+TEST_F(TrivialTest, BroadcastMulTwo) {
+    Model modelBroadcastMul2;
+    // activation: NONE.
+    int32_t activation_init[] = {ANEURALNETWORKS_FUSED_NONE};
+    OperandType scalarType(Type::INT32, {1});
+    auto activation = modelBroadcastMul2.addOperand(&scalarType);
+    modelBroadcastMul2.setOperandValue(activation, activation_init, sizeof(int32_t) * 1);
+
+    OperandType matrixType(Type::TENSOR_FLOAT32, {1, 1, 3, 4});
+    OperandType matrixType2(Type::TENSOR_FLOAT32, {4});
+
+    auto a = modelBroadcastMul2.addOperand(&matrixType);
+    auto b = modelBroadcastMul2.addOperand(&matrixType2);
+    auto c = modelBroadcastMul2.addOperand(&matrixType);
+    modelBroadcastMul2.addOperation(ANEURALNETWORKS_MUL, {a, b, activation}, {c});
+    modelBroadcastMul2.setInputsAndOutputs({a, b}, {c});
+    ASSERT_TRUE(modelBroadcastMul2.isValid());
+    modelBroadcastMul2.finish();
+
+    // Test the one node model.
+    Matrix3x4 actual;
+    memset(&actual, 0, sizeof(actual));
+    Compilation compilation(&modelBroadcastMul2);
+    compilation.compile();
+    Request request(&compilation);
+    ASSERT_EQ(request.setInput(0, matrix1, sizeof(Matrix3x4)), Result::NO_ERROR);
+    ASSERT_EQ(request.setInput(1, matrix2b, sizeof(Matrix4)), Result::NO_ERROR);
+    ASSERT_EQ(request.setOutput(0, actual, sizeof(Matrix3x4)), Result::NO_ERROR);
+    ASSERT_EQ(request.compute(), Result::NO_ERROR);
+    ASSERT_EQ(CompareMatrices(expected2c, actual), 0);
 }
 
 }  // end namespace

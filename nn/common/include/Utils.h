@@ -26,6 +26,15 @@
 namespace android {
 namespace nn {
 
+// The number of data types defined in NeuralNetworks.h.
+const int kNumberOfDataTypes = 12;
+
+// The number of operation types defined in NeuralNetworks.h.
+const int kNumberOfOperationTypes = 31;
+
+// The number of execution preferences defined in NeuralNetworks.h.
+const int kNumberOfPreferences = 3;
+
 // TODO Remove all the LOG(DEBUG) statements in all the files.
 
 // Assert macro, as Android does not generally support assert.
@@ -84,6 +93,7 @@ std::string toString(const std::vector<Type>& range) {
 }
 
 bool validateModel(const Model& model);
+bool validateRequest(const Request& request, const Model& model);
 
 } // namespace nn
 } // namespace android

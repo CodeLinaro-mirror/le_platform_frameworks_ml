@@ -22,26 +22,6 @@
 namespace android {
 namespace nn {
 
-bool fullyConnectedPrepare(const Shape& input,
-                           const Shape& weights,
-                           const Shape& bias,
-                           Shape* output) {
-    // Check all the parameters of tensor match within themselves and match the
-    // input configuration.
-    uint32_t input_size = getNumberOfElements(input);
-    uint32_t num_units  = getSizeOfDimension(weights, 0);
-    uint32_t batch_size = input_size / getSizeOfDimension(weights, 1);
-
-    DCHECK_EQ(getSizeOfDimension(bias, 0), num_units);
-    DCHECK_EQ(getSizeOfDimension(weights, 1) * batch_size, input_size);
-    DCHECK_EQ(getNumberOfDimensions(weights), 2);
-
-    output->type = input.type;
-    output->dimensions = {batch_size, num_units};
-
-    return true;
-}
-
 bool fullyConnectedFloat32(const float* inputData, const Shape& inputShape,
                            const float* weightsData, const Shape& weightsShape,
                            const float* biasData, const Shape& biasShape,
@@ -55,16 +35,7 @@ bool fullyConnectedFloat32(const float* inputData, const Shape& inputShape,
             biasData, convertShapeToDims(biasShape),                            \
             outputData, convertShapeToDims(outputShape))
 
-    if (activation == kActivationNone) {
-        ANDROID_NN_FULLY_CONNECTED(kNone);
-    }
-    if (activation == kActivationRelu) {
-        ANDROID_NN_FULLY_CONNECTED(kRelu);
-    }
-    if (activation == kActivationRelu6) {
-        ANDROID_NN_FULLY_CONNECTED(kRelu6);
-    }
-
+    ANDROID_NN_MACRO_DISPATCH(ANDROID_NN_FULLY_CONNECTED)
     #undef ANDROID_NN_FULLY_CONNECTED
     return true;
 }
@@ -103,19 +74,9 @@ bool fullyConnectedQuant8(const uint8_t* inputData, const Shape& inputShape,
             output_activation_min, output_activation_max,                       \
             outputData, convertShapeToDims(outputShape), gemm_context)
 
-    if (activation == kActivationNone) {
-        ANDROID_NN_FULLY_CONNECTED(kNone);
-    }
-    if (activation == kActivationRelu) {
-        ANDROID_NN_FULLY_CONNECTED(kRelu);
-    }
-    if (activation == kActivationRelu6) {
-        ANDROID_NN_FULLY_CONNECTED(kRelu6);
-    }
-
+    ANDROID_NN_MACRO_DISPATCH(ANDROID_NN_FULLY_CONNECTED)
     #undef ANDROID_NN_FULLY_CONNECTED
     return true;
 }
-
 }  // namespace nn
 }  // namespace android

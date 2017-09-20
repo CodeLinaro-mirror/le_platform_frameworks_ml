@@ -17,57 +17,86 @@
 #ifndef ANDROID_ML_NN_RUNTIME_REQUEST_BUILDER_H
 #define ANDROID_ML_NN_RUNTIME_REQUEST_BUILDER_H
 
+#include "Event.h"
 #include "HalInterfaces.h"
+#include "Memory.h"
 #include "NeuralNetworks.h"
 
+#include <unordered_map>
 #include <vector>
+
+using ::android::hardware::neuralnetworks::V1_0::implementation::Event;
 
 namespace android {
 namespace nn {
 
+class CompilationBuilder;
+class Memory;
 class ModelBuilder;
 
-// TODO
-class Event {
-public:
-    void wait() {}
+// TODO move length out of DataLocation
+struct ModelArgumentInfo {
+    // Whether the arguement was specified as being in a Memory, as a pointer,
+    // or has not been specified.
+    // If POINTER then:
+    //   locationAndDimension.location.length is valid.
+    //   locationAndDimension.dimension is valid.
+    //   buffer is valid
+    // If MEMORY then:
+    //   locationAndDimension.location.{poolIndex, offset, length} is valid.
+    //   locationAndDimension.dimension is valid.
+    enum { POINTER, MEMORY, UNSPECIFIED } state;
+    RequestArgument locationAndDimension;
+    void* buffer;
+
+    int setFromPointer(const Operand& operand, const ANeuralNetworksOperandType* type, void* buffer,
+                       uint32_t length);
+    int setFromMemory(const Operand& operand, const ANeuralNetworksOperandType* type,
+                      uint32_t poolIndex, uint32_t offset, uint32_t length);
+    int updateDimensionInfo(const Operand& operand, const ANeuralNetworksOperandType* newType);
 };
 
 class RequestBuilder {
 public:
-    RequestBuilder(const ModelBuilder* model);
-
-    void setPreference(uint32_t preference) { mPreference = preference; }
+    RequestBuilder(const CompilationBuilder* compilation);
 
     int setInput(uint32_t index, const ANeuralNetworksOperandType* type, const void* buffer,
                  uint32_t length);
-    int setInputFromHardwareBuffer(uint32_t index, const ANeuralNetworksOperandType* type,
-                                   const AHardwareBuffer* buffer);
+    int setInputFromMemory(uint32_t index, const ANeuralNetworksOperandType* type,
+                           const Memory* memory, uint32_t offset, uint32_t length);
     int setOutput(uint32_t index, const ANeuralNetworksOperandType* type, void* buffer,
                   uint32_t length);
-    int setOutputFromHardwareBuffer(uint32_t index, const ANeuralNetworksOperandType* type,
-                                    const AHardwareBuffer* buffer);
-    int startCompute(Event** event);
+    int setOutputFromMemory(uint32_t index, const ANeuralNetworksOperandType* type,
+                            const Memory* memory, uint32_t offset, uint32_t length);
+    int startCompute(sp<Event>* event);
 
 private:
-    int updateModelInputOutputInfo(InputOutputInfo* info, const ANeuralNetworksOperandType* newType,
-                                   uint32_t length, uint32_t operandIndex);
-    int startComputeOnDevice(sp<IDevice> driver, const Model& model, Event** event);
-    int startComputeOnCpu(Event** event, const Model& model);
+    int allocatePointerArgumentsToPool(std::vector<ModelArgumentInfo>* args, Memory* memory);
+    int updateDimensionInfo(ModelArgumentInfo* info, const ANeuralNetworksOperandType* newType,
+                            const Operand& operand);
+    int startComputeOnDevice(sp<IDevice> driver, const Model& model, sp<Event>* event);
+    int startComputeOnCpu(const Model& model, sp<Event>* event);
 
     const ModelBuilder* mModel;
-    // Whether the application prefers to go fast or use low power for this request.
-    uint32_t mPreference = ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER;
+
     // The information we'll send to the driver about the inputs and outputs.
     // Note that we build this in two steps:
-    // - Set the dimension information of these two variables as they are added
-    //   to the request.  Store the pointers to the data in m*Buffers.
-    // - Once we have all the inputs, allocated the shared memory to copy the data
-    //   into, and set the pool and offset info of the InputOutputInfo.
-    std::vector<InputOutputInfo> mInputs;
-    std::vector<InputOutputInfo> mOutputs;
-    std::vector<const void*> mInputBuffers;
-    std::vector<void*> mOutputBuffers;
+    // 1. As the arguments are specified, set the corresponding mInputs or mOutputs element.
+    //    If set from a pointer, don't set the location in the RequestArgument but store it
+    //    instead in mInputBuffers or mOutputBuffers.
+    // 2. Once we have all the inputs and outputs, if needed, allocate shared memory for
+    //    the m*Buffers entries.  Copy the input values into the shared memory.
+    // We do this to avoid creating a lot of shared memory objects if we have a lot of
+    // parameters specified via pointers.  We also avoid copying in the case where
+    // some of the nodes will interpreted on the CPU anyway.
+    std::vector<ModelArgumentInfo> mInputs;
+    std::vector<ModelArgumentInfo> mOutputs;
+    // We separate the input & output pools so that we reduce the copying done if we
+    // do an eventual remoting (hidl_memory->update()).  We could also use it to set
+    // protection on read only memory but that's not currently done.
+    Memory mInputPointerArguments;
+    Memory mOutputPointerArguments;
+    MemoryTracker mMemories;
 };
 
 } // namespace nn

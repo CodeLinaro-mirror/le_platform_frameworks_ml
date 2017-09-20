@@ -21,13 +21,15 @@
 #define ANDROID_ML_NN_RUNTIME_MODEL_BUILDER_H
 
 #include "HalInterfaces.h"
+#include "Memory.h"
 #include "NeuralNetworks.h"
 #include "Utils.h"
 
 namespace android {
 namespace nn {
 
-class RequestBuilder;
+class CompilationBuilder;
+class Memory;
 
 class ModelBuilder {
 public:
@@ -35,14 +37,18 @@ public:
     // Adds an operand to the model.
     int addOperand(const ANeuralNetworksOperandType& type);
     int setOperandValue(uint32_t index, const void* buffer, size_t length);
+    int setOperandValueFromMemory(uint32_t index, const Memory* memory, uint32_t offset,
+                                  size_t length);
 
     int addOperation(ANeuralNetworksOperationType type, const ANeuralNetworksIntList* inputs,
                      const ANeuralNetworksIntList* outputs);
     int setInputsAndOutputs(const ANeuralNetworksIntList* inputs,
                             const ANeuralNetworksIntList* outputs);
-    int loadBaseLineModel(uint32_t modelId);
 
-    RequestBuilder* createRequest();
+    int finish();
+    bool isFinished() const { return mCompletedModel; }
+
+    int createCompilation(CompilationBuilder** compilation);
 
     void setHidlModel(Model* model) const;
 
@@ -56,9 +62,10 @@ public:
     }
     uint32_t inputCount() const { return static_cast<uint32_t>(mInputIndexes.size()); }
     uint32_t outputCount() const { return static_cast<uint32_t>(mOutputIndexes.size()); }
-    uint32_t getInputOperandIndex(uint32_t i) const { return mInputIndexes[i]; }
-    uint32_t getOutputOperandIndex(uint32_t i) const { return mOutputIndexes[i]; }
+    const Operand& getInputOperand(uint32_t i) const { return mOperands[mInputIndexes[i]]; }
+    const Operand& getOutputOperand(uint32_t i) const { return mOperands[mOutputIndexes[i]]; }
     const Operand& getOperand(uint32_t index) const { return mOperands[index]; }
+    const MemoryTracker& getMemories() const { return mMemories; }
 
 private:
     // Sorts the operations to be in the correct order for single threaded
@@ -70,7 +77,6 @@ private:
         return mOperandIndexes[info.offset + listIndex];
     }
     */
-    void finishTheModel();
 
     // The operations of the graph.
     std::vector<Operation> mOperations;
@@ -81,6 +87,8 @@ private:
     // the mOperandIndexes table.
     std::vector<uint32_t> mInputIndexes;
     std::vector<uint32_t> mOutputIndexes;
+
+    MemoryTracker mMemories;
 
     // The value of the operands that are defined at model
     // creation time.

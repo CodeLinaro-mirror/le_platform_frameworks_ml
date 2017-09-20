@@ -25,65 +25,64 @@
 
 namespace android {
 namespace nn {
-
-bool addPrepare(const Shape& in1, const Shape& in2, Shape* out) {
-    return SameShape(in1, in2) && SetShape(in1, out);
-}
-
-bool addFloat32(const float* in1, const float* in2,
+bool addFloat32(const float* in1, const Shape& shape1,
+                const float* in2, const Shape& shape2,
                 int32_t activation,
-                float* out, const Shape& shape) {
-    Dims<4> dim = convertShapeToDims(shape);
-    #define ANDROID_NN_ADD(activation)                               \
-        optimized_ops::Add<FusedActivationFunctionType::activation>( \
-                in1, dim, in2, dim, out, dim)
+                float* out, const Shape& shapeOut) {
+    bool needBroadcast = !SameShape(shape1, shape2);
 
-    if (activation == kActivationNone) {
-        ANDROID_NN_ADD(kNone);
-    } else if (activation == kActivationRelu) {
-        ANDROID_NN_ADD(kRelu);
-    } else if (activation == kActivationRelu1) {
-        ANDROID_NN_ADD(kRelu1);
-    } else if (activation == kActivationRelu6) {
-        ANDROID_NN_ADD(kRelu6);
+    #define ANDROID_NN_NORMAL_ADD(activation)                        \
+        optimized_ops::Add<FusedActivationFunctionType::activation>( \
+                in1, convertShapeToDims(shape1),                     \
+                in2, convertShapeToDims(shape2),                     \
+                out, convertShapeToDims(shapeOut))
+
+    #define ANDROID_NN_BROADCAST_ADD(activation)                              \
+        optimized_ops::BroadcastAdd<FusedActivationFunctionType::activation>( \
+                in1, convertShapeToDims(shape1),                              \
+                in2, convertShapeToDims(shape2),                              \
+                out, convertShapeToDims(shapeOut))
+
+    #define ANDROID_NN_ADD_DISPATCH
+
+    if (needBroadcast) {
+        ANDROID_NN_MACRO_DISPATCH(ANDROID_NN_BROADCAST_ADD)
     } else {
-        return false;
+        ANDROID_NN_MACRO_DISPATCH(ANDROID_NN_NORMAL_ADD)
     }
 
     #undef ANDROID_NN_ADD
+    #undef ANDROID_NN_BROADCAST_ADD
     return true;
 }
 
-bool mulPrepare(const Shape& in1, const Shape& in2, Shape* out) {
-    return SameShape(in1, in2) && SetShape(in1, out);
-}
-
-bool mulFloat32(const float* in1, const float* in2,
+bool mulFloat32(const float* in1, const Shape& shape1,
+                const float* in2, const Shape& shape2,
                 int32_t activation,
-                float* out, const Shape& shape) {
-    Dims<4> dim = convertShapeToDims(shape);
-    #define ANDROID_NN_MUL(activation)                               \
-        optimized_ops::Mul<FusedActivationFunctionType::activation>( \
-                in1, dim, in2, dim, out, dim)
+                float* out, const Shape& shapeOut) {
+    bool needBroadcast = !SameShape(shape1, shape2);
 
-    if (activation == kActivationNone) {
-        ANDROID_NN_MUL(kNone);
-    } else if (activation == kActivationRelu) {
-        ANDROID_NN_MUL(kRelu);
-    } else if (activation == kActivationRelu1) {
-        ANDROID_NN_MUL(kRelu1);
-    } else if (activation == kActivationRelu6) {
-        ANDROID_NN_MUL(kRelu6);
+    #define ANDROID_NN_NORMAL_MUL(activation)                        \
+        optimized_ops::Mul<FusedActivationFunctionType::activation>( \
+                in1, convertShapeToDims(shape1),                     \
+                in2, convertShapeToDims(shape2),                     \
+                out, convertShapeToDims(shapeOut))
+
+    #define ANDROID_NN_BROADCAST_MUL(activation)                              \
+        optimized_ops::BroadcastMul<FusedActivationFunctionType::activation>( \
+                in1, convertShapeToDims(shape1),                              \
+                in2, convertShapeToDims(shape2),                              \
+                out, convertShapeToDims(shapeOut))
+
+    if (needBroadcast) {
+        ANDROID_NN_MACRO_DISPATCH(ANDROID_NN_BROADCAST_MUL)
     } else {
-        return false;
+        ANDROID_NN_MACRO_DISPATCH(ANDROID_NN_NORMAL_MUL)
     }
 
     #undef ANDROID_NN_MUL
+    #undef ANDROID_NN_BROADCAST_MUL
     return true;
-}
-
-bool floorPrepare(const Shape& input, Shape* output) {
-    return SetShape(input, output);
 }
 
 bool floorFloat32(const float* inputData,
@@ -92,15 +91,6 @@ bool floorFloat32(const float* inputData,
     Dims<4> dim = convertShapeToDims(shape);
     optimized_ops::Floor(inputData, dim, outputData, dim);
     return true;
-}
-
-bool dequantizePrepare(const Shape& input, Shape* output) {
-    if (input.type != OperandType::TENSOR_QUANT8_ASYMM ||
-            output->type != OperandType::TENSOR_FLOAT32) {
-        LOG(ERROR) << "bad input / output operand type.";
-        return false;
-    }
-    return SetShape(input, output);
 }
 
 bool dequantizeQuant8ToFloat32(const uint8_t* inputData,

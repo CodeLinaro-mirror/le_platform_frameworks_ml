@@ -33,7 +33,10 @@ cc_library {
     host_supported: false,
 
     srcs: [
+        "CompilationBuilder.cpp",
+        "Event.cpp",
         "Manager.cpp",
+        "Memory.cpp",
         "ModelBuilder.cpp",
         "NeuralNetworks.cpp",
         "RequestBuilder.cpp",
@@ -43,6 +46,7 @@ cc_library {
         android: {
             shared_libs: [
                 "libbase",
+                "libcutils",
                 "libhidlbase",
                 "libhidltransport",
                 "libhidlmemory",
@@ -62,6 +66,10 @@ cc_library {
 
     static_libs: [
         "libneuralnetworks_common",
+    ],
+
+    shared_libs: [
+        "libtextclassifier_hash"
     ],
 
     header_libs: [

@@ -15,10 +15,9 @@
  */
 
 subdirs = [
-    "cache",
     "common",
+    "driver",
     "runtime",
-    "sample_driver",
 ]
 
 cc_defaults {
@@ -28,4 +27,10 @@ cc_defaults {
         "-Wextra",
         "-Werror",
     ],
+}
+
+cc_library_headers {
+    name: "libneuralnetworks_generated_test_harness_headers",
+    host_supported: false,
+    export_include_dirs: ["tools/test_generator/include"],
 }
