@@ -13,7 +13,7 @@ Model createTestModel() {
         },
         {
             .type = OperandType::TENSOR_FLOAT32,
-            .dimensions = {2, 2, 2, 2},
+            .dimensions = {1, 2, 2, 2},
             .numberOfConsumers = 1,
             .scale = 0.0f,
             .zeroPoint = 0,
@@ -78,8 +78,7 @@ Model createTestModel() {
 
     const std::vector<Operation> operations = {
         {
-            .opTuple = {OperationType::DEPTHWISE_CONV_2D,
-                        OperandType::TENSOR_FLOAT32},
+            .type = OperationType::DEPTHWISE_CONV_2D,
             .inputs = {0, 1, 2, 3, 3, 3, 3, 5, 5, 6, 4},
             .outputs = {7},
         }

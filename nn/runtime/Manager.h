@@ -18,6 +18,7 @@
 #define ANDROID_ML_NN_RUNTIME_MANAGER_H
 
 #include "HalInterfaces.h"
+#include "Utils.h"
 
 #include <map>
 #include <unordered_set>
@@ -25,17 +26,6 @@
 
 namespace android {
 namespace nn {
-
-// These two functions are used to enable OperationTupe to be a key in an unordered_set.
-inline bool operator==(const OperationTuple& o1, const OperationTuple& o2) {
-    return o1.operationType == o2.operationType && o1.operandType == o2.operandType;
-}
-
-struct hashOperationTuple {
-    inline size_t operator()(const OperationTuple& tuple) const {
-        return static_cast<int>(tuple.operationType) * 100 + static_cast<int>(tuple.operandType);
-    }
-};
 
 class ModelBuilder;
 
@@ -46,19 +36,20 @@ public:
     const std::string& getName() { return mName; }
     void initialize();
 
-    bool canDo(OperationTuple tuple) const {
-        return mSupportedOperationTuples.count(tuple) != 0;
-    }
+    void getSupportedOperations(const Model& hidlModel, hidl_vec<bool>* supportedOperations) const;
 
     PerformanceInfo getFloat32Performance() const { return mFloat32Performance; }
     PerformanceInfo getQuantized8Performance() const { return mQuantized8Performance; }
 private:
     std::string mName;
     sp<IDevice> mInterface;
-    std::unordered_set<OperationTuple, hashOperationTuple> mSupportedOperationTuples;
-    bool mCachesCompilation;
     PerformanceInfo mFloat32Performance;
     PerformanceInfo mQuantized8Performance;
+
+    // For debugging: behavior of IDevice::getSupportedOperations for SampleDriver.
+    // 0 - all operations reported by IDevice::getSupportedOperations() supported
+    // 1 - some operations reported by IDevice::getSupportedOperations() supported
+    uint32_t mSupported;
 };
 
 // Manages the NN HAL devices.  Only one instance of this class will exist.

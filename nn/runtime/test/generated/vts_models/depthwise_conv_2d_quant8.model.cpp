@@ -13,7 +13,7 @@ Model createTestModel() {
         },
         {
             .type = OperandType::TENSOR_QUANT8_ASYMM,
-            .dimensions = {2, 2, 2, 2},
+            .dimensions = {1, 2, 2, 2},
             .numberOfConsumers = 1,
             .scale = 0.5f,
             .zeroPoint = 0,
@@ -21,7 +21,7 @@ Model createTestModel() {
             .location = {.poolIndex = 0, .offset = 0, .length = 0},
         },
         {
-            .type = OperandType::TENSOR_QUANT8_ASYMM,
+            .type = OperandType::TENSOR_INT32,
             .dimensions = {2},
             .numberOfConsumers = 1,
             .scale = 0.25f,
@@ -78,8 +78,7 @@ Model createTestModel() {
 
     const std::vector<Operation> operations = {
         {
-            .opTuple = {OperationType::DEPTHWISE_CONV_2D,
-                        OperandType::TENSOR_QUANT8_ASYMM},
+            .type = OperationType::DEPTHWISE_CONV_2D,
             .inputs = {0, 1, 2, 3, 3, 3, 3, 5, 5, 6, 4},
             .outputs = {7},
         }
