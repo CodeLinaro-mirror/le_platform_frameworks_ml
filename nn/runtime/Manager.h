@@ -40,28 +40,25 @@ public:
 
     PerformanceInfo getFloat32Performance() const { return mFloat32Performance; }
     PerformanceInfo getQuantized8Performance() const { return mQuantized8Performance; }
+
 private:
     std::string mName;
     sp<IDevice> mInterface;
     PerformanceInfo mFloat32Performance;
     PerformanceInfo mQuantized8Performance;
 
+#ifdef NN_DEBUGGABLE
     // For debugging: behavior of IDevice::getSupportedOperations for SampleDriver.
     // 0 - all operations reported by IDevice::getSupportedOperations() supported
     // 1 - some operations reported by IDevice::getSupportedOperations() supported
-    uint32_t mSupported;
+    uint32_t mSupported = 0;
+#endif  // NN_DEBUGGABLE
 };
 
 // Manages the NN HAL devices.  Only one instance of this class will exist.
 // Use get() to retrieve it.
 class DeviceManager {
 public:
-    // TODO For now, just return the first one.
-    // TODO deprecate
-    std::shared_ptr<Device> getAvailableDriver() const {
-        return mUseCpuOnly || mDevices.empty() ? nullptr : mDevices[0];
-    }
-
     const std::vector<std::shared_ptr<Device>>& getDrivers() const {
         if (mUseCpuOnly) {
             return mNoDevices;
@@ -71,6 +68,10 @@ public:
 
     // For testing only:
     void setUseCpuOnly(bool useCpuOnly) { mUseCpuOnly = useCpuOnly; }
+
+#ifdef NN_DEBUGGABLE
+    uint32_t getPartitioning() const { return mPartitioning; }
+#endif
 
     // Returns the singleton manager.
     static DeviceManager* get();
@@ -97,6 +98,16 @@ private:
     // If true, we'll ignore the drivers that are on the device and run everything
     // on the CPU.
     bool mUseCpuOnly = false;
+
+#ifdef NN_DEBUGGABLE
+    // For debugging: what to do about graph partitioning
+    // 0 - don't do graph partitioning
+    // 1 - do graph partitioning, but only to test it -- do not rely on
+    //     compilation performed by graph partitioning
+    // 2 - do graph partitioning, and rely on compilation performed by it
+    //     when there is a single partition
+    uint32_t mPartitioning = 0;
+#endif  // NN_DEBUGGABLE
 };
 
 } // namespace nn

@@ -20,6 +20,7 @@
 #include "NeuralNetworks.h"
 
 #include <android-base/logging.h>
+#include <sys/system_properties.h>
 
 using ::android::hidl::allocator::V1_0::IAllocator;
 
@@ -170,6 +171,47 @@ uint32_t alignBytesNeeded(uint32_t index, size_t length) {
     return extra;
 }
 
+// Validates the type. The used dimensions can be underspecified.
+int validateOperandType(const ANeuralNetworksOperandType& type, const char* tag,
+                        bool allowPartial) {
+    if (!allowPartial) {
+        for (uint32_t i = 0; i < type.dimensionCount; i++) {
+            if (type.dimensions[i] == 0) {
+                LOG(ERROR) << tag << " OperandType invalid dimensions[" << i
+                           << "] = " << type.dimensions[i];
+                return ANEURALNETWORKS_BAD_DATA;
+            }
+        }
+    }
+    if (!validCode(kNumberOfDataTypes, kNumberOfDataTypesOEM, type.type)) {
+        LOG(ERROR) << tag << " OperandType invalid type " << type.type;
+        return ANEURALNETWORKS_BAD_DATA;
+    }
+    if (type.type == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+        if (type.zeroPoint < 0 || type.zeroPoint > 255) {
+            LOG(ERROR) << tag << " OperandType invalid zeroPoint " << type.zeroPoint;
+            return ANEURALNETWORKS_BAD_DATA;
+        }
+        if (type.scale < 0.f) {
+            LOG(ERROR) << tag << " OperandType invalid scale " << type.scale;
+            return ANEURALNETWORKS_BAD_DATA;
+        }
+    }
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
+int validateOperandList(uint32_t count, const uint32_t* list, uint32_t operandCount,
+                        const char* tag) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (list[i] >= operandCount) {
+            LOG(ERROR) << tag << " invalid operand index at " << i << " = " << list[i]
+                       << ", operandCount " << operandCount;
+            return ANEURALNETWORKS_BAD_DATA;
+        }
+    }
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
 static bool validOperandIndexes(const hidl_vec<uint32_t> indexes, size_t operandCount) {
     for (uint32_t i : indexes) {
         if (i >= operandCount) {
@@ -302,6 +344,31 @@ bool validateRequest(const Request& request, const Model& model) {
             validRequestArguments(request.outputs, model.outputIndexes, model.operands, poolCount,
                                   "output"));
 }
+
+#ifdef NN_DEBUGGABLE
+
+// Implementation of property_get from libcutils
+static int property_get(const char *key, char *value, const char *default_value) {
+    int len;
+    len = __system_property_get(key, value);
+    if (len > 0) {
+        return len;
+    }
+
+    if (default_value) {
+        len = strlen(default_value);
+        memcpy(value, default_value, len + 1);
+    }
+    return len;
+}
+
+uint32_t getProp(const char *str) {
+    char buf[256];
+    property_get(str, buf, "0");
+    return atoi(buf);
+}
+
+#endif  // NN_DEBUGGABLE
 
 } // namespace nn
 } // namespace android
