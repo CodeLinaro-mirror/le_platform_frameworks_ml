@@ -47,14 +47,14 @@ class Example {
         bool error = false;
         for (auto& example : examples) {
             Compilation compilation(&model);
-            compilation.compile();
-            Request request(&compilation);
+            compilation.finish();
+            Execution execution(&compilation);
 
             // Go through all inputs
             for (auto& i : example.first) {
                 std::vector<T>& input = i.second;
-                request.setInput(i.first, (const void*)input.data(),
-                                 input.size() * sizeof(T));
+                execution.setInput(i.first, (const void*)input.data(),
+                                   input.size() * sizeof(T));
             }
 
             std::map<int, std::vector<T>> test_outputs;
@@ -65,12 +65,12 @@ class Example {
                 std::vector<T>& output = i.second;
                 test_outputs[i.first].resize(output.size());
                 std::vector<T>& test_output = test_outputs[i.first];
-                request.setOutput(output_no++, (void*)test_output.data(),
-                                  test_output.size() * sizeof(T));
+                execution.setOutput(output_no++, (void*)test_output.data(),
+                                    test_output.size() * sizeof(T));
             }
-            Result r = request.compute();
+            Result r = execution.compute();
             if (r != Result::NO_ERROR)
-                std::cerr << "Request was not completed normally\n";
+                std::cerr << "Execution was not completed normally\n";
             bool mismatch = false;
             for (auto& i : example.second) {
                 const std::vector<T>& test = test_outputs[i.first];
@@ -95,6 +95,7 @@ class Example {
 
     // Test driver for those generated from ml/nn/runtime/test/spec
     static void Execute(std::function<void(Model*)> create_model,
+                        std::function<bool(int)> is_ignored,
                         std::vector<MixedTypedExampleType>& examples) {
         Model model;
         create_model(&model);
@@ -103,47 +104,34 @@ class Example {
         int example_no = 1;
         for (auto& example : examples) {
             SCOPED_TRACE(example_no++);
-
-            MixedTyped& inputs = example.first;
-            MixedTyped& golden = example.second;
+            MixedTyped inputs = example.first;
+            const MixedTyped& golden = example.second;
 
             Compilation compilation(&model);
-            compilation.compile();
-            Request request(&compilation);
+            compilation.finish();
+            Execution execution(&compilation);
 
-            // Go through all ty-typed inputs
-            for_all(inputs, [&request](int idx, auto p, auto s) {
-                ASSERT_EQ(Result::NO_ERROR, request.setInput(idx, p, s));
+            // Set all inputs
+            for_all(inputs, [&execution](int idx, const void* p, size_t s) {
+                ASSERT_EQ(Result::NO_ERROR, execution.setInput(idx, p, s));
             });
 
             MixedTyped test;
             // Go through all typed outputs
-            resize_accordingly<float>(golden, test);
-            resize_accordingly<int32_t>(golden, test);
-            resize_accordingly<uint8_t>(golden, test);
-            for_all(test, [&request](int idx, auto p, auto s) {
-                ASSERT_EQ(Result::NO_ERROR, request.setOutput(idx, p, s));
+            resize_accordingly(golden, test);
+            for_all(test, [&execution](int idx, void* p, size_t s) {
+                ASSERT_EQ(Result::NO_ERROR, execution.setOutput(idx, p, s));
             });
 
-            Result r = request.compute();
+            Result r = execution.compute();
             ASSERT_EQ(Result::NO_ERROR, r);
-
+            // Filter out don't cares
+            MixedTyped filtered_golden;
+            MixedTyped filtered_test;
+            filter(golden, &filtered_golden, is_ignored);
+            filter(test, &filtered_test, is_ignored);
             // We want "close-enough" results for float
-            for (auto& i : std::get<Float32Operands>(golden)) {
-                int idx = i.first;
-                auto& test_float_operands = std::get<Float32Operands>(test);
-                auto& golden_float = i.second;
-                auto& test_float = test_float_operands[idx];
-                for (unsigned int i = 0; i < golden_float.size(); i++) {
-                    SCOPED_TRACE(i);
-                    EXPECT_FLOAT_EQ(golden_float[i], test_float[i]);
-                }
-            }
-
-            EXPECT_EQ(std::get<Int32Operands>(golden),
-                      std::get<Int32Operands>(test));
-            EXPECT_EQ(std::get<Quant8Operands>(golden),
-                      std::get<Quant8Operands>(test));
+            compare(filtered_golden, filtered_test);
         }
     }
 };
@@ -156,18 +144,18 @@ typedef generated_tests::Example<float>::ExampleType Example;
 typedef generated_tests::MixedTypedExampleType MixedTypedExample;
 
 void Execute(std::function<void(Model*)> create_model,
+             std::function<bool(int)> is_ignored,
              std::vector<MixedTypedExample>& examples) {
-    generated_tests::Example<float>::Execute(create_model, examples);
+    generated_tests::Example<float>::Execute(create_model, is_ignored,
+                                             examples);
 }
 
 class GeneratedTests : public ::testing::Test {
    protected:
     virtual void SetUp() {
-        ASSERT_EQ(android::nn::wrapper::Initialize(),
-                  android::nn::wrapper::Result::NO_ERROR);
+        // For detailed logs, uncomment this line:
+        // SetMinimumLogSeverity(android::base::VERBOSE);
     }
-
-    virtual void TearDown() { android::nn::wrapper::Shutdown(); }
 };
 
 // Testcases generated from runtime/test/specs/*.mod.py
