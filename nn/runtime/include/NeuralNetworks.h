@@ -192,8 +192,6 @@ typedef enum {
      *          For inputs of type {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, all
      *          input tensors must have the same scale and zeroPoint.
      * * n+1: An INT32 value, specifying the concatenation axis.
-     * * n+2: An INT32 value, and has to be one of the {@link FuseCode} values.
-     *        Specifies the activation to invoke on the result of each addition.
      *
      * Outputs:
      * * 0: The output, a tensor of the same type as the input tensors.
@@ -432,7 +430,7 @@ typedef enum {
      *
      * This layer implements the operation:
      *
-     *     outputs = activation(inputs * weights’ + bias)
+     *     outputs = activation(inputs * weights + bias)
      *
      * Supported tensor types:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
@@ -447,7 +445,7 @@ typedef enum {
      *      and “input_size” is the size of the input.
      * * 1: A 2-D tensor, specifying the weights, of shape [num_units, input_size], where
      *      "num_units" corresponds to the number of output nodes.
-     * * 2: A 1-D tensor, of shape [depth_out], specifying the bias.
+     * * 2: A 1-D tensor, of shape [num_units], specifying the bias.
      *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT32} type, the bias should
      *      also be of {@link ANEURALNETWORKS_TENSOR_FLOAT32}.
      *      For input tensor of {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, the bias
@@ -1444,6 +1442,9 @@ int ANeuralNetworksModel_addOperand(ANeuralNetworksModel* model,
  * be copied during processing, modifying the data after this call yields
  * undefined results.
  *
+ * To indicate that an optional operand should be considered missing,
+ * pass nullptr for buffer and 0 for length.
+ *
  * Attempting to modify a model once {@link ANeuralNetworksModel_finish} has been
  * called will return an error.
  *
@@ -1467,6 +1468,9 @@ int ANeuralNetworksModel_setOperandValue(ANeuralNetworksModel* model, int32_t in
  * of the memory region until all executions using this model have completed.
  * As the data may be copied during processing, modifying the data after this call
  * yields undefined results.
+ *
+ * To indicate that an optional operand should be considered missing,
+ * use {@link ANeuralNetworksModel_setOperandValue} instead, passing nullptr for buffer.
  *
  * Attempting to modify a model once {@link ANeuralNetworksModel_finish} has been
  * called will return an error.
@@ -1653,6 +1657,9 @@ void ANeuralNetworksExecution_free(ANeuralNetworksExecution* execution);
  *
  * <p>The provided buffer must outlive the execution.</p>
  *
+ * If the input is optional, you can indicate that it is omitted by
+ * passing nullptr for buffer and 0 for length.
+ *
  * See {@link ANeuralNetworksExecution} for information on multithreaded usage.
  *
  * @param execution The execution to be modified.
@@ -1680,6 +1687,10 @@ int ANeuralNetworksExecution_setInput(ANeuralNetworksExecution* execution, int32
  * {@link ANeuralNetworksExecution}.
  *
  * <p>The provided memory must outlive the execution.</p>
+ *
+ * If the input is optional, you can indicate that it is omitted by
+ * using @{Link ANeuralNetworks_setInput} instead, passing nullptr for buffer
+ * and 0 for length.
  *
  * See {@link ANeuralNetworksExecution} for information on multithreaded usage.
  *
@@ -1710,6 +1721,9 @@ int ANeuralNetworksExecution_setInputFromMemory(ANeuralNetworksExecution* execut
  * Associate a user buffer with an output of the model of the
  * {@link ANeuralNetworksExecution}.
  *
+ * If the output is optional, you can indicate that it is omitted by
+ * passing nullptr for buffer and 0 for length.
+ *
  * <p>The provided buffer must outlive the execution.</p>
  *
  * See {@link ANeuralNetworksExecution} for information on multithreaded usage.
@@ -1737,6 +1751,10 @@ int ANeuralNetworksExecution_setOutput(ANeuralNetworksExecution* execution, int3
 /**
  * Associate part of a memory object with an output of the model of the
  * {@link ANeuralNetworksExecution}.
+ *
+ * If the output is optional, you can indicate that it is omitted by
+ * using @{Link ANeuralNetworks_setOutput} instead, passing nullptr for buffer
+ * and 0 for length.
  *
  * <p>The provided memory must outlive the execution.</p>
  *

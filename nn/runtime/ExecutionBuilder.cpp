@@ -38,9 +38,17 @@ int ModelArgumentInfo::setFromPointer(const Operand& operand,
     if (n != ANEURALNETWORKS_NO_ERROR) {
         return n;
     }
-    state = ModelArgumentInfo::POINTER;
-    locationAndDimension.location = {.poolIndex = 0, .offset = 0, .length = length};
+    if (data == nullptr) {
+        if (length) {
+            LOG(ERROR) << "Setting argument as having no value but non-zero length passed.";
+            return ANEURALNETWORKS_BAD_DATA;
+        }
+        state = ModelArgumentInfo::HAS_NO_VALUE;
+    } else {
+        state = ModelArgumentInfo::POINTER;
+    }
     buffer = data;
+    locationAndLength = {.poolIndex = 0, .offset = 0, .length = length};
     return ANEURALNETWORKS_NO_ERROR;
 }
 
@@ -51,7 +59,16 @@ int ModelArgumentInfo::setFromMemory(const Operand& operand, const ANeuralNetwor
         return n;
     }
     state = ModelArgumentInfo::MEMORY;
-    locationAndDimension.location = {.poolIndex = poolIndex, .offset = offset, .length = length};
+    locationAndLength = {.poolIndex = poolIndex, .offset = offset, .length = length};
+    buffer = nullptr;
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
+int ModelArgumentInfo::setFromTemporaryMemory(const Operand& operand, uint32_t poolIndex) {
+    dimensions = operand.dimensions;
+    state = ModelArgumentInfo::MEMORY;
+    locationAndLength =
+            {.poolIndex = poolIndex, .offset = 0, .length = sizeOfData(operand)};
     buffer = nullptr;
     return ANEURALNETWORKS_NO_ERROR;
 }
@@ -59,7 +76,7 @@ int ModelArgumentInfo::setFromMemory(const Operand& operand, const ANeuralNetwor
 int ModelArgumentInfo::updateDimensionInfo(const Operand& operand,
                                            const ANeuralNetworksOperandType* newType) {
     if (newType == nullptr) {
-        locationAndDimension.dimensions = hidl_vec<uint32_t>();
+        dimensions = hidl_vec<uint32_t>();
     } else {
         uint32_t count = newType->dimensionCount;
         if (static_cast<OperandType>(newType->type) != operand.type ||
@@ -68,7 +85,7 @@ int ModelArgumentInfo::updateDimensionInfo(const Operand& operand,
             return ANEURALNETWORKS_BAD_DATA;
         }
         for (uint32_t i = 0; i < count; i++) {
-            locationAndDimension.dimensions[i] = newType->dimensions[i];
+            dimensions[i] = newType->dimensions[i];
         }
     }
     return ANEURALNETWORKS_NO_ERROR;
@@ -107,6 +124,8 @@ int ExecutionBuilder::setInput(uint32_t index, const ANeuralNetworksOperandType*
 
 int ExecutionBuilder::setInputFromMemory(uint32_t index, const ANeuralNetworksOperandType* type,
                                          const Memory* memory, size_t offset, size_t length) {
+    // Should be similar to StepExecutor::setInputOrOutputFromTemporaryMemory()
+
     uint32_t count = static_cast<uint32_t>(mInputs.size());
     if (index >= count) {
         LOG(ERROR) << "ANeuralNetworksExecution_setInputFromMemory bad index " << index << " "
@@ -145,6 +164,8 @@ int ExecutionBuilder::setOutput(uint32_t index, const ANeuralNetworksOperandType
 
 int ExecutionBuilder::setOutputFromMemory(uint32_t index, const ANeuralNetworksOperandType* type,
                                           const Memory* memory, size_t offset, size_t length) {
+    // Should be similar to StepExecutor::setInputOrOutputFromTemporaryMemory()
+
     uint32_t count = static_cast<uint32_t>(mOutputs.size());
     if (index >= count) {
         LOG(ERROR) << "ANeuralNetworksExecution_setOutputFromMemory bad index " << index << " "
@@ -160,13 +181,11 @@ int ExecutionBuilder::setOutputFromMemory(uint32_t index, const ANeuralNetworksO
                                          length);
 }
 
-int ExecutionBuilder::startCompute(sp<Event>* event) {
-    *event = nullptr;
+int ExecutionBuilder::startCompute(sp<ExecutionCallback>* synchronizationCallback) {
+    *synchronizationCallback = nullptr;
 
     // TODO validate that we have full types for all inputs and outputs,
     // that the graph is not cyclic,
-    /*
-       TODO: For non-optional inputs, also verify that buffers are not null.
 
     for (auto& p : mInputs) {
         if (p.state == ModelArgumentInfo::UNSPECIFIED) {
@@ -174,7 +193,6 @@ int ExecutionBuilder::startCompute(sp<Event>* event) {
             return ANEURALNETWORKS_BAD_DATA;
         }
     }
-    */
     for (auto& p : mOutputs) {
         if (p.state == ModelArgumentInfo::UNSPECIFIED) {
             LOG(ERROR) << "ANeuralNetworksExecution_startCompute not all outputs specified";
@@ -183,21 +201,56 @@ int ExecutionBuilder::startCompute(sp<Event>* event) {
     }
 
     // TODO: Remove the non-plan-based path once we've fully integrated ExecutionPlan
-    // with the compilation and execution phases of the NN API.
-#if NN_DEBUGGABLE
-    if (DeviceManager::get()->getPartitioning() > 1) {
-        std::shared_ptr<Device> device;
-        sp<IPreparedModel> preparedModel;
-        int n = mPlan->getSimplePlan(&device, &preparedModel);
-        if (n == ANEURALNETWORKS_NO_ERROR) {
-            LOG(DEBUG) << "ExecutionBuilder::startCompute (from plan) on "
-                       << (device == nullptr ? "CPU" : device->getName());
+    // with the compilation and execution phases of the NN API?  Or retain that path
+    // as a fallback in the case of partitioning failure?
+    //
+    // TODO: Entire plan-based-path should run in an asynchronous thread --
+    // take the asynchronous thread logic out of startComputeOnCpu() and use
+    // it to wrap the plan-based-path.
+    const int partitioning = DeviceManager::get()->getPartitioning();
+    if (partitioning > 0) {
+        const bool simulation = (partitioning == 1);
+        std::shared_ptr<ExecutionPlan::Controller> controller = mPlan->makeController(this);
+        if (controller == nullptr) {
+            const bool fallback = (partitioning == 2);
+            if (!simulation && !fallback) {
+                return ANEURALNETWORKS_OP_FAILED;
+            }
+        } else {
+            LOG(DEBUG) << "ExecutionBuilder::startCompute"
+                       << (simulation ? " SIMULATION" : "")
+                       << " (from plan, iteratively)";
+            while (true) {
+                std::shared_ptr<StepExecutor> executor;
+                LOG(DEBUG) << "looking for next StepExecutor";
+                int n = mPlan->next(controller, &executor);
+                if (n != ANEURALNETWORKS_NO_ERROR || executor == nullptr) {
+                    if (!simulation) {
+                        return n;
+                    }
 
-            return device == nullptr ? startComputeOnCpu(event)
-                                     : startComputeOnDevice(event, device->getInterface(), preparedModel);
+                    // simulation
+                    if (n != ANEURALNETWORKS_NO_ERROR) {
+                        LOG(DEBUG) << "ExecutionBuilder::startCompute SIMULATION failed "
+                                   << "with error " << n;
+                    }
+                    break;
+                }
+                if (simulation) {
+                    continue;
+                }
+
+                n = executor->startCompute(synchronizationCallback);
+                if (n != ANEURALNETWORKS_NO_ERROR) {
+                    return n;
+                }
+                (*synchronizationCallback)->wait();
+                if ((*synchronizationCallback)->getStatus() != ErrorStatus::NONE) {
+                    return ANEURALNETWORKS_OP_FAILED;
+                }
+            }
         }
     }
-#endif  // NN_DEBUGGABLE
 
     // Find a driver that can handle all the operations.
     Model hidlModel;
@@ -209,23 +262,30 @@ int ExecutionBuilder::startCompute(sp<Event>* event) {
         device->getSupportedOperations(hidlModel, &supports);
         if (std::find(supports.begin(), supports.end(), false) == supports.end()) {
             LOG(DEBUG) << "ExecutionBuilder::startCompute (without plan) on " << device->getName();
-            return startComputeOnDevice(event, device->getInterface());
+            StepExecutor executor(this, mModel, device->getInterface(),
+                                  nullptr /* no IPreparedModel, so compile */);
+            executor.mapInputsAndOutputsTrivially();
+            return executor.startCompute(synchronizationCallback);
         }
     }
     // If none can, run on the CPU.
     LOG(DEBUG) << "ExecutionBuilder::startCompute (without plan) on CPU";
-    return startComputeOnCpu(event);
+    StepExecutor executor(this, mModel,
+                          nullptr /* no IDevice, so CPU */,
+                          nullptr /* no IPreparedModel */);
+    executor.mapInputsAndOutputsTrivially();
+    return executor.startCompute(synchronizationCallback);
 }
 
 // Figures out how to place each of the input or outputs in a buffer. This just does the layout,
 // it does not copy data.  Aligns each input a bit.
-int ExecutionBuilder::allocatePointerArgumentsToPool(std::vector<ModelArgumentInfo>* args,
-                                                     Memory* memory) {
+int StepExecutor::allocatePointerArgumentsToPool(std::vector<ModelArgumentInfo>* args,
+                                                 Memory* memory) {
     uint32_t nextPoolIndex = mMemories.size();
     int64_t total = 0;
     for (auto& info : *args) {
         if (info.state == ModelArgumentInfo::POINTER) {
-            DataLocation& loc = info.locationAndDimension.location;
+            DataLocation& loc = info.locationAndLength;
             // TODO Good enough alignment?
             total += alignBytesNeeded(static_cast<uint32_t>(total), loc.length);
             loc.poolIndex = nextPoolIndex;
@@ -246,41 +306,97 @@ int ExecutionBuilder::allocatePointerArgumentsToPool(std::vector<ModelArgumentIn
     return ANEURALNETWORKS_NO_ERROR;
 }
 
-static void copyLocationAndDimension(const std::vector<ModelArgumentInfo>& argumentInfos,
+static void setRequestArgumentArray(const std::vector<ModelArgumentInfo>& argumentInfos,
                                      hidl_vec<RequestArgument>* ioInfos) {
     size_t count = argumentInfos.size();
     ioInfos->resize(count);
     for (size_t i = 0; i < count; i++) {
-        (*ioInfos)[i] = argumentInfos[i].locationAndDimension;
+        const auto& info = argumentInfos[i];
+        (*ioInfos)[i] = { .hasNoValue = info.state == ModelArgumentInfo::HAS_NO_VALUE,
+                          .location = info.locationAndLength,
+                          .dimensions = info.dimensions,
+                        };
     }
 }
 
-int ExecutionBuilder::startComputeOnDevice(sp<Event>* event, sp<IDevice> driver,
-                                           sp<IPreparedModel> preparedModel) {
-    *event = nullptr;
+StepExecutor::StepExecutor(const ExecutionBuilder* executionBuilder,
+                           const ModelBuilder* model,
+                           sp<IDevice> driver, sp<IPreparedModel> preparedModel) :
+    mExecutionBuilder(executionBuilder), mModel(model),
+    mDriver(driver), mPreparedModel(preparedModel),
+    mInputs(model->inputCount()), mOutputs(model->outputCount()) {}
 
-    // TODO: Remove the preparedModel == nullptr case once we've fully integrated
+void StepExecutor::mapInputsAndOutputsTrivially() {
+    mInputs = mExecutionBuilder->mInputs;
+    mOutputs = mExecutionBuilder->mOutputs;
+    mMemories = mExecutionBuilder->mMemories;
+}
+
+void StepExecutor::mapInputOrOutput(const ModelArgumentInfo& builderInputOrOutput,
+                                    ModelArgumentInfo* executorInputOrOutput) {
+    *executorInputOrOutput = builderInputOrOutput;
+    switch (executorInputOrOutput->state) {
+        default:
+            nnAssert(!"unexpected ModelArgumentInfo::state");
+        case ModelArgumentInfo::POINTER:
+        case ModelArgumentInfo::UNSPECIFIED:
+            break;
+        case ModelArgumentInfo::MEMORY: {
+            const uint32_t builderPoolIndex =
+                    builderInputOrOutput.locationAndLength.poolIndex;
+            const Memory* memory = mExecutionBuilder->mMemories[builderPoolIndex];
+            const uint32_t executorPoolIndex = mMemories.add(memory);
+            executorInputOrOutput->locationAndLength.poolIndex =
+                    executorPoolIndex;
+            break;
+        }
+    }
+}
+
+int StepExecutor::setInputOrOutputFromTemporaryMemory(const Operand& inputOrOutputOperand,
+                                                      const Memory* memory,
+                                                      ModelArgumentInfo* inputOrOutputInfo) {
+    // Should be similar to
+    //     ExecutionBuilder::setInputFromMemory()
+    //     ExecutionBuilder::setOutputFromMemory()
+
+    uint32_t poolIndex = mMemories.add(memory);
+    return inputOrOutputInfo->setFromTemporaryMemory(inputOrOutputOperand, poolIndex);
+}
+
+int StepExecutor::startCompute(sp<ExecutionCallback>* synchronizationCallback) {
+    if (mDriver == nullptr) {
+        return startComputeOnCpu(synchronizationCallback);
+    } else {
+        return startComputeOnDevice(synchronizationCallback);
+    }
+}
+
+int StepExecutor::startComputeOnDevice(sp<ExecutionCallback>* synchronizationCallback) {
+    nnAssert(mDriver != nullptr);
+
+    *synchronizationCallback = nullptr;
+
+    // TODO: Remove the mPreparedModel == nullptr case once we've fully integrated
     // ExecutionPlan with the compilation and execution phases of the NN API
-    if (preparedModel == nullptr) {
+    if (mPreparedModel == nullptr) {
         Model model;
         mModel->setHidlModel(&model);
 
         // TODO Dangerous!  In async, the model will outlive it here. Safe for now
-        sp<Event> preparationEvent = new Event();
-        ErrorStatus prepareStatus = ErrorStatus::GENERAL_FAILURE;
+        sp<PreparedModelCallback> preparedModelCallback = new PreparedModelCallback();
+        Return<ErrorStatus> prepareLaunchStatus =
+                mDriver->prepareModel(model, preparedModelCallback);
+        if (!prepareLaunchStatus.isOk() || prepareLaunchStatus != ErrorStatus::NONE) {
+            return ANEURALNETWORKS_OP_FAILED;
+        }
 
-        driver->prepareModel(model, preparationEvent,
-                             [&](ErrorStatus status, const sp<IPreparedModel>& prepared) {
-                                 prepareStatus = status;
-                                 preparedModel = prepared;
-                             });
-
-        // Immediately synchronize with event for now
+        // Immediately synchronize with callback object for now
         // TODO: change to asynchronous later
-        Event::Status eventStatus = preparationEvent->wait();
-
-        if (prepareStatus != ErrorStatus::NONE || preparedModel == nullptr ||
-            eventStatus != Event::Status::SUCCESS) {
+        preparedModelCallback->wait();
+        ErrorStatus prepareReturnStatus = preparedModelCallback->getStatus();
+        mPreparedModel = preparedModelCallback->getPreparedModel();
+        if (prepareReturnStatus != ErrorStatus::NONE || mPreparedModel == nullptr) {
             return ANEURALNETWORKS_OP_FAILED;
         }
     }
@@ -305,7 +421,7 @@ int ExecutionBuilder::startComputeOnDevice(sp<Event>* event, sp<IDevice> driver,
     // inputPointerArguments.update();
     for (auto& info : mInputs) {
         if (info.state == ModelArgumentInfo::POINTER) {
-            DataLocation& loc = info.locationAndDimension.location;
+            DataLocation& loc = info.locationAndLength;
             uint8_t* data = nullptr;
             int n = inputPointerArguments.getPointer(&data);
             if (n != ANEURALNETWORKS_NO_ERROR) {
@@ -317,41 +433,44 @@ int ExecutionBuilder::startComputeOnDevice(sp<Event>* event, sp<IDevice> driver,
     // TODO: Add inputPointerArguments.commit() and .update() at all the right places
 
     Request request;
-    copyLocationAndDimension(mInputs, &request.inputs);
-    copyLocationAndDimension(mOutputs, &request.outputs);
+    setRequestArgumentArray(mInputs, &request.inputs);
+    setRequestArgumentArray(mOutputs, &request.outputs);
     uint32_t count = mMemories.size();
     request.pools.resize(count);
     for (uint32_t i = 0; i < count; i++) {
         request.pools[i] = mMemories[i]->getHidlMemory();
     }
 
-    // Prepare the event for asynchronous execution. The sp<Event> object is
-    // returned when the execution has been successfully launched, otherwise a
-    // nullptr is returned. The sp is used for ref-counting purposes. Without
-    // it, the HIDL service could attempt to communicate with a dead event
-    // object.
+    // Prepare the callback for asynchronous execution. sp<ExecutionCallback>
+    // object is returned when the execution has been successfully launched,
+    // otherwise a nullptr is returned. The executionCallback is abstracted in
+    // the NN API as an "event".
     //
-    // TODO: Explain the "dead event" problem further, either here or
+    // The sp is used for ref-counting purposes. Without it, the HIDL service
+    // could attempt to communicate with a dead callback object.
+    //
+    // TODO: Explain the "dead callback" problem further, either here or
     // in the design document.
-    sp<Event> eventSp = new Event();
+    sp<ExecutionCallback> executionCallback = new ExecutionCallback();
 
-    LOG(DEBUG) << "Before preparedModel->execute() " << toString(request);
+    LOG(DEBUG) << "Before mPreparedModel->execute() " << toString(request);
     // Execute.
-    // TODO: What happens to the Event if the service dies abnormally
-    // -- won't that keep the Event live forever, because the service
+    // TODO: What happens to the Callback if the service dies abnormally
+    // -- won't that keep the Callback live forever, because the service
     // never has the opportunity to bump the reference count down? Or
     // maybe the HIDL infrastructure handles this magically? At worst,
-    // it seems like this is a small memory leak, if the Event stays
+    // it seems like this is a small memory leak, if the Callback stays
     // alive forever.
-    if (preparedModel->execute(request, eventSp) != ErrorStatus::NONE) {
+    if (mPreparedModel->execute(request, executionCallback) != ErrorStatus::NONE) {
         LOG(DEBUG) << "**Execute failed**";
         return ANEURALNETWORKS_OP_FAILED;
     }
 
     // TODO: Remove this synchronization point when the block of code below is
     // removed.
-    Event::Status status = eventSp->wait();
-    if (status != Event::Status::SUCCESS) {
+    executionCallback->wait();
+    Return<ErrorStatus> executionStatus = executionCallback->getStatus();
+    if (!executionStatus.isOk() || executionStatus != ErrorStatus::NONE) {
         LOG(DEBUG) << "**Execute async failed**";
         return ANEURALNETWORKS_OP_FAILED;
     }
@@ -362,7 +481,7 @@ int ExecutionBuilder::startComputeOnDevice(sp<Event>* event, sp<IDevice> driver,
     // TODO: outputMemory->update(); outputMemory->commit()
     for (auto& info : mOutputs) {
         if (info.state == ModelArgumentInfo::POINTER) {
-            DataLocation& loc = info.locationAndDimension.location;
+            DataLocation& loc = info.locationAndLength;
             uint8_t* data = nullptr;
             int n = outputPointerArguments.getPointer(&data);
             if (n != ANEURALNETWORKS_NO_ERROR) {
@@ -371,33 +490,34 @@ int ExecutionBuilder::startComputeOnDevice(sp<Event>* event, sp<IDevice> driver,
             memcpy(info.buffer, data + loc.offset, loc.length);
         }
     }
-    LOG(DEBUG) << "ExecutionBuilder::startComputeOnDevice completed";
+    LOG(DEBUG) << "StepExecutor::startComputeOnDevice completed";
 
-    *event = eventSp;
+    *synchronizationCallback = executionCallback;
     return ANEURALNETWORKS_NO_ERROR;
 }
 
 static void asyncStartComputeOnCpu(const Model& model, const Request& request,
                                    const std::vector<RunTimePoolInfo>& runTimePoolInfos,
-                                   const sp<IEvent>& event) {
+                                   const sp<IExecutionCallback>& executionCallback) {
     CpuExecutor executor;
     int err = executor.run(model, request, runTimePoolInfos);
     ErrorStatus status = err == ANEURALNETWORKS_NO_ERROR ?
             ErrorStatus::NONE : ErrorStatus::GENERAL_FAILURE;
-    event->notify(status);
+    executionCallback->notify(status);
 }
 
-int ExecutionBuilder::startComputeOnCpu(sp<Event>* event) {
+int StepExecutor::startComputeOnCpu(sp<ExecutionCallback>* synchronizationCallback) {
     // TODO: use a thread pool
 
     Model model;
     mModel->setHidlModel(&model);
 
-    // Prepare the event for asynchronous execution. The sp<Event> object is
-    // returned when the execution has been successfully launched, otherwise a
-    // nullptr is returned.
-    sp<Event> eventSp = new Event();
-    *event = nullptr;
+    // Prepare the callback for asynchronous execution. sp<ExecutionCallback>
+    // object is returned when the execution has been successfully launched,
+    // otherwise a nullptr is returned. The executionCallback is abstracted in
+    // the NN API as an "event".
+    sp<ExecutionCallback> executionCallback = new ExecutionCallback();
+    *synchronizationCallback = nullptr;
 
     std::vector<RunTimePoolInfo> runTimePoolInfos;
     uint32_t count = mMemories.size();
@@ -412,9 +532,9 @@ int ExecutionBuilder::startComputeOnCpu(sp<Event>* event) {
             if (argumentInfo.state == ModelArgumentInfo::POINTER) {
                 RunTimePoolInfo runTimeInfo = {
                             .buffer = static_cast<uint8_t*>(argumentInfo.buffer)};
-                argumentInfo.locationAndDimension.location.poolIndex =
+                argumentInfo.locationAndLength.poolIndex =
                             static_cast<uint32_t>(runTimePoolInfos.size());
-                argumentInfo.locationAndDimension.location.offset = 0;
+                argumentInfo.locationAndLength.offset = 0;
                 runTimePoolInfos.push_back(runTimeInfo);
             }
         }
@@ -423,15 +543,15 @@ int ExecutionBuilder::startComputeOnCpu(sp<Event>* event) {
     fixPointerArguments(mOutputs);
 
     Request request;
-    copyLocationAndDimension(mInputs, &request.inputs);
-    copyLocationAndDimension(mOutputs, &request.outputs);
+    setRequestArgumentArray(mInputs, &request.inputs);
+    setRequestArgumentArray(mOutputs, &request.outputs);
 
     // TODO: should model be moved with a std::cref?
     std::thread thread(asyncStartComputeOnCpu, model, std::move(request),
-                       std::move(runTimePoolInfos), eventSp);
-    eventSp->bind_thread(std::move(thread));
+                       std::move(runTimePoolInfos), executionCallback);
+    executionCallback->bind_thread(std::move(thread));
 
-    *event = eventSp;
+    *synchronizationCallback = executionCallback;
     return ANEURALNETWORKS_NO_ERROR;
 }
 

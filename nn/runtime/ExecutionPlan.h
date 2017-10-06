@@ -31,13 +31,16 @@ namespace nn {
 
 class CompilationBuilder;
 class Device;
+class ExecutionBuilder;
 class ExecutionPlan;
 class Memory;
 class ModelBuilder;
+class StepExecutor;
 
 class ExecutionStep {
 private:
     typedef std::vector<std::pair<uint32_t, uint32_t>> RemapVectorType;
+    typedef std::set<std::pair<uint32_t, uint32_t>> SubModelOutputSetType;
 
 public:
     enum OperandKind { INPUT, OUTPUT };
@@ -50,9 +53,18 @@ public:
     int addOperand(uint32_t fromOperandIndex, uint32_t* toOperandIndex,
                    const ModelBuilder& fromModel, OperandKind kind);
 
-    // Each vector entry is of the form (fromModel index, subModel index)
+    // Each container entry is of the form (fromModel index, subModel index)
+    const RemapVectorType& getModelInputs() const {
+        return mModelInputs;
+    }
+    const RemapVectorType& getModelOutputs() const {
+        return mModelOutputs;
+    }
     const RemapVectorType& getSubModelInputs() const {
         return mSubModelInputs;
+    }
+    const SubModelOutputSetType& getSubModelOutputs() const {
+        return mSubModelOutputs;
     }
 
     void recordSubModelOutput(uint32_t fromModelIndex) {
@@ -61,7 +73,19 @@ public:
         mSubModelOutputs.insert(std::make_pair(fromModelIndex, it->second));
     }
 
-    int finishSubModel();
+    // If this step has a submodel output of unknown size, sets
+    // *hasOutputOfUnknownSize to true; otherwise, leaves it
+    // unchanged.
+    int finishSubModel(const ModelBuilder* fromModel, bool* hasOutputOfUnknownSize);
+
+    std::shared_ptr<ModelBuilder> getSubModel() const { return mSubModel; }
+    std::shared_ptr<Device> getDevice() const { return mDevice; }
+
+    // only available after calling finishSubModel()
+    sp<IPreparedModel> getPreparedSubModel() const { return mPreparedSubModel; }
+
+    // Map inputs and outputs from ExecutionBuilder to StepExecutor.
+    void mapInputsAndOutputs(std::shared_ptr<StepExecutor> stepExecutor) const;
 
     void dump() const;
 private:
@@ -86,9 +110,19 @@ private:
     RemapVectorType mSubModelInputs;
     // Temporaries of original model that are outputs of this submodel:
     //     (fromModel index, subModel index)
-    std::set<std::pair<uint32_t, uint32_t>> mSubModelOutputs;
+    SubModelOutputSetType mSubModelOutputs;
     // Converts operand indexes from the main model to the submodel.
     std::unordered_map<uint32_t, uint32_t> mOperandMap;
+    // Converts input indexes from the submodel to the main model
+    // (these are input indexes, not operand indexes).  This vector
+    // only describes inputs of the submodel that are also inputs of
+    // the main model -- that is, mModelInputs but not mSubModelInputs.
+    std::vector<uint32_t> mInputIndexSubModelToFromModel;
+    // Converts output indexes from the submodel to the main model
+    // (these are output indexes, not operand indexes).  This vector
+    // only describes outputs of the submodel that are also outputs of
+    // the main model -- that is, mModelOutputs but not mSubModelOutputs.
+    std::vector<uint32_t> mOutputIndexSubModelToFromModel;
 };
 
 class ExecutionPlan {
@@ -99,12 +133,51 @@ public:
     ExecutionPlan() { }
     ~ExecutionPlan() { delete mBody; }
 
+    // Controller is part of the interface to a mechanism for
+    // performing an execution in N steps.
+    //
+    // Usage pattern:
+    // - Instantiate Controller with ExecutionPlan::makeController().
+    // - Call ExecutionPlan::next() on Controller N+1 times.  The first N times,
+    //   *executor is set to point to a new StepExecutor corresponding
+    //   to that step.  The N+1st time, *executor is set to nullptr,
+    //   signifying there are no more steps.
+    // - If ExecutionPlan::next() returns anything other than ANEURALNETWORKS_NO_ERROR,
+    //   a problem has occurred.
+    class Controller {
+        friend class ExecutionPlan;
+    private:
+        Controller(const Controller&) = delete;
+        Controller& operator=(const Controller&) = delete;
+
+        // Map from the operand index of a TEMPORARY in the original
+        // model to a Memory object used to represent that TEMPORARY
+        // as an inter-partition input or output.
+        typedef std::map<uint32_t, Memory> SubModelInputsAndOutputsType;
+
+        static const size_t kBadStepIndex = ~size_t(0);
+
+        Controller(const ExecutionPlan* plan, const ExecutionBuilder* executionBuilder,
+                   std::shared_ptr<const SubModelInputsAndOutputsType> subModelInputsAndOutputs) :
+                mPlan(plan), mExecutionBuilder(executionBuilder),
+                mSubModelInputsAndOutputs(subModelInputsAndOutputs), mNextStepIndex(0) {}
+
+        const ExecutionPlan* mPlan;
+        const ExecutionBuilder* mExecutionBuilder;
+        std::shared_ptr<const SubModelInputsAndOutputsType> mSubModelInputsAndOutputs;  // may be nullptr
+        size_t mNextStepIndex;
+    };
+
+    std::shared_ptr<Controller> makeController(const ExecutionBuilder* executionBuilder) const;
+
+    int next(std::shared_ptr<Controller> controller, std::shared_ptr<StepExecutor>* executor) const;
+
     std::shared_ptr<ExecutionStep> createNewStep(const std::shared_ptr<Device> device);
 
     void becomeSingleStep(const std::shared_ptr<Device> device,
                           const ModelBuilder* model);
 
-    int finish();
+    int finish(const ModelBuilder* fromModel);
 
     void recordTemporaryDef(uint32_t fromModelIndex, uint32_t stepIndex) {
         auto& temporaryToDefiningStep = compound()->mTemporaryToDefiningStep;
@@ -114,35 +187,14 @@ public:
 
     void dump() const;
 
-    // TODO: This member function is only temporary, until we finish
-    // fully integrating ExecutionPlan with the compilation and
-    // execution phases of the NN API.  The return value is as follows:
-    //
-    //     NO_ERROR
-    //         There's exactly one partition, and it was successfully compiled.
-    //
-    //         If device is not nullptr, *device has been set (set to nullptr
-    //         in the case of CPU execution).
-    //
-    //         If preparedModel is not nullptr, *preparedModel has been set
-    //         (set to nullptr in the case of CPU execution).
-    //
-    //     OP_FAILED
-    //         There's exactly one partition, but it was not successfully compiled.
-    //
-    //     BAD_STATE
-    //         There are zero or multiple partitions.
-    //
-    int getSimplePlan(std::shared_ptr<Device>* device = nullptr,
-                      sp<IPreparedModel>* preparedModel = nullptr) const;
-
 private:
     void findSubModelOutputs();
 
     struct Body {
         virtual ~Body() {}
         virtual void dump() const = 0;
-        virtual int finish() = 0;
+        virtual int finish(const ModelBuilder* fromModel) = 0;
+        bool mSuccessfulFinish = false;
     };
 
     struct SimpleBody : Body {
@@ -150,17 +202,16 @@ private:
                 mDevice(device), mModel(model) {}
 
         void dump() const override;
-        int finish() override;
+        int finish(const ModelBuilder* fromModel) override;
 
         std::shared_ptr<Device> mDevice;  // nullptr signifies CPU
         const ModelBuilder* mModel;
         sp<IPreparedModel> mPreparedModel;  // not used for CPU
-        bool mSuccessfulFinish = false;
     };
 
     struct CompoundBody : Body {
         void dump() const override;
-        int finish() override;
+        int finish(const ModelBuilder* fromModel) override;
 
         // TODO: Some of the data is working state information that
         // shouldn't be needed after we've constructed but not
@@ -172,6 +223,7 @@ private:
         // Used for all (and only) TEMPORARY_VARIABLEs.
         std::unordered_map<uint32_t, uint32_t> mTemporaryToDefiningStep;
 
+        bool mHasSubModelOutputOfUnknownSize = false;
     private:
         void findSubModelOutputs();
     };
@@ -181,6 +233,10 @@ private:
     CompoundBody* compound() {
         nnAssert(mState == COMPOUND);
         return static_cast<CompoundBody*>(mBody);
+    }
+    const CompoundBody* compound() const {
+        nnAssert(mState == COMPOUND);
+        return static_cast<const CompoundBody*>(mBody);
     }
 };
 
