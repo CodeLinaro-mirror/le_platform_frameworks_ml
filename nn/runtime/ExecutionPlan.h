@@ -151,26 +151,29 @@ public:
         Controller& operator=(const Controller&) = delete;
 
         // Map from the operand index of a TEMPORARY in the original
-        // model to a Memory object used to represent that TEMPORARY
-        // as an inter-partition input or output.
-        typedef std::map<uint32_t, Memory> SubModelInputsAndOutputsType;
+        // model to an offset into mTemporaries used to represent that
+        // TEMPORARY as an inter-partition input or output.
+        typedef std::map<uint32_t, uint32_t> SubModelInputsAndOutputsType;
 
         static const size_t kBadStepIndex = ~size_t(0);
 
         Controller(const ExecutionPlan* plan, const ExecutionBuilder* executionBuilder,
-                   std::shared_ptr<const SubModelInputsAndOutputsType> subModelInputsAndOutputs) :
-                mPlan(plan), mExecutionBuilder(executionBuilder),
-                mSubModelInputsAndOutputs(subModelInputsAndOutputs), mNextStepIndex(0) {}
+                   std::shared_ptr<const SubModelInputsAndOutputsType> subModelInputsAndOutputs,
+                   uint32_t totalSizeOfTemporaries);
 
         const ExecutionPlan* mPlan;
         const ExecutionBuilder* mExecutionBuilder;
         std::shared_ptr<const SubModelInputsAndOutputsType> mSubModelInputsAndOutputs;  // may be nullptr
+        Memory mTemporaries;
         size_t mNextStepIndex;
     };
 
     std::shared_ptr<Controller> makeController(const ExecutionBuilder* executionBuilder) const;
 
     int next(std::shared_ptr<Controller> controller, std::shared_ptr<StepExecutor>* executor) const;
+
+    // Create the same executor as the last one created by next().
+    int fallback(std::shared_ptr<Controller> controller, std::shared_ptr<StepExecutor>* executor) const;
 
     std::shared_ptr<ExecutionStep> createNewStep(const std::shared_ptr<Device> device);
 
@@ -186,6 +189,13 @@ public:
     }
 
     void dump() const;
+
+    // These functions are solely intended for use by unit tests of
+    // the partitioning algorithm.
+    enum class Kind { ERROR, EMPTY, SIMPLE, COMPOUND };
+    Kind forTest_getKind() const;
+    std::shared_ptr<const Device> forTest_simpleGetDevice() const;
+    const std::vector<std::shared_ptr<ExecutionStep>>& forTest_compoundGetSteps() const;
 
 private:
     void findSubModelOutputs();

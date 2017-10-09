@@ -707,7 +707,7 @@ void CreateModel(Model *model) {
   model->addOperation(ANEURALNETWORKS_RESHAPE, {op28, op86}, {op85});
   model->addOperation(ANEURALNETWORKS_SOFTMAX, {op85, b235}, {op87});
   // Phase 3, inputs and outputs
-  model->setInputsAndOutputs(
+  model->identifyInputsAndOutputs(
     {op88},
     {op87});
   assert(model->isValid());
