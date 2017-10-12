@@ -80,8 +80,8 @@ typedef enum {
      *
      * Attached to this tensor are two numbers that can be used to convert
      * the 8 bit integer to the real value and vice versa.  These two numbers are:
-     * - scale: a 32 bit floating point value
-     * - zeroPoint: an 32 bit integer
+     * - scale: a 32 bit non-negative floating point value.
+     * - zeroPoint: an 32 bit integer, in range [0, 255].
      *
      * The formula is:
      * real_value = (integer_value - zeroPoint) * scale.
@@ -115,6 +115,7 @@ typedef enum {
      *
      * Supported tensor types:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
+     * * {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM}
      *
      * Supported tensor rank: up to 4
      *
@@ -128,6 +129,7 @@ typedef enum {
      * * 0: The sum, a tensor of the same type as input0.
      */
     ANEURALNETWORKS_ADD = 0,
+
     /** Performs a 2-D average pooling operation.
      *
      * The output dimensions are functions of the filter dimensions, stride, and padding.
@@ -143,7 +145,9 @@ typedef enum {
      *
      * Supported tensor rank: 4, with "NHWC" data layout.
      *
-     * Inputs:
+     * Both explicit padding and implicit padding are supported.
+     *
+     * Inputs (explicit padding):
      * * 0: A 4-D tensor, of shape [batches, height, width, depth], specifying the input.
      * * 1: An INT32 value, specifying the padding on the left, in the ‘width’ dimension.
      * * 2: An INT32 value, specifying the padding on the right,in the ‘width’ dimension.
@@ -156,10 +160,22 @@ typedef enum {
      * * 9: An INT32 value, and has to be one of the {@link FuseCode} values.
      *      Specifies the activation to invoke on the result of each addition.
      *
+     * Inputs (implicit padding):
+     * * 0: A 4-D tensor, of shape [batches, height, width, depth], specifying the input.
+     * * 1: An INT32 value, specifying the implicit padding scheme, has to be one of the
+     *      {@link PaddingCode} values.
+     * * 2: An INT32 value, specifying the output stride in the ‘width’ dimension.
+     * * 3: An INT32 value, specifying the output stride in the ‘height’ dimension.
+     * * 4: An INT32 value, specifying the filter width.
+     * * 5: An INT32 value, specifying the filter height.
+     * * 6: An INT32 value, and has to be one of the {@link FuseCode} values.
+     *      Specifies the activation to invoke on the result of each addition.
+     *
      * Outputs:
      * * 0: The output 4-D tensor, of shape [batches, out_height, out_width, depth].
      */
     ANEURALNETWORKS_AVERAGE_POOL_2D = 1,
+
     /** Concatenates the input tensors along the given dimension.
      *
      * The input tensors must have identical type and the same dimensions except the
@@ -172,16 +188,17 @@ typedef enum {
      * Supported tensor rank: up to 4
      *
      * Inputs:
-     * 0 ~ n: The list on n input tensors, of shape [D0, D1, ..., Daxis(i), ..., Dm]
-     * n+1: An INT32 value, specifying the concatenation axis.
-     * n+2: An INT32 value, and has to be one of the {@link FuseCode} values.
-     *      Specifies the activation to invoke on the result of each addition.
+     * * 0 ~ n-1: The list of n input tensors, of shape [D0, D1, ..., Daxis(i), ..., Dm].
+     *            For the inputs of {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, all
+     *            input tensors must have the same scale and zeroPoint.
+     * * n: An INT32 value, specifying the concatenation axis.
      *
      * Outputs:
      * * 0: The output, a tensor of the same type as the input tensors.
      *      The output shape is [D0, D1, ..., sum(Daxis(i)), ..., Dm].
      */
     ANEURALNETWORKS_CONCATENATION = 2,
+
     /** Performs an 2-D convolution operation.
      *
      * The CONV_2D op sweeps a 2-D filter that can mix channels together over a batch of
@@ -204,7 +221,9 @@ typedef enum {
      *
      * Supported tensor rank: 4, with "NHWC" data layout.
      *
-     * Inputs:
+     * Both explicit padding and implicit padding are supported.
+     *
+     * Inputs (explicit padding):
      * * 0: A 4-D tensor, of shape [batches, height, width, depth_in], specifying the input.
      * * 1: A 4-D tensor, of shape [depth_out, filter_height, filter_width, depth_in],
      *      specifying the filter.
@@ -212,7 +231,8 @@ typedef enum {
      *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT32} type, the bias should
      *      also be of {@link ANEURALNETWORKS_TENSOR_FLOAT32}.
      *      For input tensor of {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, the bias
-     *      should be of {@link ANEURALNETWORKS_TENSOR_INT32}.
+     *      should be of {@link ANEURALNETWORKS_TENSOR_INT32}, with zeroPoint of 0 and
+     *      bias_scale == input_scale * filter_scale.
      * * 3: An INT32 value, specifying the padding on the left, in the ‘width’ dimension.
      * * 4: An INT32 value, specifying the padding on the right,in the ‘width’ dimension.
      * * 5: An INT32 value, specifying the padding on the top, in the ‘height’ dimension.
@@ -222,15 +242,35 @@ typedef enum {
      * * 9: An INT32 value, and has to be one of the {@link FuseCode} values.
      *      Specifies the activation to invoke on the result of each addition.
      *
+     * Inputs (implicit padding):
+     * * 0: A 4-D tensor, of shape [batches, height, width, depth_in], specifying the input.
+     * * 1: A 4-D tensor, of shape [depth_out, filter_height, filter_width, depth_in],
+     *      specifying the filter.
+     * * 2: A 1-D tensor, of shape [depth_out], specifying the bias.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT32} type, the bias should
+     *      also be of {@link ANEURALNETWORKS_TENSOR_FLOAT32}.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, the bias
+     *      should be of {@link ANEURALNETWORKS_TENSOR_INT32}, with zeroPoint of 0 and
+     *      bias_scale == input_scale * filter_scale.
+     * * 3: An INT32 value, specifying the implicit padding scheme, has to be one of the
+     *      {@link PaddingCode} values.
+     * * 4: An INT32 value, specifying the output stride in the ‘width’ dimension.
+     * * 5: An INT32 value, specifying the output stride in the ‘height’ dimension.
+     * * 6: An INT32 value, and has to be one of the {@link FuseCode} values.
+     *      Specifies the activation to invoke on the result of each addition.
+     *
      * Outputs:
      * * 0: The output 4-D tensor, of shape [batches, out_height, out_width, depth_out].
+     *      For output tensor of {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, the following
+     *      condition must be satisfied: output_scale > input_scale * filter_scale.
      */
     ANEURALNETWORKS_CONV_2D = 3,
+
     /** Performs a depthwise 2-D convolution operation.
      *
      * Given an input tensor of shape [batches, height, width, depth_in] and a filter
-     * tensor of shape [depth_out, filter_height, filter_width, depth_in] containing
-     * in_channels convolutional filters of depth 1, DEPTHWISE_CONV applies a different
+     * tensor of shape [1, filter_height, filter_width, depth_out] containing
+     * depth_out convolutional filters of depth 1, DEPTHWISE_CONV applies a different
      * filter to each input channel (expanding from 1 channel to channel_multiplier channels
      * for each), then concatenates the results together.
      *
@@ -242,7 +282,7 @@ typedef enum {
      *     output[b, i, j, k * channel_multiplier + q] =
      *         sum_{di, dj} (
      *             input[b, strides[1] * i + di, strides[2] * j + dj, k] *
-     *             filter[di, dj, k, q]
+     *             filter[1, di, dj, k * channel_multiplier + q]
      *         )
      *
      * Supported tensor types:
@@ -251,7 +291,9 @@ typedef enum {
      *
      * Supported tensor rank: 4, with "NHWC" data layout.
      *
-     * Inputs:
+     * Both explicit padding and implicit padding are supported.
+     *
+     * Inputs (explicit padding):
      * * 0: A 4-D tensor, of shape [batches, height, width, depth_in], specifying the input.
      * * 1: A 4-D tensor, of shape [1, filter_height, filter_width, depth_out],
      *      specifying the filter.
@@ -259,7 +301,8 @@ typedef enum {
      *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT32} type, the bias should
      *      also be of {@link ANEURALNETWORKS_TENSOR_FLOAT32}.
      *      For input tensor of {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, the bias
-     *      should be of {@link ANEURALNETWORKS_TENSOR_INT32}.
+     *      should be of {@link ANEURALNETWORKS_TENSOR_INT32}, with zeroPoint of 0 and
+     *      bias_scale == input_scale * filter_scale.
      * * 3: An INT32 value, specifying the padding on the left, in the ‘width’ dimension.
      * * 4: An INT32 value, specifying the padding on the right,in the ‘width’ dimension.
      * * 5: An INT32 value, specifying the padding on the top, in the ‘height’ dimension.
@@ -270,10 +313,31 @@ typedef enum {
      * * 10: An INT32 value, and has to be one of the {@link FuseCode} values.
      *       Specifies the activation to invoke on the result of each addition.
      *
+     * Inputs (explicit padding):
+     * * 0: A 4-D tensor, of shape [batches, height, width, depth_in], specifying the input.
+     * * 1: A 4-D tensor, of shape [1, filter_height, filter_width, depth_out],
+     *      specifying the filter.
+     * * 2: A 1-D tensor, of shape [depth_out], specifying the bias.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT32} type, the bias should
+     *      also be of {@link ANEURALNETWORKS_TENSOR_FLOAT32}.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, the bias
+     *      should be of {@link ANEURALNETWORKS_TENSOR_INT32}, with zeroPoint of 0 and
+     *      bias_scale == input_scale * filter_scale.
+     * * 3: An INT32 value, specifying the implicit padding scheme, has to be one of the
+     *      {@link PaddingCode} values.
+     * * 4: An INT32 value, specifying the output stride in the ‘width’ dimension.
+     * * 5: An INT32 value, specifying the output stride in the ‘height’ dimension.
+     * * 6: An INT32 value, specifying the depthwise multiplier.
+     * * 7: An INT32 value, and has to be one of the {@link FuseCode} values.
+     *       Specifies the activation to invoke on the result of each addition.
+     *
      * Outputs:
      * * 0: The output 4-D tensor, of shape [batches, out_height, out_width, depth_out].
+     *      For output tensor of {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, the following
+     *      condition must be satisfied: output_scale > input_scale * filter_scale.
      */
     ANEURALNETWORKS_DEPTHWISE_CONV_2D = 4,
+
     /** Rearranges data from depth into blocks of spatial data.
      *
      * More specifically, this op outputs a copy of the input tensor where values from
@@ -303,6 +367,7 @@ typedef enum {
      *      depth/(block_size*block_size)].
      */
     ANEURALNETWORKS_DEPTH_TO_SPACE = 5,
+
     /** Dequantizes the input tensor.
      *
      * The formula is:
@@ -359,6 +424,7 @@ typedef enum {
      * * 0: The output, a tensor of the same type and dimensions as input0.
      */
     ANEURALNETWORKS_FLOOR = 8,
+
     /** Denotes a fully (densely) connected layer, which connects all elements in the input
      * tensor with each element in the output tensor.
      *
@@ -383,12 +449,15 @@ typedef enum {
      *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT32} type, the bias should
      *      also be of {@link ANEURALNETWORKS_TENSOR_FLOAT32}.
      *      For input tensor of {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, the bias
-     *      should be of {@link ANEURALNETWORKS_TENSOR_INT32}.
+     *      should be of {@link ANEURALNETWORKS_TENSOR_INT32}, with zeroPoint of 0 and
+     *      bias_scale == input_scale * filter_scale.
      * * 3: An INT32 value, and has to be one of the {@link FuseCode} values.
      *      Specifies the activation to invoke on the result of each addition.
      *
      * Outputs:
      * * 0: The output tensor, of shape [batch_size, num_units].
+     *      For output tensor of {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, the following
+     *      condition must be satisfied: output_scale > input_scale * filter_scale.
      */
     ANEURALNETWORKS_FULLY_CONNECTED = 9,
 
@@ -403,8 +472,10 @@ typedef enum {
      *
      * Outputs:
      * * 0: Output. A tensor with shape [ k …].
-     * * 1: Hits. A uint8 tensor with shape [ k ] indicates whether the lookup
-     *      hits or not.
+     * * 1: Hits. A boolean tensor with shape [ k ] indicates whether the lookup
+     *      hits (True) or not (False).
+     *      Stored as {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} with offset 0 and scale 1.0f.
+     *      A non-zero byte represents True, a hit. A zero indicates otherwise.
      */
     ANEURALNETWORKS_HASHTABLE_LOOKUP = 10,
 
@@ -445,7 +516,9 @@ typedef enum {
      *
      * Supported tensor rank: 4, with "NHWC" data layout.
      *
-     * Inputs:
+     * Both explicit padding and implicit padding are supported.
+     *
+     * Inputs (explicit padding):
      * * 0: A 4-D tensor, of shape [batches, height, width, depth], specifying the input.
      * * 1: An INT32 value, specifying the padding on the left, in the ‘width’ dimension.
      * * 2: An INT32 value, specifying the padding on the right,in the ‘width’ dimension.
@@ -458,10 +531,22 @@ typedef enum {
      * * 9: An INT32 value, and has to be one of the {@link FuseCode} values.
      *      Specifies the activation to invoke on the result of each addition.
      *
+     * Inputs (implicit padding):
+     * * 0: A 4-D tensor, of shape [batches, height, width, depth], specifying the input.
+     * * 1: An INT32 value, specifying the implicit padding scheme, has to be one of the
+     *      {@link PaddingCode} values.
+     * * 2: An INT32 value, specifying the output stride in the ‘width’ dimension.
+     * * 3: An INT32 value, specifying the output stride in the ‘height’ dimension.
+     * * 4: An INT32 value, specifying the filter width.
+     * * 5: An INT32 value, specifying the filter height.
+     * * 6: An INT32 value, and has to be one of the {@link FuseCode} values.
+     *      Specifies the activation to invoke on the result of each addition.
+     *
      * Outputs:
      * * 0: The output 4-D tensor, of shape [batches, out_height, out_width, depth].
      */
     ANEURALNETWORKS_L2_POOL_2D = 12,
+
     /** Applies Local Response Normalization along the depth dimension.
      *
      * The 4-D input tensor is treated as a 3-D array of 1-D vectors (along the last
@@ -490,6 +575,7 @@ typedef enum {
      * * 0: The output tensor of same shape as input0.
      */
     ANEURALNETWORKS_LOCAL_RESPONSE_NORMALIZATION = 13,
+
     /** Computes sigmoid activation on the input tensor element-wise.
      *
      * The output is calculated using this formula:
@@ -506,7 +592,9 @@ typedef enum {
      * * 0: A tensor, specifying the input.
      *
      * Outputs:
-     * * 0: The output tensor of same shape as input0, with range [0.0, 1.0].
+     * * 0: The output tensor of same shape as input0.
+     *      For {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type,
+     *      the scale must be 1.f / 256 and the zeroPoint must be 0.
      */
     ANEURALNETWORKS_LOGISTIC = 14,
 
@@ -616,17 +704,21 @@ typedef enum {
      *      A 2-D tensor of type T, of shape [output_size, num_units].
      * * 17:projection_bias.
      *      A 1-D tensor of type T, of shape [output_size].
+     * * 18: output_state (in).
+     *      A 2-D tensor of type T, of shape [batch_size, output_size].
+     * * 19: cell_state (in).
+     *      A 2-D tensor of type T, of shape [batch_size, num_units].
      *
      * Parameters:
-     * * 18:fused_activation_function.
+     * * 20:fused_activation_function.
      *      An (optional) ActivationFunctionType indicating the activation
      *      function.
      *      If “NONE” is specified then it results in a linear activation.
-     * * 19:cell_clip.
+     * * 21:cell_clip.
      *      A clipping threshold for the cell state, such that values are bound
      *      within [-cell_clip, cell_clip]. If set to 0.0 then clipping is
      *      disabled.
-     * * 20:proj_clip.
+     * * 22:proj_clip.
      *      A clipping threshold for the output from the projection layer, such
      *      that values are bound within [-proj_clip, proj_clip]. If set to 0.0
      *      then clipping is disabled.
@@ -634,9 +726,9 @@ typedef enum {
      * Outputs:
      * * 0: scratch_buffer.
      *      A 3-D tensor of type T, of shape [batch_size, num_cell, 4].
-     * * 1: output_state.
+     * * 1: output_state (out).
      *      A 2-D tensor of type T, of shape [batch_size, output_size].
-     * * 2: cell_state.
+     * * 2: cell_state (out).
      *      A 2-D tensor of type T, of shape [batch_size, num_units].
      * * 3: output.
      *      A 2-D tensor of type T, of shape [batch_size, output_size]. This is
@@ -659,7 +751,9 @@ typedef enum {
      *
      * Supported tensor rank: 4, with "NHWC" data layout.
      *
-     * Inputs:
+     * Both explicit padding and implicit padding are supported.
+     *
+     * Inputs (explicit padding):
      * * 0: A 4-D tensor, of shape [batches, height, width, depth], specifying the input.
      * * 1: An INT32 value, specifying the padding on the left, in the ‘width’ dimension.
      * * 2: An INT32 value, specifying the padding on the right,in the ‘width’ dimension.
@@ -670,6 +764,17 @@ typedef enum {
      * * 7: An INT32 value, specifying the filter width.
      * * 8: An INT32 value, specifying the filter height.
      * * 9: An INT32 value, and has to be one of the {@link FuseCode} values.
+     *      Specifies the activation to invoke on the result of each addition.
+     *
+     * Inputs (implicit padding):
+     * * 0: A 4-D tensor, of shape [batches, height, width, depth], specifying the input.
+     * * 1: An INT32 value, specifying the implicit padding scheme, has to be one of the
+     *      {@link PaddingCode} values.
+     * * 2: An INT32 value, specifying the output stride in the ‘width’ dimension.
+     * * 3: An INT32 value, specifying the output stride in the ‘height’ dimension.
+     * * 4: An INT32 value, specifying the filter width.
+     * * 5: An INT32 value, specifying the filter height.
+     * * 6: An INT32 value, and has to be one of the {@link FuseCode} values.
      *      Specifies the activation to invoke on the result of each addition.
      *
      * Outputs:
@@ -691,6 +796,7 @@ typedef enum {
      *
      * Supported tensor types:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
+     * * {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM}
      *
      * Supported tensor rank: up to 4
      *
@@ -702,8 +808,11 @@ typedef enum {
      *
      * Outputs:
      * * 0: The product, a tensor of the same type as input0.
+     *      For output tensor of {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type, the following
+     *      condition must be satisfied: output_scale > input1_scale * input2_scale.
      */
     ANEURALNETWORKS_MUL = 18,
+
     /** Computes rectified linear activation on the input tensor element-wise.
      *
      * The output is calculated using this formula:
@@ -723,6 +832,7 @@ typedef enum {
      * * 0: The output tensor of same shape as input0.
      */
     ANEURALNETWORKS_RELU = 19,
+
     /** Computes rectified linear 1 activation on the input tensor element-wise.
      *
      * The output is calculated using this formula:
@@ -742,6 +852,7 @@ typedef enum {
      * * 0: The output tensor of same shape as input0.
      */
     ANEURALNETWORKS_RELU1 = 20,
+
     /** Computes rectified linear 6 activation on the input tensor element-wise.
      *
      * The output is calculated using this formula:
@@ -761,6 +872,7 @@ typedef enum {
      * * 0: The output tensor of same shape as input0.
      */
     ANEURALNETWORKS_RELU6 = 21,
+
     /** Reshapes a tensor.
      *
      * Given tensor, this operation returns a tensor that has the same values as tensor,
@@ -782,6 +894,7 @@ typedef enum {
      * * 0: The output tensor, of shape specified by the input shape.
      */
     ANEURALNETWORKS_RESHAPE = 22,
+
     /** Resizes images to given size using the bilinear interpretation.
      *
      * Resized images will be distorted if their original aspect ratio is not the same as input.
@@ -836,7 +949,7 @@ typedef enum {
      *    For FLOAT32 input tensor, bias must also be FLOAT32.
      *    For UINT8 input tensor, bias must be INT32.
      *
-     * * 4: Hidden state.
+     * * 4: Hidden state (in).
      *      A 2-D tensor of type T, of shape [batch_size, num_units].
      *
      * Parameters
@@ -846,7 +959,10 @@ typedef enum {
      *      activation.
      *
      * Outputs:
-     * * 0: output.
+     * * 0: Hidden state (out).
+     *      A 2-D tensor of type T, of shape [batch_size, num_units].
+     *
+     * * 1: output.
      *      A 2-D tensor of type T, of shape [batch_size, num_units]. This is
      *      effectively the same as the current state value.
      */
@@ -872,7 +988,9 @@ typedef enum {
      * * 1: A FLOAT32 value, specifying the positive scaling factor for the exponent, beta.
      *
      * Outputs:
-     * * 0: The output tensor of same shape as input0, with range [0.0, 1.0].
+     * * 0: The output tensor of same shape as input0.
+     *      For {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} type,
+     *      the scale must be 1.f / 256 and the zeroPoint must be 0.
      */
     ANEURALNETWORKS_SOFTMAX = 25,
 
@@ -963,15 +1081,18 @@ typedef enum {
      *    For FLOAT32 input tensor, bias must also be FLOAT32.
      *    For UINT8 input tensor, bias must be INT32.
      *
+     * * 4: state (in).
+     *      A 2-D tensor of type T, of shape [batch_size, (memory_size - 1) * num_units * rank].
+     *
      * Parameters:
-     * * 4: rank.
+     * * 5: rank.
      *      The rank of the SVD approximation.
-     * * 5: fused_activation_function.
+     * * 6: fused_activation_function.
      *      An (optional) ActivationFunctionType indicating the activation function.
      *      If “NONE” is specified then it results in a linear activation.
      *
      * Outputs:
-     * * 0: state.
+     * * 0: state (out).
      *      A 2-D tensor of type T, of shape [batch_size, (memory_size - 1) * num_units * rank].
      * * 1: output.
      *      A 2-D tensor of type T, of shape [batch_size, num_units].
@@ -1012,6 +1133,17 @@ typedef enum {
     /** Fused ReLU6 activation function. */
     ANEURALNETWORKS_FUSED_RELU6 = 3,
 } FuseCode;
+
+/**
+ * Implicit padding algorithms.
+ *
+ */
+typedef enum {
+    /** SAME padding. */
+    ANEURALNETWORKS_PADDING_SAME = 1,
+    /** VALID padding. */
+    ANEURALNETWORKS_PADDING_VALID = 2,
+} PaddingCode;
 
 /**
  * Execution preferences.
@@ -1320,6 +1452,9 @@ int ANeuralNetworksModel_addOperand(ANeuralNetworksModel* model,
  * be copied during processing, modifying the data after this call yields
  * undefined results.
  *
+ * To indicate that an optional operand should be considered missing,
+ * pass nullptr for buffer and 0 for length.
+ *
  * Attempting to modify a model once {@link ANeuralNetworksModel_finish} has been
  * called will return an error.
  *
@@ -1343,6 +1478,9 @@ int ANeuralNetworksModel_setOperandValue(ANeuralNetworksModel* model, int32_t in
  * of the memory region until all executions using this model have completed.
  * As the data may be copied during processing, modifying the data after this call
  * yields undefined results.
+ *
+ * To indicate that an optional operand should be considered missing,
+ * use {@link ANeuralNetworksModel_setOperandValue} instead, passing nullptr for buffer.
  *
  * Attempting to modify a model once {@link ANeuralNetworksModel_finish} has been
  * called will return an error.
@@ -1409,9 +1547,9 @@ int ANeuralNetworksModel_addOperation(ANeuralNetworksModel* model,
  * See {@link ANeuralNetworksModel} for information on multithreaded usage.
  *
  */
-int ANeuralNetworksModel_setInputsAndOutputs(ANeuralNetworksModel* model, uint32_t inputCount,
-                                             const uint32_t* inputs, uint32_t outputCount,
-                                             const uint32_t* outputs);
+int ANeuralNetworksModel_identifyInputsAndOutputs(ANeuralNetworksModel* model, uint32_t inputCount,
+                                                  const uint32_t* inputs, uint32_t outputCount,
+                                                  const uint32_t* outputs);
 
 /**
  * Create a {@link ANeuralNetworksCompilation} to compile the given model.
@@ -1529,12 +1667,15 @@ void ANeuralNetworksExecution_free(ANeuralNetworksExecution* execution);
  *
  * <p>The provided buffer must outlive the execution.</p>
  *
+ * If the input is optional, you can indicate that it is omitted by
+ * passing nullptr for buffer and 0 for length.
+ *
  * See {@link ANeuralNetworksExecution} for information on multithreaded usage.
  *
  * @param execution The execution to be modified.
  * @param index The index of the input argument we are setting. It is
  *              an index into the lists passed to
- *              {@link ANeuralNetworksModel_setInputsAndOutputs}. It is not
+ *              {@link ANeuralNetworksModel_identifyInputsAndOutputs}. It is not
  *              the index associated with {@link ANeuralNetworksModel_addOperand}.
  * @param type The type of the operand. This should be used to specify the
  *             dimensions that were set to 0 when the operand was added to the
@@ -1557,12 +1698,16 @@ int ANeuralNetworksExecution_setInput(ANeuralNetworksExecution* execution, int32
  *
  * <p>The provided memory must outlive the execution.</p>
  *
+ * If the input is optional, you can indicate that it is omitted by
+ * using @{Link ANeuralNetworks_setInput} instead, passing nullptr for buffer
+ * and 0 for length.
+ *
  * See {@link ANeuralNetworksExecution} for information on multithreaded usage.
  *
  * @param execution The execution to be modified.
  * @param index The index of the input argument we are setting. It is
  *              an index into the lists passed to
- *              {@link ANeuralNetworksModel_setInputsAndOutputs}. It is not
+ *              {@link ANeuralNetworksModel_identifyInputsAndOutputs}. It is not
  *              the index associated with {@link ANeuralNetworksModel_addOperand}.
  * @param type The type of the operand. This can be used to specify the
  *             dimensions that were set to 0 when the operand was added to the
@@ -1586,6 +1731,9 @@ int ANeuralNetworksExecution_setInputFromMemory(ANeuralNetworksExecution* execut
  * Associate a user buffer with an output of the model of the
  * {@link ANeuralNetworksExecution}.
  *
+ * If the output is optional, you can indicate that it is omitted by
+ * passing nullptr for buffer and 0 for length.
+ *
  * <p>The provided buffer must outlive the execution.</p>
  *
  * See {@link ANeuralNetworksExecution} for information on multithreaded usage.
@@ -1593,7 +1741,7 @@ int ANeuralNetworksExecution_setInputFromMemory(ANeuralNetworksExecution* execut
  * @param execution The execution to be modified.
  * @param index The index of the output argument we are setting. It is
  *              an index into the lists passed to
- *              {@link ANeuralNetworksModel_setInputsAndOutputs}. It is not
+ *              {@link ANeuralNetworksModel_identifyInputsAndOutputs}. It is not
  *              the index associated with {@link ANeuralNetworksModel_addOperand}.
  * @param type The type of the operand. This can be used to specify the
  *             dimensions that were set to 0 when the operand was added to the
@@ -1614,6 +1762,10 @@ int ANeuralNetworksExecution_setOutput(ANeuralNetworksExecution* execution, int3
  * Associate part of a memory object with an output of the model of the
  * {@link ANeuralNetworksExecution}.
  *
+ * If the output is optional, you can indicate that it is omitted by
+ * using @{Link ANeuralNetworks_setOutput} instead, passing nullptr for buffer
+ * and 0 for length.
+ *
  * <p>The provided memory must outlive the execution.</p>
  *
  * See {@link ANeuralNetworksExecution} for information on multithreaded usage.
@@ -1621,7 +1773,7 @@ int ANeuralNetworksExecution_setOutput(ANeuralNetworksExecution* execution, int3
  * @param execution The execution to be modified.
  * @param index The index of the output argument we are setting. It is
  *              an index into the lists passed to
- *              {@link ANeuralNetworksModel_setInputsAndOutputs}. It is not
+ *              {@link ANeuralNetworksModel_identifyInputsAndOutputs}. It is not
  *              the index associated with {@link ANeuralNetworksModel_addOperand}.
  * @param type The type of the operand. This can be used to specify the
  *             dimensions that were set to 0 when the operand was added to the

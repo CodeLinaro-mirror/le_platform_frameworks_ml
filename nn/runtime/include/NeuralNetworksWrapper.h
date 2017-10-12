@@ -56,30 +56,15 @@ struct OperandType {
     // int32_t type;
     std::vector<uint32_t> dimensions;
 
-    OperandType(Type type, const std::vector<uint32_t>& d) : dimensions(d) {
+    OperandType(Type type, const std::vector<uint32_t>& d, float scale = 0.0f,
+                int32_t zeroPoint = 0)
+        : dimensions(d) {
         operandType.type = static_cast<int32_t>(type);
-        operandType.scale = 0.0f;
-        operandType.zeroPoint = 0;
+        operandType.scale = scale;
+        operandType.zeroPoint = zeroPoint;
 
         operandType.dimensionCount = static_cast<uint32_t>(dimensions.size());
         operandType.dimensions = dimensions.data();
-    }
-
-    OperandType(Type type, float scale, const std::vector<uint32_t>& d) : OperandType(type, d) {
-        operandType.scale = scale;
-    }
-
-    OperandType(Type type, float f_min, float f_max, const std::vector<uint32_t>& d)
-        : OperandType(type, d) {
-        uint8_t q_min = std::numeric_limits<uint8_t>::min();
-        uint8_t q_max = std::numeric_limits<uint8_t>::max();
-        float range = q_max - q_min;
-        float scale = (f_max - f_min) / range;
-        int32_t zeroPoint =
-                    fmin(q_max, fmax(q_min, static_cast<uint8_t>(round(q_min - f_min / scale))));
-
-        operandType.scale = scale;
-        operandType.zeroPoint = zeroPoint;
     }
 };
 
@@ -150,9 +135,7 @@ public:
         return *this;
     }
 
-    Result finish() {
-        return static_cast<Result>(ANeuralNetworksModel_finish(mModel));
-    }
+    Result finish() { return static_cast<Result>(ANeuralNetworksModel_finish(mModel)); }
 
     uint32_t addOperand(const OperandType* type) {
         if (ANeuralNetworksModel_addOperand(mModel, &(type->operandType)) !=
@@ -185,12 +168,12 @@ public:
             mValid = false;
         }
     }
-    void setInputsAndOutputs(const std::vector<uint32_t>& inputs,
-                             const std::vector<uint32_t>& outputs) {
-        if (ANeuralNetworksModel_setInputsAndOutputs(mModel, static_cast<uint32_t>(inputs.size()),
-                                                     inputs.data(),
-                                                     static_cast<uint32_t>(outputs.size()),
-                                                     outputs.data()) != ANEURALNETWORKS_NO_ERROR) {
+    void identifyInputsAndOutputs(const std::vector<uint32_t>& inputs,
+                                  const std::vector<uint32_t>& outputs) {
+        if (ANeuralNetworksModel_identifyInputsAndOutputs(
+                        mModel, static_cast<uint32_t>(inputs.size()), inputs.data(),
+                        static_cast<uint32_t>(outputs.size()),
+                        outputs.data()) != ANEURALNETWORKS_NO_ERROR) {
             mValid = false;
         }
     }
@@ -206,6 +189,7 @@ private:
 
 class Event {
 public:
+    Event() {}
     ~Event() { ANeuralNetworksEvent_free(mEvent); }
 
     // Disallow copy semantics to ensure the runtime object can only be freed
@@ -217,9 +201,7 @@ public:
     // Move semantics to remove access to the runtime object from the wrapper
     // object that is being moved. This ensures the runtime object will be
     // freed only once.
-    Event(Event&& other) {
-        *this = std::move(other);
-    }
+    Event(Event&& other) { *this = std::move(other); }
     Event& operator=(Event&& other) {
         if (this != &other) {
             mEvent = other.mEvent;
@@ -230,7 +212,7 @@ public:
 
     Result wait() { return static_cast<Result>(ANeuralNetworksEvent_wait(mEvent)); }
 
-    // Only for use by Compilation
+    // Only for use by Execution
     void set(ANeuralNetworksEvent* newEvent) {
         ANeuralNetworksEvent_free(mEvent);
         mEvent = newEvent;
@@ -268,9 +250,7 @@ public:
                     mCompilation, static_cast<int32_t>(preference)));
     }
 
-    Result finish() {
-        return static_cast<Result>(ANeuralNetworksCompilation_finish(mCompilation));
-    }
+    Result finish() { return static_cast<Result>(ANeuralNetworksCompilation_finish(mCompilation)); }
 
     ANeuralNetworksCompilation* getHandle() const { return mCompilation; }
 
@@ -341,7 +321,7 @@ public:
     Result compute() {
         ANeuralNetworksEvent* event = nullptr;
         Result result =
-                static_cast<Result>(ANeuralNetworksExecution_startCompute(mExecution, &event));
+                    static_cast<Result>(ANeuralNetworksExecution_startCompute(mExecution, &event));
         if (result != Result::NO_ERROR) {
             return result;
         }
