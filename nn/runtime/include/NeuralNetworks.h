@@ -80,7 +80,7 @@ typedef enum {
      *
      * Attached to this tensor are two numbers that can be used to convert
      * the 8 bit integer to the real value and vice versa.  These two numbers are:
-     * - scale: a 32 bit non-negative floating point value.
+     * - scale: a 32 bit floating point value greater than zero.
      * - zeroPoint: an 32 bit integer, in range [0, 255].
      *
      * The formula is:
@@ -462,10 +462,11 @@ typedef enum {
      * Supported tensor rank: up to 4.
      *
      * Inputs:
-     * * 0: A tensor, specifying the input. If rank is greater than 2, then it gets flattened to
-     *      a 2-D Tensor. The 2-D Tensor is handled as if dimensions corresponded to shape
-     *      [batch_size, input_size], where “batch_size” corresponds to the batching dimension,
-     *      and “input_size” is the size of the input.
+     * * 0: A tensor of at least rank 2, specifying the input. If rank is greater than 2,
+     *      then it gets flattened to a 2-D Tensor. The (flattened) 2-D Tensor is reshaped
+     *      (if necessary) to [batch_size, input_size], where "input_size" corresponds to
+     *      the number of inputs to the layer, matching the second dimension of weights, and
+     *      "batch_size" is calculated by dividing the number of elements by "input_size".
      * * 1: A 2-D tensor, specifying the weights, of shape [num_units, input_size], where
      *      "num_units" corresponds to the number of output nodes.
      * * 2: A 1-D tensor, of shape [num_units], specifying the bias.
@@ -741,9 +742,11 @@ typedef enum {
      *   \f{eqnarray*}{
      *   i_t = 1 - f_t
      *   \f}
-     * * The cell-to-input weights (\f$W_{ci}\f$), cell-to-forget weights (\f$W_{cf}\f$), and cell-to-output
-     *   weights (\f$W_{co}\f$) either all have values or none of them have values.
-     *   If they have values, the peephole optimization is used.
+     * * The cell-to-forget weights (\f$W_{cf}\f$) and cell-to-output
+     *   weights (\f$W_{co}\f$) either both have values or neither of them have values.
+     *   If they have values, the peephole optimization is used. Additionally,
+     *   if CIFG is not used, cell-to-input weights (\f$W_{ci}\f$) is also
+     *   required to have values for peephole optimization.
      * * The projection weights (\f$W_{proj}\f$) is required only for the recurrent projection
      *   layer, and should otherwise have no value.
      * * The projection bias (\f$b_{proj}\f$) may (but not required to) have a value if the
@@ -1014,7 +1017,8 @@ typedef enum {
     /** Resizes images to given size using the bilinear interpretation.
      *
      * Resized images will be distorted if their output aspect ratio is not the same as
-     * input aspect ratio.
+     * input aspect ratio. The corner pixels of output may not be the same as
+     * corner pixels of input.
      *
      * Supported tensor types:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
@@ -1415,6 +1419,13 @@ typedef enum {
      *    tensor to be sliced. The length must be of rank(input0).
      * 3: A 1-D Tensor of type TENSOR_INT32, the strides of the dimensions of the input
      *    tensor to be sliced. The length must be of rank(input0).
+     * 4: An INT32 value, begin_mask. If the ith bit of begin_mask is set, begin[i] is ignored
+     *    and the fullest possible range in that dimension is used instead.
+     * 5: An INT32 value, end_mask. If the ith bit of end_mask is set, end[i] is ignored and
+     *    the fullest possible range in that dimension is used instead.
+     * 6: An INT32 value, shrink_axis_mask. An int32 mask. If the ith bit of shrink_axis_mask is
+     *    set, it implies that the ith specification shrinks the dimensionality by 1. A slice of
+     *    size 1 starting from begin[i] in the dimension will be preserved.
      *
      * Outputs:
      * 0: A tensor of the same type as input0.
@@ -1559,8 +1570,8 @@ typedef enum {
     ANEURALNETWORKS_UNEXPECTED_NULL = 3,
     ANEURALNETWORKS_BAD_DATA = 4,
     ANEURALNETWORKS_OP_FAILED = 5,
-    ANEURALNETWORKS_UNMAPPABLE = 5,
     ANEURALNETWORKS_BAD_STATE = 6,
+    ANEURALNETWORKS_UNMAPPABLE = 7,
 } ResultCode;
 
 /**
@@ -1923,7 +1934,7 @@ int ANeuralNetworksModel_addOperation(ANeuralNetworksModel* model,
                                       const uint32_t* outputs);
 
 /**
- * Specfifies which operands will be the model's inputs and outputs.
+ * Specifies which operands will be the model's inputs and outputs.
  *
  * An operand cannot be used for both input and output. Doing so will
  * return an error.

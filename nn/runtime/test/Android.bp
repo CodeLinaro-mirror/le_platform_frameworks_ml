@@ -37,7 +37,6 @@ cc_defaults {
         "libhidltransport",
         "libhidlmemory",
         "liblog",
-        "libnativehelper",
         "libtextclassifier_hash",
         "libutils",
         "android.hardware.neuralnetworks@1.0",
@@ -59,7 +58,10 @@ cc_test {
     name: "NeuralNetworksTest_shared_partial",
     defaults: ["NeuralNetworksTest_defaults"],
     srcs: [
-        "TestMainPartial.cpp",
+        "TestMain.cpp",
+    ],
+    cflags: [
+        "-DNNTEST_ONLY_PUBLIC_API"
     ],
     shared_libs: [
         "libneuralnetworks",

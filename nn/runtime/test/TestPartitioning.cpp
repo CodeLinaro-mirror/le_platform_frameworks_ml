@@ -224,6 +224,15 @@ void graphDump([[maybe_unused]] const char* name, [[maybe_unused]] const Wrapper
 // operation.  The subset is represented with a bitmask, in which
 // operation kind K corresponds to the bit (1 << K).
 class PartitioningDriver : public SampleDriver {
+private:
+    // Dummy class -- a prepared model must not be nullptr.
+    class PartitioningPreparedModel : public IPreparedModel {
+    public:
+        Return<ErrorStatus> execute(const Request&,
+                                    const sp<IExecutionCallback>&) override {
+            return ErrorStatus::DEVICE_UNAVAILABLE;
+        }
+    };
 public:
     enum OEM { OEMNo, OEMYes };
 
@@ -233,11 +242,12 @@ public:
             mOperationMask(operationMask), mOEM(oem) {}
     ~PartitioningDriver() override {}
 
-    Return<ErrorStatus> prepareModel_1_1(const Model&,
+    Return<ErrorStatus> prepareModel_1_1(const Model&, ExecutionPreference,
                                          const sp<IPreparedModelCallback>& cb) override {
-        cb->notify(ErrorStatus::NONE, nullptr);
+        cb->notify(ErrorStatus::NONE, new PartitioningPreparedModel);
         return ErrorStatus::NONE;
     }
+
     Return<DeviceStatus> getStatus() override {
         return DeviceStatus::AVAILABLE;
     }
@@ -246,6 +256,7 @@ public:
         cb(ErrorStatus::NONE, mCapabilities);
         return Void();
     }
+
     Return<void> getSupportedOperations_1_1(const Model& model,
                                             getSupportedOperations_cb cb) override {
         if (!android::nn::validateModel(model)) {
@@ -269,6 +280,7 @@ public:
         cb(ErrorStatus::NONE, supported);
         return Void();
     }
+
 private:
     Capabilities mCapabilities;
     uint32_t mOperationMask;
