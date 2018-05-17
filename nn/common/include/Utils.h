@@ -69,6 +69,12 @@ enum VLogFlags {
 extern int vLogMask;
 void initVLogMask();
 
+#ifdef NN_DEBUGGABLE
+#define SHOW_IF_DEBUG(msg) msg
+#else
+#define SHOW_IF_DEBUG(msg) ""
+#endif
+
 // Assert macro, as Android does not generally support assert.
 #define nnAssert(v)                                                                            \
     do {                                                                                       \
@@ -142,6 +148,13 @@ inline size_t getSizeFromInts(int lower, int higher) {
     return (uint32_t)(lower) + ((uint64_t)(uint32_t)(higher) << 32);
 }
 
+// Convert ANEURALNETWORKS_* result code to ErrorStatus.
+// Not guaranteed to be a 1-to-1 mapping.
+ErrorStatus convertResultCodeToErrorStatus(int resultCode);
+
+// Convert ErrorStatus to ANEURALNETWORKS_* result code.
+// Not guaranteed to be a 1-to-1 mapping.
+int convertErrorStatusToResultCode(ErrorStatus status);
 
 // Versioning
 

@@ -29,6 +29,7 @@
 #include "Memory.h"
 #include "NeuralNetworksOEM.h"
 #include "ModelBuilder.h"
+#include "Utils.h"
 
 #include <memory>
 #include <vector>
@@ -275,7 +276,7 @@ int ANeuralNetworksModel_create(ANeuralNetworksModel** model) {
         LOG(ERROR) << "ANeuralNetworksModel_create passed a nullptr";
         return ANEURALNETWORKS_UNEXPECTED_NULL;
     }
-    ModelBuilder* m = new ModelBuilder();
+    ModelBuilder* m = new (std::nothrow) ModelBuilder();
     if (m == nullptr) {
         *model = nullptr;
         return ANEURALNETWORKS_OUT_OF_MEMORY;
@@ -510,14 +511,7 @@ int ANeuralNetworksEvent_wait(ANeuralNetworksEvent* event) {
 
     sp<ExecutionCallback>* e = reinterpret_cast<sp<ExecutionCallback>*>(event);
     (*e)->wait();
-    switch ((*e)->getStatus()) {
-        case ErrorStatus::NONE:
-            return ANEURALNETWORKS_NO_ERROR;
-        case ErrorStatus::INVALID_ARGUMENT:
-            return ANEURALNETWORKS_BAD_DATA;
-        default:
-            return ANEURALNETWORKS_OP_FAILED;
-    }
+    return convertErrorStatusToResultCode((*e)->getStatus());
 }
 
 void ANeuralNetworksEvent_free(ANeuralNetworksEvent* event) {

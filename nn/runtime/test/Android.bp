@@ -26,6 +26,7 @@ cc_defaults {
         "TestMemory.cpp",
         "TestMemoryInternal.cpp",
         "TestTrivialModel.cpp",
+        "TestUnknownDimensions.cpp",
         "TestValidateOperations.cpp",
         "TestValidation.cpp",
         "TestWrapper.cpp",
@@ -58,7 +59,10 @@ cc_test {
     name: "NeuralNetworksTest_shared_partial",
     defaults: ["NeuralNetworksTest_defaults"],
     srcs: [
-        "TestMainPartial.cpp",
+        "TestMain.cpp",
+    ],
+    cflags: [
+        "-DNNTEST_ONLY_PUBLIC_API"
     ],
     shared_libs: [
         "libneuralnetworks",
