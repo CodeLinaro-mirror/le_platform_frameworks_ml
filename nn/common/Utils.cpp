@@ -268,7 +268,7 @@ void logModelToInfo(const V1_0::Model& model) {
     LOG(INFO) << "inputIndexes" << toString(model.inputIndexes);
     LOG(INFO) << "outputIndexes" << toString(model.outputIndexes);
     LOG(INFO) << "operandValues size" << model.operandValues.size();
-    LOG(INFO) << "pools" << toString(model.pools);
+    LOG(INFO) << "pools" << SHOW_IF_DEBUG(toString(model.pools));
 }
 
 void logModelToInfo(const V1_1::Model& model) {
@@ -278,7 +278,7 @@ void logModelToInfo(const V1_1::Model& model) {
     LOG(INFO) << "inputIndexes" << toString(model.inputIndexes);
     LOG(INFO) << "outputIndexes" << toString(model.outputIndexes);
     LOG(INFO) << "operandValues size" << model.operandValues.size();
-    LOG(INFO) << "pools" << toString(model.pools);
+    LOG(INFO) << "pools" << SHOW_IF_DEBUG(toString(model.pools));
 }
 
 // Validates the type. The used dimensions can be underspecified.
@@ -302,7 +302,7 @@ int validateOperandType(const ANeuralNetworksOperandType& type, const char* tag,
             LOG(ERROR) << tag << " OperandType invalid zeroPoint " << type.zeroPoint;
             return ANEURALNETWORKS_BAD_DATA;
         }
-        if (type.scale < 0.f) {
+        if (type.scale <= 0.f) {
             LOG(ERROR) << tag << " OperandType invalid scale " << type.scale;
             return ANEURALNETWORKS_BAD_DATA;
         }
@@ -1451,6 +1451,45 @@ int validateOperation(ANeuralNetworksOperationType opType,
     }
 }
 
+ErrorStatus convertResultCodeToErrorStatus(int resultCode) {
+    switch (resultCode) {
+        case ANEURALNETWORKS_NO_ERROR:
+            return ErrorStatus::NONE;
+
+        case ANEURALNETWORKS_BAD_DATA:
+        case ANEURALNETWORKS_UNEXPECTED_NULL:
+            return ErrorStatus::INVALID_ARGUMENT;
+
+        default:
+            LOG(ERROR) << "Unknown result code " << resultCode
+                       << " mapped to ErrorStatus::GENERAL_FAILURE";
+        case ANEURALNETWORKS_BAD_STATE:
+        case ANEURALNETWORKS_INCOMPLETE:
+        case ANEURALNETWORKS_OP_FAILED:
+        case ANEURALNETWORKS_OUT_OF_MEMORY:
+        case ANEURALNETWORKS_UNMAPPABLE:
+            return ErrorStatus::GENERAL_FAILURE;
+    }
+}
+
+int convertErrorStatusToResultCode(ErrorStatus status) {
+    switch (status) {
+        case ErrorStatus::NONE:
+            return ANEURALNETWORKS_NO_ERROR;
+
+        case ErrorStatus::INVALID_ARGUMENT:
+            return ANEURALNETWORKS_BAD_DATA;
+
+        default:
+            LOG(ERROR) << "Unknown ErrorStatus " << toString(status)
+                       << " mapped to ANEURALNETWORKS_OP_FAILED";
+        case ErrorStatus::DEVICE_UNAVAILABLE:
+        case ErrorStatus::GENERAL_FAILURE:
+        case ErrorStatus::OUTPUT_INSUFFICIENT_SIZE:
+            return ANEURALNETWORKS_OP_FAILED;
+    }
+}
+
 // Versioning
 
 bool compliantWithV1_0(V1_0::OperationType) {
@@ -1656,7 +1695,7 @@ V1_0::Model convertToV1_0(const V1_0::Model& model) {
 
 V1_0::Model convertToV1_0(const V1_1::Model& model) {
     if (!compliantWithV1_0(model)) {
-        LOG(ERROR) << "Upcasting non-compliant model " << toString(model)
+        LOG(ERROR) << "Upcasting non-compliant model " << SHOW_IF_DEBUG(toString(model))
                    << " from V1_1::Model to V1_0::Model";
     }
     return {.operands = model.operands,
