@@ -18,9 +18,15 @@
 #include "CpuOperationUtils.h"
 
 #include "tensorflow/contrib/lite/kernels/internal/optimized/optimized_ops.h"
+#include "tensorflow/contrib/lite/kernels/internal/reference/reference_ops.h"
 
 namespace android {
 namespace nn {
+
+// executionMutex is used to protect concurrent access of non-threadsafe resources
+// like gemmlowp::GemmContext.
+// std::mutex is safe for pthreads on Android.
+static std::mutex executionMutex;
 
 bool fullyConnectedFloat32(const float* inputData, const Shape& inputShape,
                            const float* weightsData, const Shape& weightsShape,
@@ -31,13 +37,25 @@ bool fullyConnectedFloat32(const float* inputData, const Shape& inputShape,
     CalculateActivationRangeFloat(activation, &output_activation_min,
                                   &output_activation_max);
 
-    tflite::optimized_ops::FullyConnected(
-            inputData, convertShapeToDims(inputShape),
-            weightsData, convertShapeToDims(weightsShape),
-            biasData, convertShapeToDims(biasShape),
-            output_activation_min, output_activation_max,
-            outputData, convertShapeToDims(outputShape));
-
+    // b/80425683, optimized implementation produces incorrect results when the
+    // number of input elements is the squre of batch_size.
+    uint32_t batch_size = getSizeOfDimension(outputShape, 0);
+    uint32_t input_n_elements = getNumberOfElements(inputShape);
+    if (batch_size * batch_size == input_n_elements) {
+        tflite::reference_ops::FullyConnected(
+                inputData, convertShapeToDims(inputShape),
+                weightsData, convertShapeToDims(weightsShape),
+                biasData, convertShapeToDims(biasShape),
+                output_activation_min, output_activation_max,
+                outputData, convertShapeToDims(outputShape));
+    } else {
+        tflite::optimized_ops::FullyConnected(
+                inputData, convertShapeToDims(inputShape),
+                weightsData, convertShapeToDims(weightsShape),
+                biasData, convertShapeToDims(biasShape),
+                output_activation_min, output_activation_max,
+                outputData, convertShapeToDims(outputShape));
+    }
     return true;
 }
 
@@ -67,7 +85,10 @@ bool fullyConnectedQuant8(const uint8_t* inputData, const Shape& inputShape,
                                   &output_activation_max);
 
     static gemmlowp::GemmContext gemm_context;
-    // Alow gemmlowp automatcally decide how many threads to use.
+
+    // Prevent concurrent executions that access gemm_context.
+    std::unique_lock<std::mutex> lock(executionMutex);
+    // Alow gemmlowp automatically decide how many threads to use.
     gemm_context.set_max_num_threads(0);
 
     tflite::optimized_ops::FullyConnected(
