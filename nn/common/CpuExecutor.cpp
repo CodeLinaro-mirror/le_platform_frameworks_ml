@@ -20,9 +20,13 @@
 
 #include "NeuralNetworks.h"
 #include "Operations.h"
+#include "Tracing.h"
 
 #include "Eigen/Core"
+// b/109953668, disable OpenMP
+#ifdef NNAPI_OPENMP
 #include <omp.h>
+#endif  // NNAPI_OPENMP
 #include <sys/mman.h>
 
 namespace android {
@@ -34,7 +38,7 @@ RunTimePoolInfo::RunTimePoolInfo(const hidl_memory& hidlMemory, bool* fail) {
     sp<IMemory> memory;
     uint8_t* buffer = nullptr;
 
-    auto memType = hidlMemory.name();
+    const auto& memType = hidlMemory.name();
     if (memType == "ashmem") {
         memory = mapMemory(hidlMemory);
         if (memory == nullptr) {
@@ -189,16 +193,21 @@ static bool setInfoAndAllocateIfNeeded(RunTimeOperandInfo* info, const Shape& sh
 int CpuExecutor::run(const V1_0::Model& model, const Request& request,
                      const std::vector<RunTimePoolInfo>& modelPoolInfos,
                      const std::vector<RunTimePoolInfo>& requestPoolInfos) {
+    NNTRACE_CPU(NNTRACE_PHASE_EXECUTION, "run::V1_0");
     return run(convertToV1_1(model), request, modelPoolInfos, requestPoolInfos);
 }
 
 int CpuExecutor::run(const V1_1::Model& model, const Request& request,
                      const std::vector<RunTimePoolInfo>& modelPoolInfos,
                      const std::vector<RunTimePoolInfo>& requestPoolInfos) {
+    NNTRACE_CPU(NNTRACE_PHASE_EXECUTION, "run::V1_1");
     VLOG(CPUEXE) << "CpuExecutor::run() with request("
                  << SHOW_IF_DEBUG(toString(request)) << ")";
 
+    // b/109953668, disable OpenMP
+#ifdef NNAPI_OPENMP
     ScopedOpenmpSettings openMpSettings;
+#endif  // NNAPI_OPENMP
 
     mModel = &model;
     mRequest = &request; // TODO check if mRequest is needed
@@ -1534,6 +1543,8 @@ int CpuExecutor::executeOperation(const Operation& operation) {
     return ANEURALNETWORKS_NO_ERROR;
 }
 
+// b/109953668, disable OpenMP
+#ifdef NNAPI_OPENMP
 ScopedOpenmpSettings::ScopedOpenmpSettings() {
     mBlocktimeInitial = kmp_get_blocktime();
     kmp_set_blocktime(20);  // ms, see b/109645291
@@ -1559,7 +1570,6 @@ ScopedOpenmpSettings::~ScopedOpenmpSettings() {
     Eigen::setNbThreads(mMaxThreadsInitial);
 #endif
 }
-
-
+#endif  // NNAPI_OPENMP
 } // namespace nn
 } // namespace android
