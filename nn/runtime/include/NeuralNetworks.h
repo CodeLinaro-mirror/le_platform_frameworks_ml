@@ -144,8 +144,10 @@ typedef enum {
      *
      * The values in the output tensor are computed as:
      *
-     *     output[batch, row, col, channel] =
-     *         sum_{i, j}(input[batch, row + i, col + j, channel]) / sum(1)
+     *     output[b, i, j, channel] =
+     *         sum_{di, dj}(
+     *             input[b, strides[1] * i + di, strides[2] * j + dj, channel]
+     *         ) / sum(1)
      *
      * Supported tensor {@link OperandCode}:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
@@ -245,12 +247,11 @@ typedef enum {
      *
      * The values in the output tensor are computed as:
      *
-     *     output[batch, row, col, channel] =
-     *         sum_{i, j} (
-     *             input[batch, row + i, col + j, k] *
-     *             filter[channel, row + i, col + j, k] +
-     *             bias[channel]
-     *         )
+     *     output[b, i, j, channel] =
+     *         sum_{di, dj, k} (
+     *             input[b, strides[1] * i + di, strides[2] * j + dj, k] *
+     *             filter[channel, di, dj, k]
+     *         ) + bias[channel]
      *
      * Supported tensor {@link OperandCode}:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
@@ -341,7 +342,7 @@ typedef enum {
      *         sum_{di, dj} (
      *             input[b, strides[1] * i + di, strides[2] * j + dj, k] *
      *             filter[1, di, dj, k * channel_multiplier + q]
-     *         )
+     *         ) + bias[k * channel_multiplier + q]
      *
      * Supported tensor {@link OperandCode}:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
@@ -659,8 +660,8 @@ typedef enum {
      *
      * The values in the output tensor are computed as:
      *
-     *     output[batch, row, col, channel] =
-     *         sqrt(sum_{i, j} pow(input[batch, row + i, col + j, channel], 2) /
+     *     output[b, i, j, c] =
+     *         sqrt(sum_{di, dj} pow(input[b, strides[1] * i + di, strides[2] * j + dj, c], 2) /
      *              sum(1))
      *
      * Supported tensor {@link OperandCode}:
@@ -1023,8 +1024,10 @@ typedef enum {
      *
      * The values in the output tensor are computed as:
      *
-     *     output[batch, row, col, channel] =
-     *         max_{i, j} (input[batch, row + i, col + j, channel])
+     *     output[b, i, j, channel] =
+     *         max_{di, dj} (
+     *             input[b, strides[1] * i + di, strides[2] * j + dj, channel]
+     *         )
      *
      * Supported tensor {@link OperandCode}:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
@@ -1823,7 +1826,7 @@ typedef enum {
      * It could be computed as follows:
      *    out_size = (input + stride - 1) / stride;
      *    needed_input = (out_size - 1) * stride + filter_size
-     *    total_padding = max(0, needed_input - output_size)
+     *    total_padding = max(0, needed_input - input_size)
      *  The computation is the same for the horizontal and vertical directions.
      */
     ANEURALNETWORKS_PADDING_SAME = 1,
@@ -2125,6 +2128,7 @@ typedef int32_t ANeuralNetworksOperationType;
  */
 typedef struct ANeuralNetworksEvent ANeuralNetworksEvent;
 
+#if __ANDROID_API__ >= 27
 
 /**
  * Creates a shared memory object from a file descriptor.
@@ -2402,6 +2406,8 @@ int ANeuralNetworksModel_identifyInputsAndOutputs(ANeuralNetworksModel* model, u
                                                   const uint32_t* inputs, uint32_t outputCount,
                                                   const uint32_t* outputs) __INTRODUCED_IN(27);
 
+#if __ANDROID_API__ >= 28
+
 /**
  * Specifies whether {@link ANEURALNETWORKS_TENSOR_FLOAT32} is allowed to be
  * calculated with range and/or precision as low as that of the IEEE 754 16-bit
@@ -2425,6 +2431,8 @@ int ANeuralNetworksModel_identifyInputsAndOutputs(ANeuralNetworksModel* model, u
  * See {@link ANeuralNetworksModel} for information on multithreaded usage.
  */
 int ANeuralNetworksModel_relaxComputationFloat32toFloat16(ANeuralNetworksModel* model, bool allow) __INTRODUCED_IN(28);
+
+#endif  // __ANDROID_API__ >= 28
 
 /**
  * Create a {@link ANeuralNetworksCompilation} to compile the given model.
@@ -2759,6 +2767,8 @@ int ANeuralNetworksEvent_wait(ANeuralNetworksEvent* event) __INTRODUCED_IN(27);
  * Available since API level 27.
  */
 void ANeuralNetworksEvent_free(ANeuralNetworksEvent* event) __INTRODUCED_IN(27);
+
+#endif  // __ANDROID_API__ >= 27
 
 __END_DECLS
 
