@@ -17,7 +17,7 @@
 #include "Operations.h"
 #include "CpuOperationUtils.h"
 
-#include "tensorflow/contrib/lite/kernels/internal/optimized/optimized_ops.h"
+#include "tensorflow/contrib/lite/kernels/internal/optimized/legacy_optimized_ops.h"
 
 #include "Tracing.h"
 
@@ -164,10 +164,10 @@ bool logisticQuant8(const uint8_t* inputData, const Shape& inputShape,
 
     NNTRACE_COMP_SWITCH("optimized_ops::Logistic");
     tflite::optimized_ops::Logistic(
-            inputData, convertShapeToDims(inputShape),
+            inputData, convertShapeToTflshape(inputShape),
             inputShape.offset, input_range_radius,
             input_multiplier, input_left_shift,
-            outputData, convertShapeToDims(outputShape));
+            outputData, convertShapeToTflshape(outputShape));
 
     return true;
 }
