@@ -37,11 +37,16 @@ public:
     SampleDriver(const char* name) : mName(name) {}
     ~SampleDriver() override {}
     Return<void> getCapabilities(getCapabilities_cb cb) override;
+    Return<void> getVersionString(getVersionString_cb cb) override;
     Return<void> getSupportedOperations(const V1_0::Model& model,
                                         getSupportedOperations_cb cb) override;
+    Return<void> getSupportedOperations_1_1(const V1_1::Model& model,
+                                            getSupportedOperations_1_1_cb cb) override;
     Return<ErrorStatus> prepareModel(const V1_0::Model& model,
                                      const sp<IPreparedModelCallback>& callback) override;
     Return<ErrorStatus> prepareModel_1_1(const V1_1::Model& model, ExecutionPreference preference,
+                                         const sp<IPreparedModelCallback>& callback) override;
+    Return<ErrorStatus> prepareModel_1_2(const V1_2::Model& model, ExecutionPreference preference,
                                          const sp<IPreparedModelCallback>& callback) override;
     Return<DeviceStatus> getStatus() override;
 

@@ -62,14 +62,27 @@ bool SetShape(const Shape& in, Shape* out);
 // Return the total number of elements, i.e. all the dimensions multiplied
 // together. For a scalar, returns one.
 uint32_t getNumberOfElements(const Shape& shape);
+uint32_t getNumberOfElements(const Shape& shape,
+                             size_t firstAxisInclusive,
+                             size_t lastAxisExclusive);
 
 uint32_t getNumberOfDimensions(const Shape& shape);
 
 uint32_t getSizeOfDimension(const Shape& shape, uint32_t dimensionIdx);
 
+// Converts an axis index from the range [-dims, dims) into the range [0, dims).
+int32_t getDimensionIndex(const Shape& shape, int32_t axis);
+int32_t getDimensionIndex(int32_t numberOfDimensions, int32_t axis);
+
 inline uint32_t computeOutSize(uint32_t imageSize, uint32_t filterSize, uint32_t stride,
                                uint32_t paddingHead, uint32_t paddingTail) {
     return (imageSize - filterSize + stride + paddingHead + paddingTail) / stride;
+}
+
+inline uint32_t computeOutSizeTransposeConv(uint32_t imageSize, uint32_t filterSize,
+                                            uint32_t stride, uint32_t paddingHead,
+                                            uint32_t paddingTail) {
+    return imageSize * stride + filterSize - stride - paddingHead - paddingTail;
 }
 
 __wur
@@ -279,6 +292,29 @@ bool stridedSlicePrepare(const Shape& input,
                          const int32_t* stridesData, const Shape& stridesShape,
                          int32_t beginMask, int32_t endMask, int32_t shrinkAxisMask,
                          Shape* output);
+
+bool argMinMaxPrepare(const Shape& input, int32_t axis, Shape* output);
+
+bool splitPrepare(const Shape& input, int32_t axis, int32_t numOutputs, std::vector<Shape>* output);
+
+bool roiAlignPrepare(const Shape& input, const float* roiData, const Shape& roiShape,
+                     const int32_t* outputShapeData, const Shape& outputShapeShape,
+                     const float spatialScale, Shape* output);
+
+bool heatmapMaxKeypointPrepare(const Shape& heatmapShape, const float* boxesData,
+                               const Shape& boxesShape, Shape* output);
+
+bool groupedConvPrepare(const Shape& input, const Shape& filter, const Shape& bias,
+                        int32_t padding_left, int32_t padding_right, int32_t padding_top,
+                        int32_t padding_bottom, int32_t stride_width, int32_t stride_height,
+                        int32_t numGroups, Shape* output);
+
+bool channelShufflePrepare(const Shape& input, int32_t numGroups, Shape* output);
+
+bool transposeConvPrepare(const Shape& input, const Shape& filter, const Shape& bias,
+                          int32_t padding_left, int32_t padding_right, int32_t padding_top,
+                          int32_t padding_bottom, int32_t stride_width, int32_t stride_height,
+                          Shape* output);
 } // namespace nn
 } // namespace android
 
