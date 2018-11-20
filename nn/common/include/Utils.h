@@ -31,7 +31,7 @@ namespace nn {
 const int kNumberOfDataTypes = 9;
 
 // The number of operation types (OperationCode) defined in NeuralNetworks.h.
-const int kNumberOfOperationTypes = 88;
+const int kNumberOfOperationTypes = 90;
 
 // The number of execution preferences defined in NeuralNetworks.h.
 const int kNumberOfPreferences = 3;
@@ -76,14 +76,15 @@ void initVLogMask();
 #define SHOW_IF_DEBUG(msg) ""
 #endif
 
-// Assert macro, as Android does not generally support assert.
-#define nnAssert(v)                                                                            \
-    do {                                                                                       \
-        if (!(v)) {                                                                            \
-            LOG(ERROR) << "nnAssert failed at " << __FILE__ << ":" << __LINE__ << " - '" << #v \
-                       << "'\n";                                                               \
-            abort();                                                                           \
-        }                                                                                      \
+// DEPRECATED(b/118737105). Use CHECK.
+#define nnAssert(v) CHECK(v)
+
+#define NN_RETURN_IF_ERROR(expr)                      \
+    do {                                              \
+        int _errorCode = (expr);                      \
+        if (_errorCode != ANEURALNETWORKS_NO_ERROR) { \
+            return _errorCode;                        \
+        }                                             \
     } while (0)
 
 // Returns the amount of space needed to store a value of the specified
@@ -134,6 +135,19 @@ std::string toString(const std::vector<Type>& range) {
     return os += "]";
 }
 
+inline std::string toString(HalVersion halVersion) {
+    switch (halVersion) {
+        case HalVersion::UNKNOWN:
+            return "UNKNOWN HAL version";
+        case HalVersion::V1_0:
+            return "HAL version 1.0";
+        case HalVersion::V1_1:
+            return "HAL version 1.1";
+        case HalVersion::V1_2:
+            return "HAL version 1.2";
+    }
+}
+
 inline bool validCode(uint32_t codeCount, uint32_t codeCountOEM, uint32_t code) {
     return (code < codeCount) || (code >= kOEMCodeBase && (code - kOEMCodeBase) < codeCountOEM);
 }
@@ -141,19 +155,12 @@ inline bool validCode(uint32_t codeCount, uint32_t codeCountOEM, uint32_t code) 
 int validateOperandType(const ANeuralNetworksOperandType& type, const char* tag, bool allowPartial);
 int validateOperandList(uint32_t count, const uint32_t* list, uint32_t operandCount,
                         const char* tag);
-// Typename substitutes are contained in the cpp file.
+// Returns ANEURALNETWORKS_NO_ERROR if the corresponding operation is defined and can handle the
+// provided operand types in the given HAL version, otherwise returns ANEURALNETWORKS_BAD_DATA.
 int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
                       const uint32_t* inputIndexes, uint32_t outputCount,
                       const uint32_t* outputIndexes, const std::vector<Operand>& operands,
-                      HalVersion* minSupportedHalVersion);
-
-inline int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
-                             const uint32_t* inputIndexes, uint32_t outputCount,
-                             const uint32_t* outputIndexes, const std::vector<Operand>& operands) {
-    HalVersion minSupportedHalVersion;
-    return validateOperation(opType, inputCount, inputIndexes, outputCount, outputIndexes, operands,
-                             &minSupportedHalVersion);
-}
+                      HalVersion halVersion);
 
 inline size_t getSizeFromInts(int lower, int higher) {
     return (uint32_t)(lower) + ((uint64_t)(uint32_t)(higher) << 32);

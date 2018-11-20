@@ -242,7 +242,15 @@ TEST_F(NeuralnetworksHidlTest, {test_name}) {{
   generated_tests::Execute(device,
                            {namespace}::{create_model_name},
                            {namespace}::{is_ignored_name},
-                           {namespace}::{examples_name});\n}}\n"""
+                           {namespace}::{examples_name});\n}}
+
+TEST_F(ValidationTest, {test_name}) {{
+  const Model model = {namespace}::{create_model_name}();
+  const std::vector<Request> requests = createRequests({namespace}::{examples_name});
+  validateModel(model);
+  validateRequests(model, requests);
+}}\n
+"""
     print(testTemplate.format(
         test_name=str(example.testName),
         namespace=tg.FileNames.specName,
@@ -274,6 +282,7 @@ namespace {spec_name} {{
 if __name__ == "__main__":
     ParseCmdLine()
     while tg.FileNames.NextFile():
+        print("Generating test(s) from spec: %s" % tg.FileNames.specFile, file=sys.stderr)
         exec (open(tg.FileNames.specFile, "r").read())
         print("Output VTS model: %s" % tg.FileNames.modelFile, file=sys.stderr)
         print("Output example:" + tg.FileNames.exampleFile, file=sys.stderr)
