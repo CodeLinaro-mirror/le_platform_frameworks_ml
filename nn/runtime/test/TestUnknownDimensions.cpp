@@ -77,29 +77,27 @@ auto ioValues = Combine(ioDimensionValues, ioDimensionValues);
 auto constantValues = Combine(constantDimensionValues, constantDimensionValues);
 
 class UnknownDimensionsTest : public ::testing::TestWithParam<OperandParams> {
-protected:
-    template<class T, Type TensorType> void TestOne(
-            const OperandParams& paramsForInput0, const OperandParams& paramsForInput1,
-            const OperandParams& paramsForConst, const OperandParams& paramsForOutput);
-    template<class T, Type TensorType> void TestAll();
-    void CompareResults(std::map<int, std::vector<float>>& expected,
-                        std::map<int, std::vector<float>>& actual);
-    void CompareResults(std::map<int, std::vector<uint8_t>>& expected,
-                        std::map<int, std::vector<uint8_t>>& actual);
+   protected:
+    template <class T, Type TensorType>
+    void TestOne(const OperandParams& paramsForInput0, const OperandParams& paramsForInput1,
+                 const OperandParams& paramsForConst, const OperandParams& paramsForOutput);
+    template <class T, Type TensorType>
+    void TestAll();
+
+    template <typename T>
+    void CompareResults(std::map<int, std::vector<T>>& expected,
+                        std::map<int, std::vector<T>>& actual);
 };
 
-void UnknownDimensionsTest::CompareResults(
-        std::map<int, std::vector<uint8_t>>& expected,
-        std::map<int, std::vector<uint8_t>>& actual) {
+template <typename T>
+void UnknownDimensionsTest::CompareResults(std::map<int, std::vector<T>>& expected,
+                                           std::map<int, std::vector<T>>& actual) {
     // Uint8_t operands last in MixedType
-    compare(MixedTyped{ {}, {}, expected }, MixedTyped{ {}, {}, actual });
-}
-
-void UnknownDimensionsTest::CompareResults(
-        std::map<int, std::vector<float>>& expected,
-        std::map<int, std::vector<float>>& actual) {
-    // Float operands first in MixedType
-    compare(MixedTyped{ expected, {}, {} }, MixedTyped{ actual, {}, {} });
+    MixedTyped expectedMixedTyped;
+    std::get<MixedTypedIndex<T>::index>(expectedMixedTyped) = expected;
+    MixedTyped actualMixedTyped;
+    std::get<MixedTypedIndex<T>::index>(actualMixedTyped) = actual;
+    compare(expectedMixedTyped, actualMixedTyped);
 }
 
 template<class T, Type TensorType> void UnknownDimensionsTest::TestOne(
@@ -280,6 +278,10 @@ TEST_P(UnknownDimensionsTest, Float) {
 
 TEST_P(UnknownDimensionsTest, Quantized) {
     TestAll<uint8_t, Type::TENSOR_QUANT8_ASYMM>();
+}
+
+TEST_P(UnknownDimensionsTest, Float16) {
+    TestAll<_Float16, Type::TENSOR_FLOAT16>();
 }
 
 INSTANTIATE_TEST_CASE_P(UnknownCombinationsTest, UnknownDimensionsTest,
