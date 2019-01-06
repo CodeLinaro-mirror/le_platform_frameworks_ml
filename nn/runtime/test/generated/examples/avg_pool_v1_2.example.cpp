@@ -1,6 +1,7 @@
 // clang-format off
 // Generated file (from: avg_pool_v1_2.mod.py). Do not edit
-std::vector<MixedTypedExample> examples_nhwc = {
+std::vector<MixedTypedExample>& get_examples_nhwc() {
+static std::vector<MixedTypedExample> examples_nhwc = {
 // Begin of an example
 {
 .operands = {
@@ -33,8 +34,11 @@ std::vector<MixedTypedExample> examples_nhwc = {
 },
 }, // End of an example
 };
+return examples_nhwc;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_relaxed = {
+std::vector<MixedTypedExample>& get_examples_nhwc_relaxed() {
+static std::vector<MixedTypedExample> examples_nhwc_relaxed = {
 // Begin of an example
 {
 .operands = {
@@ -67,110 +71,11 @@ std::vector<MixedTypedExample> examples_nhwc_relaxed = {
 },
 }, // End of an example
 };
-
-std::vector<MixedTypedExample> examples_nhwc_quant8 = {
-// Begin of an example
-{
-.operands = {
-//Input(s)
-{ // See tools/test_generator/include/TestHarness.h:MixedTyped
-  // int -> FLOAT32 map
-  {},
-  // int -> INT32 map
-  {},
-  // int -> QUANT8_ASYMM map
-  {{0, {2, 4, 6, 8}}},
-  // int -> QUANT16_SYMM map
-  {},
-  // int -> FLOAT16 map
-  {},
-},
-//Output(s)
-{ // See tools/test_generator/include/TestHarness.h:MixedTyped
-  // int -> FLOAT32 map
-  {},
-  // int -> INT32 map
-  {},
-  // int -> QUANT8_ASYMM map
-  {{0, {2, 4, 6, 8}}},
-  // int -> QUANT16_SYMM map
-  {},
-  // int -> FLOAT16 map
-  {},
-}
-},
-}, // End of an example
+return examples_nhwc_relaxed;
 };
 
-std::vector<MixedTypedExample> examples_nchw = {
-// Begin of an example
-{
-.operands = {
-//Input(s)
-{ // See tools/test_generator/include/TestHarness.h:MixedTyped
-  // int -> FLOAT32 map
-  {{0, {1.0f, 2.0f, 3.0f, 4.0f}}},
-  // int -> INT32 map
-  {},
-  // int -> QUANT8_ASYMM map
-  {},
-  // int -> QUANT16_SYMM map
-  {},
-  // int -> FLOAT16 map
-  {},
-},
-//Output(s)
-{ // See tools/test_generator/include/TestHarness.h:MixedTyped
-  // int -> FLOAT32 map
-  {{0, {1.0f, 2.0f, 3.0f, 4.0f}}},
-  // int -> INT32 map
-  {},
-  // int -> QUANT8_ASYMM map
-  {},
-  // int -> QUANT16_SYMM map
-  {},
-  // int -> FLOAT16 map
-  {},
-}
-},
-}, // End of an example
-};
-
-std::vector<MixedTypedExample> examples_nchw_relaxed = {
-// Begin of an example
-{
-.operands = {
-//Input(s)
-{ // See tools/test_generator/include/TestHarness.h:MixedTyped
-  // int -> FLOAT32 map
-  {{0, {1.0f, 2.0f, 3.0f, 4.0f}}},
-  // int -> INT32 map
-  {},
-  // int -> QUANT8_ASYMM map
-  {},
-  // int -> QUANT16_SYMM map
-  {},
-  // int -> FLOAT16 map
-  {},
-},
-//Output(s)
-{ // See tools/test_generator/include/TestHarness.h:MixedTyped
-  // int -> FLOAT32 map
-  {{0, {1.0f, 2.0f, 3.0f, 4.0f}}},
-  // int -> INT32 map
-  {},
-  // int -> QUANT8_ASYMM map
-  {},
-  // int -> QUANT16_SYMM map
-  {},
-  // int -> FLOAT16 map
-  {},
-}
-},
-}, // End of an example
-};
-
-std::vector<MixedTypedExample> examples_nchw_quant8 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_quant8() {
+static std::vector<MixedTypedExample> examples_nhwc_quant8 = {
 // Begin of an example
 {
 .operands = {
@@ -203,8 +108,122 @@ std::vector<MixedTypedExample> examples_nchw_quant8 = {
 },
 }, // End of an example
 };
+return examples_nhwc_quant8;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_2 = {
+std::vector<MixedTypedExample>& get_examples_nchw() {
+static std::vector<MixedTypedExample> examples_nchw = {
+// Begin of an example
+{
+.operands = {
+//Input(s)
+{ // See tools/test_generator/include/TestHarness.h:MixedTyped
+  // int -> FLOAT32 map
+  {{0, {1.0f, 2.0f, 3.0f, 4.0f}}},
+  // int -> INT32 map
+  {},
+  // int -> QUANT8_ASYMM map
+  {},
+  // int -> QUANT16_SYMM map
+  {},
+  // int -> FLOAT16 map
+  {},
+},
+//Output(s)
+{ // See tools/test_generator/include/TestHarness.h:MixedTyped
+  // int -> FLOAT32 map
+  {{0, {1.0f, 2.0f, 3.0f, 4.0f}}},
+  // int -> INT32 map
+  {},
+  // int -> QUANT8_ASYMM map
+  {},
+  // int -> QUANT16_SYMM map
+  {},
+  // int -> FLOAT16 map
+  {},
+}
+},
+}, // End of an example
+};
+return examples_nchw;
+};
+
+std::vector<MixedTypedExample>& get_examples_nchw_relaxed() {
+static std::vector<MixedTypedExample> examples_nchw_relaxed = {
+// Begin of an example
+{
+.operands = {
+//Input(s)
+{ // See tools/test_generator/include/TestHarness.h:MixedTyped
+  // int -> FLOAT32 map
+  {{0, {1.0f, 2.0f, 3.0f, 4.0f}}},
+  // int -> INT32 map
+  {},
+  // int -> QUANT8_ASYMM map
+  {},
+  // int -> QUANT16_SYMM map
+  {},
+  // int -> FLOAT16 map
+  {},
+},
+//Output(s)
+{ // See tools/test_generator/include/TestHarness.h:MixedTyped
+  // int -> FLOAT32 map
+  {{0, {1.0f, 2.0f, 3.0f, 4.0f}}},
+  // int -> INT32 map
+  {},
+  // int -> QUANT8_ASYMM map
+  {},
+  // int -> QUANT16_SYMM map
+  {},
+  // int -> FLOAT16 map
+  {},
+}
+},
+}, // End of an example
+};
+return examples_nchw_relaxed;
+};
+
+std::vector<MixedTypedExample>& get_examples_nchw_quant8() {
+static std::vector<MixedTypedExample> examples_nchw_quant8 = {
+// Begin of an example
+{
+.operands = {
+//Input(s)
+{ // See tools/test_generator/include/TestHarness.h:MixedTyped
+  // int -> FLOAT32 map
+  {},
+  // int -> INT32 map
+  {},
+  // int -> QUANT8_ASYMM map
+  {{0, {2, 4, 6, 8}}},
+  // int -> QUANT16_SYMM map
+  {},
+  // int -> FLOAT16 map
+  {},
+},
+//Output(s)
+{ // See tools/test_generator/include/TestHarness.h:MixedTyped
+  // int -> FLOAT32 map
+  {},
+  // int -> INT32 map
+  {},
+  // int -> QUANT8_ASYMM map
+  {{0, {2, 4, 6, 8}}},
+  // int -> QUANT16_SYMM map
+  {},
+  // int -> FLOAT16 map
+  {},
+}
+},
+}, // End of an example
+};
+return examples_nchw_quant8;
+};
+
+std::vector<MixedTypedExample>& get_examples_nhwc_2() {
+static std::vector<MixedTypedExample> examples_nhwc_2 = {
 // Begin of an example
 {
 .operands = {
@@ -237,8 +256,11 @@ std::vector<MixedTypedExample> examples_nhwc_2 = {
 },
 }, // End of an example
 };
+return examples_nhwc_2;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_relaxed_2 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_relaxed_2() {
+static std::vector<MixedTypedExample> examples_nhwc_relaxed_2 = {
 // Begin of an example
 {
 .operands = {
@@ -271,8 +293,11 @@ std::vector<MixedTypedExample> examples_nhwc_relaxed_2 = {
 },
 }, // End of an example
 };
+return examples_nhwc_relaxed_2;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_quant8_2 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_quant8_2() {
+static std::vector<MixedTypedExample> examples_nhwc_quant8_2 = {
 // Begin of an example
 {
 .operands = {
@@ -305,8 +330,11 @@ std::vector<MixedTypedExample> examples_nhwc_quant8_2 = {
 },
 }, // End of an example
 };
+return examples_nhwc_quant8_2;
+};
 
-std::vector<MixedTypedExample> examples_nchw_2 = {
+std::vector<MixedTypedExample>& get_examples_nchw_2() {
+static std::vector<MixedTypedExample> examples_nchw_2 = {
 // Begin of an example
 {
 .operands = {
@@ -339,8 +367,11 @@ std::vector<MixedTypedExample> examples_nchw_2 = {
 },
 }, // End of an example
 };
+return examples_nchw_2;
+};
 
-std::vector<MixedTypedExample> examples_nchw_relaxed_2 = {
+std::vector<MixedTypedExample>& get_examples_nchw_relaxed_2() {
+static std::vector<MixedTypedExample> examples_nchw_relaxed_2 = {
 // Begin of an example
 {
 .operands = {
@@ -373,8 +404,11 @@ std::vector<MixedTypedExample> examples_nchw_relaxed_2 = {
 },
 }, // End of an example
 };
+return examples_nchw_relaxed_2;
+};
 
-std::vector<MixedTypedExample> examples_nchw_quant8_2 = {
+std::vector<MixedTypedExample>& get_examples_nchw_quant8_2() {
+static std::vector<MixedTypedExample> examples_nchw_quant8_2 = {
 // Begin of an example
 {
 .operands = {
@@ -407,8 +441,11 @@ std::vector<MixedTypedExample> examples_nchw_quant8_2 = {
 },
 }, // End of an example
 };
+return examples_nchw_quant8_2;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_3 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_3() {
+static std::vector<MixedTypedExample> examples_nhwc_3 = {
 // Begin of an example
 {
 .operands = {
@@ -441,8 +478,11 @@ std::vector<MixedTypedExample> examples_nhwc_3 = {
 },
 }, // End of an example
 };
+return examples_nhwc_3;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_relaxed_3 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_relaxed_3() {
+static std::vector<MixedTypedExample> examples_nhwc_relaxed_3 = {
 // Begin of an example
 {
 .operands = {
@@ -475,8 +515,11 @@ std::vector<MixedTypedExample> examples_nhwc_relaxed_3 = {
 },
 }, // End of an example
 };
+return examples_nhwc_relaxed_3;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_quant8_3 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_quant8_3() {
+static std::vector<MixedTypedExample> examples_nhwc_quant8_3 = {
 // Begin of an example
 {
 .operands = {
@@ -509,8 +552,11 @@ std::vector<MixedTypedExample> examples_nhwc_quant8_3 = {
 },
 }, // End of an example
 };
+return examples_nhwc_quant8_3;
+};
 
-std::vector<MixedTypedExample> examples_nchw_3 = {
+std::vector<MixedTypedExample>& get_examples_nchw_3() {
+static std::vector<MixedTypedExample> examples_nchw_3 = {
 // Begin of an example
 {
 .operands = {
@@ -543,8 +589,11 @@ std::vector<MixedTypedExample> examples_nchw_3 = {
 },
 }, // End of an example
 };
+return examples_nchw_3;
+};
 
-std::vector<MixedTypedExample> examples_nchw_relaxed_3 = {
+std::vector<MixedTypedExample>& get_examples_nchw_relaxed_3() {
+static std::vector<MixedTypedExample> examples_nchw_relaxed_3 = {
 // Begin of an example
 {
 .operands = {
@@ -577,8 +626,11 @@ std::vector<MixedTypedExample> examples_nchw_relaxed_3 = {
 },
 }, // End of an example
 };
+return examples_nchw_relaxed_3;
+};
 
-std::vector<MixedTypedExample> examples_nchw_quant8_3 = {
+std::vector<MixedTypedExample>& get_examples_nchw_quant8_3() {
+static std::vector<MixedTypedExample> examples_nchw_quant8_3 = {
 // Begin of an example
 {
 .operands = {
@@ -611,8 +663,11 @@ std::vector<MixedTypedExample> examples_nchw_quant8_3 = {
 },
 }, // End of an example
 };
+return examples_nchw_quant8_3;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_4 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_4() {
+static std::vector<MixedTypedExample> examples_nhwc_4 = {
 // Begin of an example
 {
 .operands = {
@@ -645,8 +700,11 @@ std::vector<MixedTypedExample> examples_nhwc_4 = {
 },
 }, // End of an example
 };
+return examples_nhwc_4;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_relaxed_4 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_relaxed_4() {
+static std::vector<MixedTypedExample> examples_nhwc_relaxed_4 = {
 // Begin of an example
 {
 .operands = {
@@ -679,8 +737,11 @@ std::vector<MixedTypedExample> examples_nhwc_relaxed_4 = {
 },
 }, // End of an example
 };
+return examples_nhwc_relaxed_4;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_quant8_4 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_quant8_4() {
+static std::vector<MixedTypedExample> examples_nhwc_quant8_4 = {
 // Begin of an example
 {
 .operands = {
@@ -713,8 +774,11 @@ std::vector<MixedTypedExample> examples_nhwc_quant8_4 = {
 },
 }, // End of an example
 };
+return examples_nhwc_quant8_4;
+};
 
-std::vector<MixedTypedExample> examples_nchw_4 = {
+std::vector<MixedTypedExample>& get_examples_nchw_4() {
+static std::vector<MixedTypedExample> examples_nchw_4 = {
 // Begin of an example
 {
 .operands = {
@@ -747,8 +811,11 @@ std::vector<MixedTypedExample> examples_nchw_4 = {
 },
 }, // End of an example
 };
+return examples_nchw_4;
+};
 
-std::vector<MixedTypedExample> examples_nchw_relaxed_4 = {
+std::vector<MixedTypedExample>& get_examples_nchw_relaxed_4() {
+static std::vector<MixedTypedExample> examples_nchw_relaxed_4 = {
 // Begin of an example
 {
 .operands = {
@@ -781,8 +848,11 @@ std::vector<MixedTypedExample> examples_nchw_relaxed_4 = {
 },
 }, // End of an example
 };
+return examples_nchw_relaxed_4;
+};
 
-std::vector<MixedTypedExample> examples_nchw_quant8_4 = {
+std::vector<MixedTypedExample>& get_examples_nchw_quant8_4() {
+static std::vector<MixedTypedExample> examples_nchw_quant8_4 = {
 // Begin of an example
 {
 .operands = {
@@ -815,8 +885,11 @@ std::vector<MixedTypedExample> examples_nchw_quant8_4 = {
 },
 }, // End of an example
 };
+return examples_nchw_quant8_4;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_5 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_5() {
+static std::vector<MixedTypedExample> examples_nhwc_5 = {
 // Begin of an example
 {
 .operands = {
@@ -849,8 +922,11 @@ std::vector<MixedTypedExample> examples_nhwc_5 = {
 },
 }, // End of an example
 };
+return examples_nhwc_5;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_relaxed_5 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_relaxed_5() {
+static std::vector<MixedTypedExample> examples_nhwc_relaxed_5 = {
 // Begin of an example
 {
 .operands = {
@@ -883,8 +959,11 @@ std::vector<MixedTypedExample> examples_nhwc_relaxed_5 = {
 },
 }, // End of an example
 };
+return examples_nhwc_relaxed_5;
+};
 
-std::vector<MixedTypedExample> examples_nhwc_quant8_5 = {
+std::vector<MixedTypedExample>& get_examples_nhwc_quant8_5() {
+static std::vector<MixedTypedExample> examples_nhwc_quant8_5 = {
 // Begin of an example
 {
 .operands = {
@@ -917,8 +996,11 @@ std::vector<MixedTypedExample> examples_nhwc_quant8_5 = {
 },
 }, // End of an example
 };
+return examples_nhwc_quant8_5;
+};
 
-std::vector<MixedTypedExample> examples_nchw_5 = {
+std::vector<MixedTypedExample>& get_examples_nchw_5() {
+static std::vector<MixedTypedExample> examples_nchw_5 = {
 // Begin of an example
 {
 .operands = {
@@ -951,8 +1033,11 @@ std::vector<MixedTypedExample> examples_nchw_5 = {
 },
 }, // End of an example
 };
+return examples_nchw_5;
+};
 
-std::vector<MixedTypedExample> examples_nchw_relaxed_5 = {
+std::vector<MixedTypedExample>& get_examples_nchw_relaxed_5() {
+static std::vector<MixedTypedExample> examples_nchw_relaxed_5 = {
 // Begin of an example
 {
 .operands = {
@@ -985,8 +1070,11 @@ std::vector<MixedTypedExample> examples_nchw_relaxed_5 = {
 },
 }, // End of an example
 };
+return examples_nchw_relaxed_5;
+};
 
-std::vector<MixedTypedExample> examples_nchw_quant8_5 = {
+std::vector<MixedTypedExample>& get_examples_nchw_quant8_5() {
+static std::vector<MixedTypedExample> examples_nchw_quant8_5 = {
 // Begin of an example
 {
 .operands = {
@@ -1018,5 +1106,7 @@ std::vector<MixedTypedExample> examples_nchw_quant8_5 = {
 }
 },
 }, // End of an example
+};
+return examples_nchw_quant8_5;
 };
 
