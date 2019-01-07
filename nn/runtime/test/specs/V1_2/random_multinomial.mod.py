@@ -16,7 +16,7 @@
 
 input0 = Input("input0", "TENSOR_FLOAT32", "{1, 1024}")
 sample_count = Int32Scalar("sample_count", 128)
-seeds = Parameter("seeds", "TENSOR_FLOAT32", "{2}", [37, 42])
+seeds = Parameter("seeds", "TENSOR_INT32", "{2}", [37, 42])
 output0 = IgnoredOutput("output", "TENSOR_INT32", "{1, 128}")
 
 model = Model().Operation("RANDOM_MULTINOMIAL", input0, sample_count, seeds).To(output0)

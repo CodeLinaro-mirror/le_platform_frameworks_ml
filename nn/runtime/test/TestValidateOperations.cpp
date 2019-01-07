@@ -18,6 +18,7 @@
 #include "NeuralNetworksOEM.h"
 
 #include <gtest/gtest.h>
+#include <set>
 
 using namespace android::nn::wrapper;
 
@@ -28,6 +29,8 @@ static const int32_t kAvailableOperandCodes[] = {
         ANEURALNETWORKS_UINT32,         ANEURALNETWORKS_TENSOR_FLOAT32,
         ANEURALNETWORKS_TENSOR_INT32,   ANEURALNETWORKS_TENSOR_QUANT8_ASYMM,
         ANEURALNETWORKS_BOOL,           ANEURALNETWORKS_TENSOR_QUANT16_SYMM,
+        ANEURALNETWORKS_TENSOR_FLOAT16, ANEURALNETWORKS_TENSOR_BOOL8,
+        ANEURALNETWORKS_FLOAT16,        ANEURALNETWORKS_TENSOR_QUANT8_SYMM_PER_CHANNEL,
         ANEURALNETWORKS_TENSOR_OEM_BYTE};
 
 ANeuralNetworksOperandType getOpType(int32_t opcode, uint32_t dimCount = 0, uint32_t* dim = nullptr,
@@ -88,8 +91,21 @@ public:
             }
             ANeuralNetworksOperandType newType = mValidInputs[i];
             int32_t originalOperandCode = mValidInputs[i].type;
+            std::set<int32_t> operandTypesToSkip;
+            // SPARSE_TO_DENSE's first two inputs have fixed types. And the
+            // third argument can be both TENSOR_QUANT8_ASYMM and TENSOR_INT32
+            // while having INT32 as the 4th argument. Therefore, we need to
+            // skip one while having another as an input.
+            if (mOpCode == ANEURALNETWORKS_SPARSE_TO_DENSE && i == 2) {
+                if (originalOperandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+                    operandTypesToSkip.insert(ANEURALNETWORKS_TENSOR_INT32);
+                } else if (originalOperandCode == ANEURALNETWORKS_TENSOR_INT32) {
+                    operandTypesToSkip.insert(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+                }
+            }
             for (int32_t newOperandCode : kAvailableOperandCodes) {
-                if (newOperandCode == originalOperandCode) {
+                if (newOperandCode == originalOperandCode ||
+                    operandTypesToSkip.find(newOperandCode) != operandTypesToSkip.end()) {
                     continue;
                 }
                 newType.type = newOperandCode;
@@ -118,6 +134,12 @@ public:
             int32_t originalOperandCode = mValidOutputs[i].type;
             for (int32_t newOperandCode : kAvailableOperandCodes) {
                 if (newOperandCode == originalOperandCode) {
+                    continue;
+                }
+                // DEQUANTIZE's output can be either TENSOR_FLOAT16 or TENSOR_FLOAT32.
+                if (mOpCode == ANEURALNETWORKS_DEQUANTIZE &&
+                    (newOperandCode == ANEURALNETWORKS_TENSOR_FLOAT16 ||
+                     newOperandCode == ANEURALNETWORKS_TENSOR_FLOAT32)) {
                     continue;
                 }
                 newType.type = newOperandCode;
@@ -160,6 +182,26 @@ private:
     std::vector<ANeuralNetworksOperandType> mValidInputs;
     std::vector<ANeuralNetworksOperandType> mValidOutputs;
 };
+
+TEST(OperationValidationTest, DEQUANTIZE_float16) {
+    uint32_t inputDimensions[4] = {2, 2, 2, 2};
+    ANeuralNetworksOperandType input = {.type = ANEURALNETWORKS_TENSOR_QUANT8_ASYMM,
+                                        .dimensionCount = 4,
+                                        .dimensions = inputDimensions,
+                                        .scale = 1.0f,
+                                        .zeroPoint = 0};
+    ANeuralNetworksOperandType output = {.type = ANEURALNETWORKS_TENSOR_FLOAT16,
+                                         .dimensionCount = 4,
+                                         .dimensions = inputDimensions,
+                                         .scale = 0.0f,
+                                         .zeroPoint = 0};
+    OperationTestBase dequantizeTest(ANEURALNETWORKS_DEQUANTIZE, {input}, {output});
+
+    EXPECT_TRUE(dequantizeTest.testMutatingInputOperandCode());
+    EXPECT_TRUE(dequantizeTest.testMutatingInputOperandCounts());
+    EXPECT_TRUE(dequantizeTest.testMutatingOutputOperandCode());
+    EXPECT_TRUE(dequantizeTest.testMutatingOutputOperandCounts());
+}
 
 TEST(OperationValidationTest, DEQUANTIZE_float32) {
     uint32_t inputDimensions[4] = {2, 2, 2, 2};
@@ -236,6 +278,60 @@ TEST(OperationValidationTest, MUL_quant8) {
     simpleMathOpTest(ANEURALNETWORKS_MUL, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
 }
 
+void binaryOpTest(ANeuralNetworksOperationType operationCode, int32_t operandCode) {
+    uint32_t inputDimensions[] = {2, 2, 2, 2, 2};
+    ANeuralNetworksOperandType input1 = {.type = operandCode,
+                                         .dimensionCount = 5,
+                                         .dimensions = inputDimensions,
+                                         .scale = 0.0f,
+                                         .zeroPoint = 0};
+    if (operandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+        input1.scale = 0.5f;
+    }
+
+    ANeuralNetworksOperandType input2 = input1;
+    ANeuralNetworksOperandType output = input1;
+
+    OperationTestBase test(operationCode, {input1, input2}, {output});
+
+    EXPECT_TRUE(test.testMutatingInputOperandCode());
+    EXPECT_TRUE(test.testMutatingInputOperandCounts());
+    EXPECT_TRUE(test.testMutatingOutputOperandCode());
+    EXPECT_TRUE(test.testMutatingOutputOperandCounts());
+}
+
+TEST(OperationValidationTest, MAXIMUM_float16) {
+    binaryOpTest(ANEURALNETWORKS_MAXIMUM, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, MAXIMUM_float32) {
+    binaryOpTest(ANEURALNETWORKS_MAXIMUM, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, MAXIMUM_int32) {
+    binaryOpTest(ANEURALNETWORKS_MAXIMUM, ANEURALNETWORKS_TENSOR_INT32);
+}
+
+TEST(OperationValidationTest, MAXIMUM_quant8) {
+    binaryOpTest(ANEURALNETWORKS_MAXIMUM, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+TEST(OperationValidationTest, MINIMUM_float16) {
+    binaryOpTest(ANEURALNETWORKS_MINIMUM, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, MINIMUM_float32) {
+    binaryOpTest(ANEURALNETWORKS_MINIMUM, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, MINIMUM_int32) {
+    binaryOpTest(ANEURALNETWORKS_MINIMUM, ANEURALNETWORKS_TENSOR_INT32);
+}
+
+TEST(OperationValidationTest, MINIMUM_quant8) {
+    binaryOpTest(ANEURALNETWORKS_MINIMUM, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
 void activationOpTest(ANeuralNetworksOperationType operationCode, int32_t operandCode) {
     uint32_t inputDimensions[4] = {2, 2, 2, 2};
     ANeuralNetworksOperandType input = {.type = operandCode,
@@ -248,12 +344,12 @@ void activationOpTest(ANeuralNetworksOperationType operationCode, int32_t operan
     }
 
     ANeuralNetworksOperandType output = input;
-    OperationTestBase activationTest(operationCode, {input}, {output});
+    OperationTestBase test(operationCode, {input}, {output});
 
-    EXPECT_TRUE(activationTest.testMutatingInputOperandCode());
-    EXPECT_TRUE(activationTest.testMutatingInputOperandCounts());
-    EXPECT_TRUE(activationTest.testMutatingOutputOperandCode());
-    EXPECT_TRUE(activationTest.testMutatingOutputOperandCounts());
+    EXPECT_TRUE(test.testMutatingInputOperandCode());
+    EXPECT_TRUE(test.testMutatingInputOperandCounts());
+    EXPECT_TRUE(test.testMutatingOutputOperandCode());
+    EXPECT_TRUE(test.testMutatingOutputOperandCounts());
 }
 
 TEST(OperationValidationTest, ABS_float16) {
@@ -264,8 +360,76 @@ TEST(OperationValidationTest, ABS_float32) {
     activationOpTest(ANEURALNETWORKS_ABS, ANEURALNETWORKS_TENSOR_FLOAT32);
 }
 
+TEST(OperationValidationTest, EXP_float16) {
+    activationOpTest(ANEURALNETWORKS_EXP, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, EXP_float32) {
+    activationOpTest(ANEURALNETWORKS_EXP, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, LOG_float16) {
+    activationOpTest(ANEURALNETWORKS_LOG, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, LOG_float32) {
+    activationOpTest(ANEURALNETWORKS_LOG, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, RSQRT_float16) {
+    activationOpTest(ANEURALNETWORKS_RSQRT, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, RSQRT_float32) {
+    activationOpTest(ANEURALNETWORKS_RSQRT, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, SIN_float16) {
+    activationOpTest(ANEURALNETWORKS_SIN, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, SIN_float32) {
+    activationOpTest(ANEURALNETWORKS_SIN, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, SQRT_float16) {
+    activationOpTest(ANEURALNETWORKS_SQRT, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, SQRT_float32) {
+    activationOpTest(ANEURALNETWORKS_SQRT, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, NEG_float16) {
+    activationOpTest(ANEURALNETWORKS_NEG, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, NEG_float32) {
+    activationOpTest(ANEURALNETWORKS_NEG, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, NEG_int32) {
+    activationOpTest(ANEURALNETWORKS_NEG, ANEURALNETWORKS_TENSOR_INT32);
+}
+
+TEST(OperationValidationTest, FLOOR_float16) {
+    activationOpTest(ANEURALNETWORKS_FLOOR, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
 TEST(OperationValidationTest, FLOOR_float32) {
     activationOpTest(ANEURALNETWORKS_FLOOR, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, LOGICAL_NOT_bool) {
+    activationOpTest(ANEURALNETWORKS_LOGICAL_NOT, ANEURALNETWORKS_TENSOR_BOOL8);
+}
+
+TEST(OperationValidationTest, MEAN_float16) {
+    activationOpTest(ANEURALNETWORKS_MEAN, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, MEAN_float32) {
+    activationOpTest(ANEURALNETWORKS_MEAN, ANEURALNETWORKS_TENSOR_FLOAT32);
 }
 
 TEST(OperationValidationTest, TANH_float32) {
@@ -438,12 +602,24 @@ void poolingOpTest(ANeuralNetworksOperationType operationCode, int32_t operandCo
     EXPECT_TRUE(implicitNchwPoolingTest.testMutatingOutputOperandCounts());
 }
 
+TEST(OperationValidationTest, AVERAGE_POOL_2D_float16) {
+    poolingOpTest(ANEURALNETWORKS_AVERAGE_POOL_2D, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
 TEST(OperationValidationTest, AVERAGE_POOL_2D_float32) {
     poolingOpTest(ANEURALNETWORKS_AVERAGE_POOL_2D, ANEURALNETWORKS_TENSOR_FLOAT32);
 }
 
 TEST(OperationValidationTest, MAX_POOL_2D_float32) {
     poolingOpTest(ANEURALNETWORKS_MAX_POOL_2D, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, MAX_POOL_2D_float16) {
+    poolingOpTest(ANEURALNETWORKS_MAX_POOL_2D, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, L2_POOL_2D_float16) {
+    poolingOpTest(ANEURALNETWORKS_L2_POOL_2D, ANEURALNETWORKS_TENSOR_FLOAT16);
 }
 
 TEST(OperationValidationTest, L2_POOL_2D_float32) {
@@ -622,29 +798,45 @@ TEST(OperationValidationTest, SQUEEZE_quant8) {
     transposeAndSqueezeOpTest(ANEURALNETWORKS_SQUEEZE, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
 }
 
-void convOpTest(int32_t operandCode) {
+void convOpTest(int32_t inputOperandCode, int32_t filterOperandCode) {
     uint32_t inputDimensions[4] = {2, 4, 4, 2};
-    ANeuralNetworksOperandType input = {.type = operandCode,
+    ANeuralNetworksOperandType input = {.type = inputOperandCode,
                                         .dimensionCount = 4,
                                         .dimensions = inputDimensions,
                                         .scale = 0.0f,
                                         .zeroPoint = 0};
-    if (operandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+    if (inputOperandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
         input.scale = 0.5f;
     }
-
-    ANeuralNetworksOperandType filter = input;
     ANeuralNetworksOperandType output = input;
 
+    float filterScales[2] = {0.5f, 1.0f};
+    ANeuralNetworksOperandType filter = {.type = filterOperandCode,
+                                         .dimensionCount = 4,
+                                         .dimensions = inputDimensions,
+                                         .scale = 0.0f,
+                                         .zeroPoint = 0};
+    if (filterOperandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+        filter.scale = 0.5f;
+    }
+    if (filterOperandCode == ANEURALNETWORKS_TENSOR_QUANT8_SYMM_PER_CHANNEL) {
+        filter.extraParams.channelQuant = {
+                .scales = filterScales, .channelDim = 0, .scaleCount = 2};
+    }
+
     uint32_t biasDimensions[1] = {2};
-    ANeuralNetworksOperandType bias = {.type = operandCode,
+    ANeuralNetworksOperandType bias = {.type = inputOperandCode,
                                        .dimensionCount = 1,
                                        .dimensions = biasDimensions,
                                        .scale = 0.0f,
                                        .zeroPoint = 0};
-    if (operandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+    if (filterOperandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
         bias.type = ANEURALNETWORKS_TENSOR_INT32;
         bias.scale = 0.25f;
+    }
+    if (filterOperandCode == ANEURALNETWORKS_TENSOR_QUANT8_SYMM_PER_CHANNEL) {
+        bias.type = ANEURALNETWORKS_TENSOR_INT32;
+        bias.scale = 0.0f;
     }
 
     ANeuralNetworksOperandType scalar = {.type = ANEURALNETWORKS_INT32,
@@ -714,36 +906,56 @@ void convOpTest(int32_t operandCode) {
 }
 
 TEST(OperationValidationTest, CONV_2D_float32) {
-    convOpTest(ANEURALNETWORKS_TENSOR_FLOAT32);
+    convOpTest(ANEURALNETWORKS_TENSOR_FLOAT32, ANEURALNETWORKS_TENSOR_FLOAT32);
 }
 
 TEST(OperationValidationTest, CONV_2D_quant8) {
-    convOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+    convOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
 }
 
-void depthwiseConvOpTest(int32_t operandCode) {
+TEST(OperationValidationTest, CONV_2D_quant8_per_channel) {
+    convOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, ANEURALNETWORKS_TENSOR_QUANT8_SYMM_PER_CHANNEL);
+}
+
+void depthwiseConvOpTest(int32_t inputOperandCode, int32_t filterOperandCode) {
     uint32_t inputDimensions[4] = {1, 2, 2, 2};
-    ANeuralNetworksOperandType input = {.type = operandCode,
+    ANeuralNetworksOperandType input = {.type = inputOperandCode,
                                         .dimensionCount = 4,
                                         .dimensions = inputDimensions,
                                         .scale = 0.0f,
                                         .zeroPoint = 0};
-    if (operandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+    if (inputOperandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
         input.scale = 0.5f;
     }
-
-    ANeuralNetworksOperandType filter = input;
     ANeuralNetworksOperandType output = input;
 
+    float filterScales[2] = {0.5f, 1.0f};
+    ANeuralNetworksOperandType filter = {.type = filterOperandCode,
+                                         .dimensionCount = 4,
+                                         .dimensions = inputDimensions,
+                                         .scale = 0.0f,
+                                         .zeroPoint = 0};
+    if (filterOperandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+        filter.scale = 0.5f;
+    }
+    if (filterOperandCode == ANEURALNETWORKS_TENSOR_QUANT8_SYMM_PER_CHANNEL) {
+        filter.extraParams.channelQuant = {
+                .scales = filterScales, .channelDim = 3, .scaleCount = 2};
+    }
+
     uint32_t biasDimensions[1] = {2};
-    ANeuralNetworksOperandType bias = {.type = operandCode,
+    ANeuralNetworksOperandType bias = {.type = inputOperandCode,
                                        .dimensionCount = 1,
                                        .dimensions = biasDimensions,
                                        .scale = 0.0f,
                                        .zeroPoint = 0};
-    if (operandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+    if (filterOperandCode == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
         bias.type = ANEURALNETWORKS_TENSOR_INT32;
         bias.scale = 0.25f;
+    }
+    if (filterOperandCode == ANEURALNETWORKS_TENSOR_QUANT8_SYMM_PER_CHANNEL) {
+        bias.type = ANEURALNETWORKS_TENSOR_INT32;
+        bias.scale = 0.0f;
     }
 
     ANeuralNetworksOperandType scalar = {.type = ANEURALNETWORKS_INT32,
@@ -814,15 +1026,20 @@ void depthwiseConvOpTest(int32_t operandCode) {
 }
 
 TEST(OperationValidationTest, DEPTHWISE_CONV_2D_float32) {
-    depthwiseConvOpTest(ANEURALNETWORKS_TENSOR_FLOAT32);
+    depthwiseConvOpTest(ANEURALNETWORKS_TENSOR_FLOAT32, ANEURALNETWORKS_TENSOR_FLOAT32);
 }
 
 TEST(OperationValidationTest, DEPTHWISE_CONV_2D_float16) {
-    depthwiseConvOpTest(ANEURALNETWORKS_TENSOR_FLOAT16);
+    depthwiseConvOpTest(ANEURALNETWORKS_TENSOR_FLOAT16, ANEURALNETWORKS_TENSOR_FLOAT16);
 }
 
 TEST(OperationValidationTest, DEPTHWISE_CONV_2D_quant8) {
-    depthwiseConvOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+    depthwiseConvOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+TEST(OperationValidationTest, DEPTHWISE_CONV_2D_quant8_per_channel) {
+    depthwiseConvOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM,
+                        ANEURALNETWORKS_TENSOR_QUANT8_SYMM_PER_CHANNEL);
 }
 
 void fullyConnectedOpTest(int32_t operandCode) {
@@ -864,6 +1081,10 @@ void fullyConnectedOpTest(int32_t operandCode) {
     EXPECT_TRUE(fullyConnectedTest.testMutatingInputOperandCounts());
     EXPECT_TRUE(fullyConnectedTest.testMutatingOutputOperandCode());
     EXPECT_TRUE(fullyConnectedTest.testMutatingOutputOperandCounts());
+}
+
+TEST(OperationValidationTest, FULLY_CONNECTED_float16) {
+    fullyConnectedOpTest(ANEURALNETWORKS_TENSOR_FLOAT16);
 }
 
 TEST(OperationValidationTest, FULLY_CONNECTED_float32) {
@@ -1028,9 +1249,9 @@ TEST(OperationValidationTest, HASHTABLE_LOOKUP_quant8) {
     hashtableLookupTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
 }
 
-void lshProjectionTest(int32_t operandCode) {
+void lshProjectionTest(int32_t operandCode, int32_t hashAndWeightOperandCode) {
     uint32_t inputDimensions[2] = {5, 5};
-    ANeuralNetworksOperandType hash = {.type = ANEURALNETWORKS_TENSOR_FLOAT32,
+    ANeuralNetworksOperandType hash = {.type = hashAndWeightOperandCode,
                                        .dimensionCount = 2,
                                        .dimensions = inputDimensions,
                                        .scale = 0.0f,
@@ -1043,7 +1264,7 @@ void lshProjectionTest(int32_t operandCode) {
     }
 
     uint32_t weightDimensions[1] = {5};
-    ANeuralNetworksOperandType weight = {.type = ANEURALNETWORKS_TENSOR_FLOAT32,
+    ANeuralNetworksOperandType weight = {.type = hashAndWeightOperandCode,
                                          .dimensionCount = 1,
                                          .dimensions = weightDimensions,
                                          .scale = 0.0f,
@@ -1067,12 +1288,18 @@ void lshProjectionTest(int32_t operandCode) {
     EXPECT_TRUE(lshProjTest.testMutatingOutputOperandCounts());
 }
 
+TEST(OperationValidationTest, LSH_PROJECTION_float16) {
+    lshProjectionTest(ANEURALNETWORKS_TENSOR_FLOAT16, ANEURALNETWORKS_TENSOR_FLOAT32);
+    lshProjectionTest(ANEURALNETWORKS_TENSOR_FLOAT16, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
 TEST(OperationValidationTest, LSH_PROJECTION_float32) {
-    lshProjectionTest(ANEURALNETWORKS_TENSOR_FLOAT32);
+    lshProjectionTest(ANEURALNETWORKS_TENSOR_FLOAT32, ANEURALNETWORKS_TENSOR_FLOAT32);
+    lshProjectionTest(ANEURALNETWORKS_TENSOR_FLOAT32, ANEURALNETWORKS_TENSOR_FLOAT16);
 }
 
 TEST(OperationValidationTest, LSH_PROJECTION_quant8) {
-    lshProjectionTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+    lshProjectionTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, ANEURALNETWORKS_TENSOR_FLOAT32);
+    lshProjectionTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, ANEURALNETWORKS_TENSOR_FLOAT16);
 }
 
 TEST(OperationValidationTest, LSTM_float32) {
@@ -1234,6 +1461,32 @@ TEST(OperationValidationTest, LSTM_V1_2_float32) {
     EXPECT_TRUE(lstmTest.testMutatingOutputOperandCounts());
 }
 
+TEST(OperationValidationTest, RANDOM_MULTINOMIAL_float16) {
+    uint32_t twoDimensional[2] = {5, 5};
+    ANeuralNetworksOperandType floatTensor2D = {.type = ANEURALNETWORKS_TENSOR_FLOAT16,
+                                                .dimensionCount = 2,
+                                                .dimensions = twoDimensional,
+                                                .scale = 0.0f,
+                                                .zeroPoint = 0};
+    ANeuralNetworksOperandType intScalar = {.type = ANEURALNETWORKS_INT32,
+                                            .dimensionCount = 0,
+                                            .dimensions = nullptr,
+                                            .scale = 0.0f,
+                                            .zeroPoint = 0};
+
+    ANeuralNetworksOperandType input = floatTensor2D;
+    ANeuralNetworksOperandType sample_count = intScalar;
+    ANeuralNetworksOperandType output = floatTensor2D;
+
+    OperationTestBase multinomialTest(ANEURALNETWORKS_RANDOM_MULTINOMIAL, {input, sample_count},
+                                      {output});
+
+    EXPECT_TRUE(multinomialTest.testMutatingInputOperandCode());
+    EXPECT_TRUE(multinomialTest.testMutatingInputOperandCounts());
+    EXPECT_TRUE(multinomialTest.testMutatingOutputOperandCode());
+    EXPECT_TRUE(multinomialTest.testMutatingOutputOperandCounts());
+}
+
 TEST(OperationValidationTest, RANDOM_MULTINOMIAL_float32) {
     uint32_t twoDimensional[2] = {5, 5};
     ANeuralNetworksOperandType floatTensor2D = {.type = ANEURALNETWORKS_TENSOR_FLOAT32,
@@ -1251,7 +1504,47 @@ TEST(OperationValidationTest, RANDOM_MULTINOMIAL_float32) {
     ANeuralNetworksOperandType sample_count = intScalar;
     ANeuralNetworksOperandType output = floatTensor2D;
 
-    OperationTestBase rnnTest(ANEURALNETWORKS_RNN, {input, sample_count}, {output});
+    OperationTestBase multinomialTest(ANEURALNETWORKS_RANDOM_MULTINOMIAL, {input, sample_count},
+                                      {output});
+
+    EXPECT_TRUE(multinomialTest.testMutatingInputOperandCode());
+    EXPECT_TRUE(multinomialTest.testMutatingInputOperandCounts());
+    EXPECT_TRUE(multinomialTest.testMutatingOutputOperandCode());
+    EXPECT_TRUE(multinomialTest.testMutatingOutputOperandCounts());
+}
+
+TEST(OperationValidationTest, RNN_float16) {
+    uint32_t oneDimensional[1] = {5};
+    uint32_t twoDimensional[2] = {5, 5};
+    ANeuralNetworksOperandType floatTensor1D = {.type = ANEURALNETWORKS_TENSOR_FLOAT16,
+                                                .dimensionCount = 1,
+                                                .dimensions = oneDimensional,
+                                                .scale = 0.0f,
+                                                .zeroPoint = 0};
+    ANeuralNetworksOperandType floatTensor2D = {.type = ANEURALNETWORKS_TENSOR_FLOAT16,
+                                                .dimensionCount = 2,
+                                                .dimensions = twoDimensional,
+                                                .scale = 0.0f,
+                                                .zeroPoint = 0};
+    ANeuralNetworksOperandType intScalar = {.type = ANEURALNETWORKS_INT32,
+                                            .dimensionCount = 0,
+                                            .dimensions = nullptr,
+                                            .scale = 0.0f,
+                                            .zeroPoint = 0};
+
+    ANeuralNetworksOperandType input = floatTensor2D;
+    ANeuralNetworksOperandType weights = floatTensor2D;
+    ANeuralNetworksOperandType recurrentWeights = floatTensor2D;
+    ANeuralNetworksOperandType bias = floatTensor1D;
+    ANeuralNetworksOperandType hiddenStateIn = floatTensor2D;
+    ANeuralNetworksOperandType activation = intScalar;
+
+    ANeuralNetworksOperandType hiddenStateOut = floatTensor2D;
+    ANeuralNetworksOperandType output = floatTensor2D;
+
+    OperationTestBase rnnTest(ANEURALNETWORKS_RNN,
+                              {input, weights, recurrentWeights, bias, hiddenStateIn, activation},
+                              {hiddenStateOut, output});
 
     EXPECT_TRUE(rnnTest.testMutatingInputOperandCode());
     EXPECT_TRUE(rnnTest.testMutatingInputOperandCounts());
@@ -1338,6 +1631,47 @@ TEST(OperationValidationTest, SVDF_float32) {
     EXPECT_TRUE(svdfTest.testMutatingOutputOperandCounts());
 }
 
+TEST(OperationValidationTest, SVDF_float16) {
+    uint32_t oneDimensional[1] = {5};
+    uint32_t twoDimensional[2] = {5, 5};
+    ANeuralNetworksOperandType floatTensor1D = {.type = ANEURALNETWORKS_TENSOR_FLOAT16,
+                                                .dimensionCount = 1,
+                                                .dimensions = oneDimensional,
+                                                .scale = 0.0f,
+                                                .zeroPoint = 0};
+    ANeuralNetworksOperandType floatTensor2D = {.type = ANEURALNETWORKS_TENSOR_FLOAT16,
+                                                .dimensionCount = 2,
+                                                .dimensions = twoDimensional,
+                                                .scale = 0.0f,
+                                                .zeroPoint = 0};
+    ANeuralNetworksOperandType intScalar = {.type = ANEURALNETWORKS_INT32,
+                                            .dimensionCount = 0,
+                                            .dimensions = nullptr,
+                                            .scale = 0.0f,
+                                            .zeroPoint = 0};
+
+    ANeuralNetworksOperandType input = floatTensor2D;
+    ANeuralNetworksOperandType weightsFeature = floatTensor2D;
+    ANeuralNetworksOperandType weightsTime = floatTensor2D;
+    ANeuralNetworksOperandType bias = floatTensor1D;
+    ANeuralNetworksOperandType stateIn = floatTensor2D;
+    ANeuralNetworksOperandType rank = intScalar;
+    ANeuralNetworksOperandType activation = intScalar;
+
+    ANeuralNetworksOperandType stateOut = floatTensor2D;
+    ANeuralNetworksOperandType output = floatTensor2D;
+
+    OperationTestBase svdfTest(
+            ANEURALNETWORKS_SVDF,
+            {input, weightsFeature, weightsTime, bias, stateIn, rank, activation},
+            {stateOut, output});
+
+    EXPECT_TRUE(svdfTest.testMutatingInputOperandCode());
+    EXPECT_TRUE(svdfTest.testMutatingInputOperandCounts());
+    EXPECT_TRUE(svdfTest.testMutatingOutputOperandCode());
+    EXPECT_TRUE(svdfTest.testMutatingOutputOperandCounts());
+}
+
 void stridedSliceOpTest(int32_t operandCode) {
     uint32_t inputDimensions[2] = {5, 5};
     ANeuralNetworksOperandType input = {.type = operandCode,
@@ -1391,15 +1725,17 @@ TEST(OperationValidationTest, STRIDED_SLICE_quant8) {
     stridedSliceOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
 }
 
-void roiAlignOpTest(int32_t operandCode) {
-    uint32_t inDim[] = {1, 4, 4, 1}, roiDim[] = {4, 4}, outShapeDim[] = {2};
+void roiAlignOpTest(int32_t inputOperandCode, int32_t roiOperandCode, int32_t scalarOperandCode) {
+    uint32_t inDim[] = {1, 4, 4, 1}, roiDim[] = {4, 4};
     uint32_t outDim[] = {4, 2, 2, 1};
     OperationTestBase roiAlignTest(
             ANEURALNETWORKS_ROI_ALIGN,
-            {getOpType(operandCode, 4, inDim), getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 2, roiDim),
-             getOpType(ANEURALNETWORKS_TENSOR_INT32, 1, outShapeDim),
-             getOpType(ANEURALNETWORKS_FLOAT32), getOpType(ANEURALNETWORKS_INT32)},
-            {getOpType(operandCode, 4, outDim)});
+            {getOpType(inputOperandCode, 4, inDim), getOpType(roiOperandCode, 2, roiDim),
+             getOpType(ANEURALNETWORKS_INT32), getOpType(ANEURALNETWORKS_INT32),
+             getOpType(scalarOperandCode), getOpType(scalarOperandCode),
+             getOpType(ANEURALNETWORKS_INT32), getOpType(ANEURALNETWORKS_INT32),
+             getOpType(ANEURALNETWORKS_BOOL)},
+            {getOpType(inputOperandCode, 4, outDim)});
 
     EXPECT_TRUE(roiAlignTest.testMutatingInputOperandCode());
     EXPECT_TRUE(roiAlignTest.testMutatingInputOperandCounts());
@@ -1407,23 +1743,31 @@ void roiAlignOpTest(int32_t operandCode) {
     EXPECT_TRUE(roiAlignTest.testMutatingOutputOperandCounts());
 }
 
+TEST(OperationValidationTest, ROI_ALIGN_float16) {
+    roiAlignOpTest(ANEURALNETWORKS_TENSOR_FLOAT16, ANEURALNETWORKS_TENSOR_FLOAT16,
+                   ANEURALNETWORKS_FLOAT16);
+}
+
 TEST(OperationValidationTest, ROI_ALIGN_float32) {
-    roiAlignOpTest(ANEURALNETWORKS_TENSOR_FLOAT32);
+    roiAlignOpTest(ANEURALNETWORKS_TENSOR_FLOAT32, ANEURALNETWORKS_TENSOR_FLOAT32,
+                   ANEURALNETWORKS_FLOAT32);
 }
 
 TEST(OperationValidationTest, ROI_ALIGN_quant8) {
-    roiAlignOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+    roiAlignOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, ANEURALNETWORKS_TENSOR_FLOAT32,
+                   ANEURALNETWORKS_FLOAT32);
 }
 
-void roiPoolingOpTest(int32_t operandCode) {
-    uint32_t inDim[] = {1, 4, 4, 1}, roiDim[] = {4, 4}, outShapeDim[] = {2};
+void roiPoolingOpTest(int32_t inputOperandCode, int32_t roiOperandCode, int32_t scalarOperandCode) {
+    uint32_t inDim[] = {1, 4, 4, 1}, roiDim[] = {4, 4};
     uint32_t outDim[] = {4, 2, 2, 1};
     OperationTestBase roiPoolingTest(
             ANEURALNETWORKS_ROI_POOLING,
-            {getOpType(operandCode, 4, inDim), getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 2, roiDim),
-             getOpType(ANEURALNETWORKS_TENSOR_INT32, 1, outShapeDim),
-             getOpType(ANEURALNETWORKS_FLOAT32)},
-            {getOpType(operandCode, 4, outDim)});
+            {getOpType(inputOperandCode, 4, inDim), getOpType(roiOperandCode, 2, roiDim),
+             getOpType(ANEURALNETWORKS_INT32), getOpType(ANEURALNETWORKS_INT32),
+             getOpType(scalarOperandCode), getOpType(scalarOperandCode),
+             getOpType(ANEURALNETWORKS_BOOL)},
+            {getOpType(inputOperandCode, 4, outDim)});
 
     EXPECT_TRUE(roiPoolingTest.testMutatingInputOperandCode());
     EXPECT_TRUE(roiPoolingTest.testMutatingInputOperandCounts());
@@ -1431,26 +1775,41 @@ void roiPoolingOpTest(int32_t operandCode) {
     EXPECT_TRUE(roiPoolingTest.testMutatingOutputOperandCounts());
 }
 
+TEST(OperationValidationTest, ROI_POOLING_float16) {
+    roiPoolingOpTest(ANEURALNETWORKS_TENSOR_FLOAT16, ANEURALNETWORKS_TENSOR_FLOAT16,
+                     ANEURALNETWORKS_FLOAT16);
+}
+
 TEST(OperationValidationTest, ROI_POOLING_float32) {
-    roiPoolingOpTest(ANEURALNETWORKS_TENSOR_FLOAT32);
+    roiPoolingOpTest(ANEURALNETWORKS_TENSOR_FLOAT32, ANEURALNETWORKS_TENSOR_FLOAT32,
+                     ANEURALNETWORKS_FLOAT32);
 }
 
 TEST(OperationValidationTest, ROI_POOLING_quant8) {
-    roiPoolingOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+    roiPoolingOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, ANEURALNETWORKS_TENSOR_FLOAT32,
+                     ANEURALNETWORKS_FLOAT32);
 }
 
-TEST(OperationValidationTest, HEATMAP_MAX_KEYPOINT_float32) {
+void heatmapMaxKeypointOpTest(int32_t operandCode) {
     uint32_t heatmapDim[] = {6, 4, 4, 1}, boxDim[] = {6, 4}, outDim[] = {6, 3, 1};
     OperationTestBase heatmapMaxKeypointTest(
             ANEURALNETWORKS_HEATMAP_MAX_KEYPOINT,
-            {getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 4, heatmapDim),
-             getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 2, boxDim), getOpType(ANEURALNETWORKS_BOOL)},
-            {getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 3, outDim)});
+            {getOpType(operandCode, 4, heatmapDim), getOpType(operandCode, 2, boxDim),
+             getOpType(ANEURALNETWORKS_BOOL)},
+            {getOpType(operandCode, 3, outDim)});
 
     EXPECT_TRUE(heatmapMaxKeypointTest.testMutatingInputOperandCode());
     EXPECT_TRUE(heatmapMaxKeypointTest.testMutatingInputOperandCounts());
     EXPECT_TRUE(heatmapMaxKeypointTest.testMutatingOutputOperandCode());
     EXPECT_TRUE(heatmapMaxKeypointTest.testMutatingOutputOperandCounts());
+}
+
+TEST(OperationValidationTest, HEATMAP_MAX_KEYPOINT_float16) {
+    heatmapMaxKeypointOpTest(ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, HEATMAP_MAX_KEYPOINT_float32) {
+    heatmapMaxKeypointOpTest(ANEURALNETWORKS_TENSOR_FLOAT32);
 }
 
 void groupedConvOpTest(int32_t operandCode) {
@@ -1569,6 +1928,10 @@ void preluOpTest(int32_t operandCode) {
     EXPECT_TRUE(preluTest.testMutatingOutputOperandCounts());
 }
 
+TEST(OperationValidationTest, PRELU_float16) {
+    preluOpTest(ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
 TEST(OperationValidationTest, PRELU_float32) {
     preluOpTest(ANEURALNETWORKS_TENSOR_FLOAT32);
 }
@@ -1636,18 +1999,15 @@ TEST(OperationValidationTest, LOCAL_RESPONSE_NORMALIZATION_float32) {
     localResponseNormOpTest(ANEURALNETWORKS_TENSOR_FLOAT32);
 }
 
-TEST(OperationValidationTest, AXIS_ALIGNED_BBOX_TRANSFORM_float32) {
+void axisAlignedBBoxTransformOpTest(int32_t operandCode) {
     uint32_t roiDim[] = {5, 5}, deltaDim[] = {5, 8}, imageDim[] = {5, 3}, weightDim[] = {4};
     uint32_t outDim[] = {5, 8}, bsDim[] = {5};
     OperationTestBase axisAlignedBBoxTransformTest(
             ANEURALNETWORKS_AXIS_ALIGNED_BBOX_TRANSFORM,
-            {getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 2, roiDim),
-             getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 2, deltaDim),
-             getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 2, imageDim),
-             getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 1, weightDim),
+            {getOpType(operandCode, 2, roiDim), getOpType(operandCode, 2, deltaDim),
+             getOpType(operandCode, 2, imageDim), getOpType(operandCode, 1, weightDim),
              getOpType(ANEURALNETWORKS_BOOL)},
-            {getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 2, outDim),
-             getOpType(ANEURALNETWORKS_TENSOR_INT32, 1, bsDim)});
+            {getOpType(operandCode, 2, outDim), getOpType(ANEURALNETWORKS_TENSOR_INT32, 1, bsDim)});
 
     EXPECT_TRUE(axisAlignedBBoxTransformTest.testMutatingInputOperandCode());
     EXPECT_TRUE(axisAlignedBBoxTransformTest.testMutatingInputOperandCounts());
@@ -1655,25 +2015,39 @@ TEST(OperationValidationTest, AXIS_ALIGNED_BBOX_TRANSFORM_float32) {
     EXPECT_TRUE(axisAlignedBBoxTransformTest.testMutatingOutputOperandCounts());
 }
 
-TEST(OperationValidationTest, ROTATED_BBOX_TRANSFORM_float32) {
+TEST(OperationValidationTest, AXIS_ALIGNED_BBOX_TRANSFORM_float16) {
+    axisAlignedBBoxTransformOpTest(ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, AXIS_ALIGNED_BBOX_TRANSFORM_float32) {
+    axisAlignedBBoxTransformOpTest(ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+void rotatedBBoxTransformOpTest(int32_t tensorOperandCode, int32_t scalarOperandCode) {
     uint32_t roiDim[] = {5, 5}, deltaDim[] = {5, 8}, imageDim[] = {5, 3}, weightDim[] = {4};
     uint32_t outDim[] = {5, 8}, bsDim[] = {5};
     OperationTestBase rotatedBBoxTransformTest(
             ANEURALNETWORKS_ROTATED_BBOX_TRANSFORM,
-            {getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 2, roiDim),
-             getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 2, deltaDim),
-             getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 2, imageDim),
-             getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 1, weightDim),
+            {getOpType(tensorOperandCode, 2, roiDim), getOpType(tensorOperandCode, 2, deltaDim),
+             getOpType(tensorOperandCode, 2, imageDim), getOpType(tensorOperandCode, 1, weightDim),
              getOpType(ANEURALNETWORKS_BOOL), getOpType(ANEURALNETWORKS_BOOL),
              getOpType(ANEURALNETWORKS_INT32), getOpType(ANEURALNETWORKS_INT32),
-             getOpType(ANEURALNETWORKS_FLOAT32)},
-            {getOpType(ANEURALNETWORKS_TENSOR_FLOAT32, 2, outDim),
+             getOpType(scalarOperandCode)},
+            {getOpType(tensorOperandCode, 2, outDim),
              getOpType(ANEURALNETWORKS_TENSOR_INT32, 1, bsDim)});
 
     EXPECT_TRUE(rotatedBBoxTransformTest.testMutatingInputOperandCode());
     EXPECT_TRUE(rotatedBBoxTransformTest.testMutatingInputOperandCounts());
     EXPECT_TRUE(rotatedBBoxTransformTest.testMutatingOutputOperandCode());
     EXPECT_TRUE(rotatedBBoxTransformTest.testMutatingOutputOperandCounts());
+}
+
+TEST(OperationValidationTest, ROTATED_BBOX_TRANSFORM_float16) {
+    rotatedBBoxTransformOpTest(ANEURALNETWORKS_TENSOR_FLOAT16, ANEURALNETWORKS_FLOAT16);
+}
+
+TEST(OperationValidationTest, ROTATED_BBOX_TRANSFORM_float32) {
+    rotatedBBoxTransformOpTest(ANEURALNETWORKS_TENSOR_FLOAT32, ANEURALNETWORKS_FLOAT32);
 }
 
 void sliceTest(int32_t operandCode) {
@@ -1705,6 +2079,303 @@ TEST(OperationValidationTest, SLICE_uint8) {
 }
 TEST(OperationValidationTest, SLICE_float16) {
     sliceTest(ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+void logicalTest(ANeuralNetworksOperationType operationCode) {
+    uint32_t inputDimensions[4] = {2, 2, 2, 2};
+    ANeuralNetworksOperandType input1 = {.type = ANEURALNETWORKS_TENSOR_BOOL8,
+                                         .dimensionCount = 4,
+                                         .dimensions = inputDimensions,
+                                         .scale = 0.0f,
+                                         .zeroPoint = 0};
+    ANeuralNetworksOperandType input2 = input1;
+    ANeuralNetworksOperandType output = input1;
+
+    OperationTestBase test(operationCode, {input1, input2}, {output});
+
+    EXPECT_TRUE(test.testMutatingInputOperandCode());
+    EXPECT_TRUE(test.testMutatingInputOperandCounts());
+    EXPECT_TRUE(test.testMutatingOutputOperandCode());
+    EXPECT_TRUE(test.testMutatingOutputOperandCounts());
+}
+
+TEST(OperationValidationTest, LOGICAL_AND) {
+    logicalTest(ANEURALNETWORKS_LOGICAL_AND);
+}
+
+TEST(OperationValidationTest, LOGICAL_OR) {
+    logicalTest(ANEURALNETWORKS_LOGICAL_OR);
+}
+
+void comparisonTest(ANeuralNetworksOperationType operationCode, int32_t inputOperandType) {
+    uint32_t inputDimensions[4] = {2, 2, 2, 2};
+    ANeuralNetworksOperandType input1 = {.type = inputOperandType,
+                                         .dimensionCount = 4,
+                                         .dimensions = inputDimensions,
+                                         .scale = 0.0f,
+                                         .zeroPoint = 0};
+    if (inputOperandType == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+        input1.scale = 1.f / 256;
+    }
+    ANeuralNetworksOperandType input2 = input1;
+    ANeuralNetworksOperandType output = {.type = ANEURALNETWORKS_TENSOR_BOOL8,
+                                         .dimensionCount = 4,
+                                         .dimensions = inputDimensions,
+                                         .scale = 0.0f,
+                                         .zeroPoint = 0};
+    OperationTestBase test(operationCode, {input1, input2}, {output});
+
+    EXPECT_TRUE(test.testMutatingInputOperandCode());
+    EXPECT_TRUE(test.testMutatingInputOperandCounts());
+    EXPECT_TRUE(test.testMutatingOutputOperandCode());
+    EXPECT_TRUE(test.testMutatingOutputOperandCounts());
+}
+
+TEST(OperationValidationTest, LESS) {
+    comparisonTest(ANEURALNETWORKS_LESS, ANEURALNETWORKS_TENSOR_BOOL8);
+    comparisonTest(ANEURALNETWORKS_LESS, ANEURALNETWORKS_TENSOR_FLOAT16);
+    comparisonTest(ANEURALNETWORKS_LESS, ANEURALNETWORKS_TENSOR_FLOAT32);
+    comparisonTest(ANEURALNETWORKS_LESS, ANEURALNETWORKS_TENSOR_INT32);
+    comparisonTest(ANEURALNETWORKS_LESS, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+TEST(OperationValidationTest, LESS_EQUAL) {
+    comparisonTest(ANEURALNETWORKS_LESS_EQUAL, ANEURALNETWORKS_TENSOR_BOOL8);
+    comparisonTest(ANEURALNETWORKS_LESS_EQUAL, ANEURALNETWORKS_TENSOR_FLOAT16);
+    comparisonTest(ANEURALNETWORKS_LESS_EQUAL, ANEURALNETWORKS_TENSOR_FLOAT32);
+    comparisonTest(ANEURALNETWORKS_LESS_EQUAL, ANEURALNETWORKS_TENSOR_INT32);
+    comparisonTest(ANEURALNETWORKS_LESS_EQUAL, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+TEST(OperationValidationTest, EQUAL) {
+    comparisonTest(ANEURALNETWORKS_EQUAL, ANEURALNETWORKS_TENSOR_BOOL8);
+    comparisonTest(ANEURALNETWORKS_EQUAL, ANEURALNETWORKS_TENSOR_FLOAT16);
+    comparisonTest(ANEURALNETWORKS_EQUAL, ANEURALNETWORKS_TENSOR_FLOAT32);
+    comparisonTest(ANEURALNETWORKS_EQUAL, ANEURALNETWORKS_TENSOR_INT32);
+    comparisonTest(ANEURALNETWORKS_EQUAL, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+TEST(OperationValidationTest, NOT_EQUAL) {
+    comparisonTest(ANEURALNETWORKS_NOT_EQUAL, ANEURALNETWORKS_TENSOR_BOOL8);
+    comparisonTest(ANEURALNETWORKS_NOT_EQUAL, ANEURALNETWORKS_TENSOR_FLOAT16);
+    comparisonTest(ANEURALNETWORKS_NOT_EQUAL, ANEURALNETWORKS_TENSOR_FLOAT32);
+    comparisonTest(ANEURALNETWORKS_NOT_EQUAL, ANEURALNETWORKS_TENSOR_INT32);
+    comparisonTest(ANEURALNETWORKS_NOT_EQUAL, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+TEST(OperationValidationTest, GREATER) {
+    comparisonTest(ANEURALNETWORKS_GREATER, ANEURALNETWORKS_TENSOR_BOOL8);
+    comparisonTest(ANEURALNETWORKS_GREATER, ANEURALNETWORKS_TENSOR_FLOAT16);
+    comparisonTest(ANEURALNETWORKS_GREATER, ANEURALNETWORKS_TENSOR_FLOAT32);
+    comparisonTest(ANEURALNETWORKS_GREATER, ANEURALNETWORKS_TENSOR_INT32);
+    comparisonTest(ANEURALNETWORKS_GREATER, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+TEST(OperationValidationTest, GREATER_EQUAL) {
+    comparisonTest(ANEURALNETWORKS_GREATER_EQUAL, ANEURALNETWORKS_TENSOR_BOOL8);
+    comparisonTest(ANEURALNETWORKS_GREATER_EQUAL, ANEURALNETWORKS_TENSOR_FLOAT16);
+    comparisonTest(ANEURALNETWORKS_GREATER_EQUAL, ANEURALNETWORKS_TENSOR_FLOAT32);
+    comparisonTest(ANEURALNETWORKS_GREATER_EQUAL, ANEURALNETWORKS_TENSOR_INT32);
+    comparisonTest(ANEURALNETWORKS_GREATER_EQUAL, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+void reduceOpTest(ANeuralNetworksOperationType operationCode, int32_t inputOperandType) {
+    bool isQuant = inputOperandType == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM;
+    float scale = isQuant ? 1.f / 256 : 0.0f;
+    uint32_t inputDimensions[4] = {2, 2, 2, 2};
+    ANeuralNetworksOperandType input1 = {
+            .type = inputOperandType,
+            .dimensionCount = 4,
+            .dimensions = inputDimensions,
+            .scale = scale,
+            .zeroPoint = 0,
+    };
+    uint32_t axesDimensions[1] = {2};
+    ANeuralNetworksOperandType input2 = {
+            .type = ANEURALNETWORKS_TENSOR_INT32,
+            .dimensionCount = 1,
+            .dimensions = axesDimensions,
+    };
+    ANeuralNetworksOperandType input3 = {
+            .type = ANEURALNETWORKS_BOOL,
+            .dimensions = {},
+    };
+    ANeuralNetworksOperandType output = {
+            .type = inputOperandType,
+            .dimensionCount = 4,
+            .dimensions = inputDimensions,
+            .scale = scale,
+    };
+    OperationTestBase test(operationCode, {input1, input2, input3}, {output});
+
+    EXPECT_TRUE(test.testMutatingInputOperandCode());
+    EXPECT_TRUE(test.testMutatingInputOperandCounts());
+    EXPECT_TRUE(test.testMutatingOutputOperandCode());
+    EXPECT_TRUE(test.testMutatingOutputOperandCounts());
+}
+
+TEST(OperationValidationTest, REDUCE_PROD) {
+    reduceOpTest(ANEURALNETWORKS_REDUCE_PROD, ANEURALNETWORKS_TENSOR_FLOAT16);
+    reduceOpTest(ANEURALNETWORKS_REDUCE_PROD, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, REDUCE_SUM) {
+    reduceOpTest(ANEURALNETWORKS_REDUCE_SUM, ANEURALNETWORKS_TENSOR_FLOAT16);
+    reduceOpTest(ANEURALNETWORKS_REDUCE_SUM, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, REDUCE_MAX) {
+    reduceOpTest(ANEURALNETWORKS_REDUCE_MAX, ANEURALNETWORKS_TENSOR_FLOAT16);
+    reduceOpTest(ANEURALNETWORKS_REDUCE_MAX, ANEURALNETWORKS_TENSOR_FLOAT32);
+    reduceOpTest(ANEURALNETWORKS_REDUCE_MAX, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+TEST(OperationValidationTest, REDUCE_MIN) {
+    reduceOpTest(ANEURALNETWORKS_REDUCE_MIN, ANEURALNETWORKS_TENSOR_FLOAT16);
+    reduceOpTest(ANEURALNETWORKS_REDUCE_MIN, ANEURALNETWORKS_TENSOR_FLOAT32);
+    reduceOpTest(ANEURALNETWORKS_REDUCE_MIN, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+TEST(OperationValidationTest, REDUCE_ANY) {
+    reduceOpTest(ANEURALNETWORKS_REDUCE_ANY, ANEURALNETWORKS_TENSOR_BOOL8);
+}
+
+TEST(OperationValidationTest, REDUCE_ALL) {
+    reduceOpTest(ANEURALNETWORKS_REDUCE_ALL, ANEURALNETWORKS_TENSOR_BOOL8);
+}
+
+void selectTest(ANeuralNetworksOperationType operationCode, int32_t inputOperandType) {
+    uint32_t inputDimensions[4] = {2, 2, 2, 2};
+    ANeuralNetworksOperandType input0 = {.type = ANEURALNETWORKS_TENSOR_BOOL8,
+                                         .dimensionCount = 4,
+                                         .dimensions = inputDimensions,
+                                         .scale = 0.0f,
+                                         .zeroPoint = 0};
+    ANeuralNetworksOperandType input1 = {.type = inputOperandType,
+                                         .dimensionCount = 4,
+                                         .dimensions = inputDimensions,
+                                         .scale = 0.0f,
+                                         .zeroPoint = 0};
+    if (inputOperandType == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+        input1.scale = 1.f / 256;
+    }
+    ANeuralNetworksOperandType input2 = input1;
+    ANeuralNetworksOperandType output = input1;
+
+    OperationTestBase test(operationCode, {input0, input1, input2}, {output});
+
+    EXPECT_TRUE(test.testMutatingInputOperandCode());
+    EXPECT_TRUE(test.testMutatingInputOperandCounts());
+    EXPECT_TRUE(test.testMutatingOutputOperandCode());
+    EXPECT_TRUE(test.testMutatingOutputOperandCounts());
+}
+
+TEST(OperationValidationTest, SELECT) {
+    selectTest(ANEURALNETWORKS_SELECT, ANEURALNETWORKS_TENSOR_FLOAT16);
+    selectTest(ANEURALNETWORKS_SELECT, ANEURALNETWORKS_TENSOR_FLOAT32);
+    selectTest(ANEURALNETWORKS_SELECT, ANEURALNETWORKS_TENSOR_INT32);
+    selectTest(ANEURALNETWORKS_SELECT, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+void sparseToDenseTest(int32_t inputOperandType, int32_t scalarOperandType) {
+    uint32_t inputDimensions[4] = {3, 3, 3};
+    ANeuralNetworksOperandType input_indices = {.type = ANEURALNETWORKS_TENSOR_INT32,
+                                                .dimensionCount = 2,
+                                                .dimensions = inputDimensions,
+                                                .scale = 0.0f,
+                                                .zeroPoint = 0};
+    ANeuralNetworksOperandType output_shape = {.type = ANEURALNETWORKS_TENSOR_INT32,
+                                               .dimensionCount = 1,
+                                               .dimensions = inputDimensions,
+                                               .scale = 0.0f,
+                                               .zeroPoint = 0};
+    ANeuralNetworksOperandType input_values = {.type = inputOperandType,
+                                               .dimensionCount = 1,
+                                               .dimensions = inputDimensions,
+                                               .scale = 0.0f,
+                                               .zeroPoint = 0};
+    ANeuralNetworksOperandType default_value = {.type = scalarOperandType,
+                                                .dimensionCount = 0,
+                                                .dimensions = nullptr,
+                                                .scale = 0.0f,
+                                                .zeroPoint = 0};
+    if (inputOperandType == ANEURALNETWORKS_TENSOR_QUANT8_ASYMM) {
+        input_values.scale = 1.f / 256;
+    }
+    ANeuralNetworksOperandType output = input_values;
+    output.dimensionCount = 3;
+
+    OperationTestBase test(ANEURALNETWORKS_SPARSE_TO_DENSE,
+                           {input_indices, output_shape, input_values, default_value}, {output});
+
+    EXPECT_TRUE(test.testMutatingInputOperandCode());
+    EXPECT_TRUE(test.testMutatingInputOperandCounts());
+    EXPECT_TRUE(test.testMutatingOutputOperandCode());
+    EXPECT_TRUE(test.testMutatingOutputOperandCounts());
+}
+
+TEST(OperationValidationTest, SPARSE_TO_DENSE) {
+    sparseToDenseTest(ANEURALNETWORKS_TENSOR_FLOAT16, ANEURALNETWORKS_FLOAT16);
+    sparseToDenseTest(ANEURALNETWORKS_TENSOR_FLOAT32, ANEURALNETWORKS_FLOAT32);
+    sparseToDenseTest(ANEURALNETWORKS_TENSOR_INT32, ANEURALNETWORKS_INT32);
+    sparseToDenseTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, ANEURALNETWORKS_INT32);
+}
+
+void embeddingLookupSparseTest(int32_t inputOperandType) {
+    const uint32_t lookupIdsDimensions[] = {3};
+    ANeuralNetworksOperandType lookupIds = {.type = ANEURALNETWORKS_TENSOR_INT32,
+                                            .dimensionCount = 1,
+                                            .dimensions = lookupIdsDimensions,
+                                            .scale = 0.0f,
+                                            .zeroPoint = 0};
+    const uint32_t indicesDimensions[] = {3, 2};
+    ANeuralNetworksOperandType indices = {.type = ANEURALNETWORKS_TENSOR_INT32,
+                                          .dimensionCount = 2,
+                                          .dimensions = indicesDimensions,
+                                          .scale = 0.0f,
+                                          .zeroPoint = 0};
+    const uint32_t denseShapeDimensions[] = {2};
+    ANeuralNetworksOperandType denseShape = {.type = ANEURALNETWORKS_TENSOR_INT32,
+                                             .dimensionCount = 1,
+                                             .dimensions = denseShapeDimensions,
+                                             .scale = 0.0f,
+                                             .zeroPoint = 0};
+    const uint32_t weightsDimensions[] = {3};
+    ANeuralNetworksOperandType weights = {.type = inputOperandType,
+                                          .dimensionCount = 1,
+                                          .dimensions = weightsDimensions,
+                                          .scale = 0.0f,
+                                          .zeroPoint = 0};
+    ANeuralNetworksOperandType combiner = {.type = ANEURALNETWORKS_INT32,
+                                           .dimensionCount = 0,
+                                           .dimensions = nullptr,
+                                           .scale = 0.0f,
+                                           .zeroPoint = 0};
+    const uint32_t valuesDimensions[] = {4, 3, 2};
+    ANeuralNetworksOperandType values = {.type = inputOperandType,
+                                         .dimensionCount = 3,
+                                         .dimensions = valuesDimensions,
+                                         .scale = 0.0f,
+                                         .zeroPoint = 0};
+    const uint32_t outputDimensions[] = {3, 3, 2};
+    ANeuralNetworksOperandType output = {.type = inputOperandType,
+                                         .dimensionCount = 3,
+                                         .dimensions = outputDimensions,
+                                         .scale = 0.0f,
+                                         .zeroPoint = 0};
+
+    OperationTestBase test(ANEURALNETWORKS_EMBEDDING_LOOKUP_SPARSE,
+                           {lookupIds, indices, denseShape, weights, combiner, values}, {output});
+
+    EXPECT_TRUE(test.testMutatingInputOperandCode());
+    EXPECT_TRUE(test.testMutatingInputOperandCounts());
+    EXPECT_TRUE(test.testMutatingOutputOperandCode());
+    EXPECT_TRUE(test.testMutatingOutputOperandCounts());
+}
+
+TEST(OperationValidationTest, EMBEDDING_LOOKUP_SPARSE) {
+    embeddingLookupSparseTest(ANEURALNETWORKS_TENSOR_FLOAT16);
+    embeddingLookupSparseTest(ANEURALNETWORKS_TENSOR_FLOAT32);
 }
 
 }  // end namespace

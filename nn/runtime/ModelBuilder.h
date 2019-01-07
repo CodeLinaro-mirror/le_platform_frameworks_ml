@@ -91,13 +91,14 @@ public:
     int partitionTheWork(const std::vector<std::shared_ptr<Device>>& devices,
                          uint32_t preference, ExecutionPlan* plan) const;
 
- private:
+    static Operand::ExtraParams createOperandExtraParams(const ANeuralNetworksOperandType& type);
+
+   private:
     // TODO: move partitionTheWork, findBestDeviceForEachOperation,
     // sortIntoRunOrder to CompilationBuilder?
 
     int findBestDeviceForEachOperation(uint32_t preference,
                                        const std::vector<std::shared_ptr<Device>>& devices,
-                                       const size_t deviceCount,
                                        std::vector<int>* bestDeviceForOperation) const;
     PerformanceInfo getPerformanceInfo(const std::shared_ptr<Device> device,
                                        uint32_t operationIndex) const;
