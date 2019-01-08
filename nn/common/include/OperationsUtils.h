@@ -22,22 +22,82 @@
 #include <cstdint>
 #include <vector>
 
-// Macro to check if the input parameters for operation are valid or not.
-#define NN_CHECK(v)                                                     \
-  do {                                                                  \
-    if (!(v)) {                                                         \
-      LOG(ERROR) << "NN_CHECK failed: "  << #v << "'\n";                \
-      return false;                                                     \
-    }                                                                   \
-  } while(0);
-
-#define NN_CHECK_EQ(actual, expected)           \
-  NN_CHECK((actual) == (expected))
-
-#define NN_OPS_CHECK NN_CHECK
-
 namespace android {
 namespace nn {
+
+// The NN_RET_CHECK family of macros defined below is similar to the CHECK family defined in
+// system/core/base/include/android-base/logging.h
+//
+// The difference is that NN_RET_CHECK macros use LOG(ERROR) instead of LOG(FATAL)
+// and return false instead of aborting.
+
+// Logs an error and returns false. Append context using << after. For example:
+//
+//   NN_RET_CHECK_FAIL() << "Something went wrong";
+//
+// The containing function must return a bool.
+#define NN_RET_CHECK_FAIL() return ::android::nn::FalseyErrorStream() << "NN_RET_CHECK failed: "
+
+// Logs an error and returns false if condition is false. Extra logging can be appended using <<
+// after. For example:
+//
+//   NN_RET_CHECK(false) << "Something went wrong";
+//
+// The containing function must return a bool.
+#define NN_RET_CHECK(condition) \
+    while (UNLIKELY(!(condition))) NN_RET_CHECK_FAIL() << #condition << " "
+
+// Helper for NN_CHECK_xx(x, y) macros.
+#define NN_RET_CHECK_OP(LHS, RHS, OP)                                                 \
+    for (auto _values = ::android::base::MakeEagerEvaluator(LHS, RHS);                \
+         UNLIKELY(!(_values.lhs OP _values.rhs));                                     \
+         /* empty */)                                                                 \
+    NN_RET_CHECK_FAIL() << #LHS << " " << #OP << " " << #RHS << " (" << #LHS << " = " \
+                        << _values.lhs << ", " << #RHS << " = " << _values.rhs << ") "
+
+// Logs an error and returns false if a condition between x and y does not hold. Extra logging can
+// be appended using << after. For example:
+//
+//   NN_RET_CHECK_EQ(a, b) << "Something went wrong";
+//
+// The values must implement the appropriate comparison operator as well as
+// `operator<<(std::ostream&, ...)`.
+// The containing function must return a bool.
+#define NN_RET_CHECK_EQ(x, y) NN_RET_CHECK_OP(x, y, ==)
+#define NN_RET_CHECK_NE(x, y) NN_RET_CHECK_OP(x, y, !=)
+#define NN_RET_CHECK_LE(x, y) NN_RET_CHECK_OP(x, y, <=)
+#define NN_RET_CHECK_LT(x, y) NN_RET_CHECK_OP(x, y, <)
+#define NN_RET_CHECK_GE(x, y) NN_RET_CHECK_OP(x, y, >=)
+#define NN_RET_CHECK_GT(x, y) NN_RET_CHECK_OP(x, y, >)
+
+// DEPRECATED. Use NN_RET_CHECK instead.
+#define NN_CHECK(x) NN_RET_CHECK(x)
+#define NN_OPS_CHECK(x) NN_RET_CHECK(x)
+
+// DEPRECATED. Use NN_RET_CHECK_EQ instead.
+#define NN_CHECK_EQ(x, y) NN_RET_CHECK_EQ(x, y)
+
+// A wrapper around LOG(ERROR) that can be implicitly converted to bool (always evaluates to false).
+// Used to implement stream logging in NN_RET_CHECK.
+class FalseyErrorStream {
+    DISALLOW_COPY_AND_ASSIGN(FalseyErrorStream);
+
+   public:
+    FalseyErrorStream() {}
+
+    template <typename T>
+    FalseyErrorStream& operator<<(const T& value) {
+        mBuffer << value;
+        return *this;
+    }
+
+    ~FalseyErrorStream() { LOG(ERROR) << mBuffer.str(); }
+
+    operator bool() const { return false; }
+
+   private:
+    std::ostringstream mBuffer;
+};
 
 enum PaddingScheme {
     kPaddingUnknown = 0,
@@ -71,8 +131,11 @@ uint32_t getNumberOfDimensions(const Shape& shape);
 uint32_t getSizeOfDimension(const Shape& shape, uint32_t dimensionIdx);
 
 // Converts an axis index from the range [-dims, dims) into the range [0, dims).
-int32_t getDimensionIndex(const Shape& shape, int32_t axis);
-int32_t getDimensionIndex(int32_t numberOfDimensions, int32_t axis);
+bool handleNegativeAxis(int32_t numberOfDimensions, int32_t* axis);
+
+inline bool handleNegativeAxis(const Shape& shape, int32_t* axis) {
+    return handleNegativeAxis(getNumberOfDimensions(shape), axis);
+}
 
 inline uint32_t computeOutSize(uint32_t imageSize, uint32_t filterSize, uint32_t stride,
                                uint32_t paddingHead, uint32_t paddingTail) {
@@ -181,6 +244,10 @@ inline int32_t ClampedIndex(int32_t index, int dim, bool pos_stride) {
                     : PositiveRemainder(
                           std::min(std::max(index, -dim), dim - 1), dim));
 }
+
+// Broadcasts input shape against one another and puts the result into output
+// shape. Returns true on success and false on error.
+bool calculateBroadcastedShape(const Shape& in1, const Shape& in2, Shape* out);
 
 // Preparation functions for the corresponding ops
 bool addMulPrepare(const Shape& in1, const Shape& in2, Shape* out1);
@@ -317,6 +384,17 @@ bool transposeConvPrepare(const Shape& input, const Shape& filter, const Shape& 
                           int32_t padding_left, int32_t padding_right, int32_t padding_top,
                           int32_t padding_bottom, int32_t stride_width, int32_t stride_height,
                           Shape* output);
+
+bool axisAlignedBBoxTransformPrepare(const float* roiData, const Shape& roiShape,
+                                     const Shape& bboxDeltasShape, const Shape& imageInfoShape,
+                                     const Shape& weightsShape, Shape* outputShape,
+                                     Shape* batchSplitShape);
+
+bool rotatedBBoxTransformPrepare(const float* roiData, const Shape& roiShape,
+                                 const Shape& bboxDeltasShape, const Shape& imageInfoShape,
+                                 const Shape& weightsShape, bool angleBoundOn,
+                                 int32_t angleBoundLow, int32_t angleBoundHigh, Shape* outputShape,
+                                 Shape* batchSplitShape);
 } // namespace nn
 } // namespace android
 
