@@ -99,6 +99,9 @@ class FalseyErrorStream {
     std::ostringstream mBuffer;
 };
 
+// An 8-bit boolean type (sizeof(bool) is implementation-defined).
+typedef uint8_t bool8;
+
 enum PaddingScheme {
     kPaddingUnknown = 0,
     kPaddingSame = 1,
@@ -118,7 +121,18 @@ class IOperationValidationContext {
    public:
     virtual ~IOperationValidationContext() {}
 
-    // The HAL version used to validate the operation.
+    // The HAL version of the environment in which the operation is to be
+    // executed.
+    //
+    // Operation validation logic needs to handle all HAL versions to support
+    // the following use cases (assume in these examples that the latest HAL
+    // version is V1_2):
+    // 1. Our runtime wants to distribute work to a driver implementing an older
+    //    HAL version and calls, for example,
+    //    compliantWithV1_0(const V1_2::Model&).
+    // 2. A driver implements an older HAL version and delegates model
+    //    validation to, for example, validateModel(const V1_0::Model&).
+    //
     // If getHalVersion() returns HalVersion::V1_0 and the operation
     // is only supported since HalVersion::V1_1, validation will fail.
     virtual HalVersion getHalVersion() const = 0;
@@ -147,8 +161,8 @@ class IOperationExecutionContext {
     virtual Shape getOutputShape(uint32_t index) const = 0;
     virtual void* getOutputBuffer(uint32_t index) = 0;
 
-    // Requests the output buffer to be resized. Updates the output shape.
-    virtual bool resizeOutputTensor(uint32_t index, const Shape& shape) = 0;
+    // Updates the output shape, allocating the buffer if necessary.
+    virtual bool setOutputShape(uint32_t index, const Shape& shape) = 0;
 
     template <typename T>
     const T* getInputBuffer(uint32_t index) const {
@@ -315,6 +329,9 @@ inline int32_t ClampedIndex(int32_t index, int dim, bool pos_stride) {
 // shape. Returns true on success and false on error.
 bool calculateBroadcastedShape(const Shape& in1, const Shape& in2, Shape* out);
 
+// Dequantizes a value and quantizes it back using new scale and offset.
+uint8_t requantize(uint8_t value, const Shape& oldShape, const Shape& newShape);
+
 // Preparation functions for the corresponding ops
 bool addMulPrepare(const Shape& in1, const Shape& in2, Shape* out1);
 
@@ -324,13 +341,10 @@ bool dequantizePrepare(const Shape& input, Shape* output);
 
 bool quantizePrepare(const Shape& input, Shape* output);
 
-bool depthwiseConvPrepare(const Shape& input,
-                          const Shape& filter,
-                          const Shape& bias,
-                          int32_t padding_left, int32_t padding_right,
-                          int32_t padding_top, int32_t padding_bottom,
-                          int32_t stride_width, int32_t stride_height,
-                          Shape* output);
+bool depthwiseConvPrepare(const Shape& input, const Shape& filter, const Shape& bias,
+                          int32_t padding_left, int32_t padding_right, int32_t padding_top,
+                          int32_t padding_bottom, int32_t stride_width, int32_t stride_height,
+                          int32_t depth_multiplier, Shape* output);
 
 bool convPrepare(const Shape& input,
                  const Shape& filter,
@@ -432,13 +446,6 @@ bool argMinMaxPrepare(const Shape& input, int32_t axis, Shape* output);
 
 bool splitPrepare(const Shape& input, int32_t axis, int32_t numOutputs, std::vector<Shape>* output);
 
-bool roiAlignPrepare(const Shape& input, const float* roiData, const Shape& roiShape,
-                     const int32_t* outputShapeData, const Shape& outputShapeShape,
-                     const float spatialScale, Shape* output);
-
-bool heatmapMaxKeypointPrepare(const Shape& heatmapShape, const float* boxesData,
-                               const Shape& boxesShape, Shape* output);
-
 bool groupedConvPrepare(const Shape& input, const Shape& filter, const Shape& bias,
                         int32_t padding_left, int32_t padding_right, int32_t padding_top,
                         int32_t padding_bottom, int32_t stride_width, int32_t stride_height,
@@ -448,17 +455,6 @@ bool transposeConvPrepare(const Shape& input, const Shape& filter, const Shape& 
                           int32_t padding_left, int32_t padding_right, int32_t padding_top,
                           int32_t padding_bottom, int32_t stride_width, int32_t stride_height,
                           Shape* output);
-
-bool axisAlignedBBoxTransformPrepare(const float* roiData, const Shape& roiShape,
-                                     const Shape& bboxDeltasShape, const Shape& imageInfoShape,
-                                     const Shape& weightsShape, Shape* outputShape,
-                                     Shape* batchSplitShape);
-
-bool rotatedBBoxTransformPrepare(const float* roiData, const Shape& roiShape,
-                                 const Shape& bboxDeltasShape, const Shape& imageInfoShape,
-                                 const Shape& weightsShape, bool angleBoundOn,
-                                 int32_t angleBoundLow, int32_t angleBoundHigh, Shape* outputShape,
-                                 Shape* batchSplitShape);
 } // namespace nn
 } // namespace android
 

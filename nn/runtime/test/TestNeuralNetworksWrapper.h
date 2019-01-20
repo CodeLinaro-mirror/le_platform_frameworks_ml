@@ -39,6 +39,9 @@ enum class Type {
     BOOL = ANEURALNETWORKS_BOOL,
     TENSOR_QUANT16_SYMM = ANEURALNETWORKS_TENSOR_QUANT16_SYMM,
     TENSOR_FLOAT16 = ANEURALNETWORKS_TENSOR_FLOAT16,
+    TENSOR_BOOL8 = ANEURALNETWORKS_TENSOR_BOOL8,
+    FLOAT16 = ANEURALNETWORKS_FLOAT16,
+    TENSOR_QUANT8_SYMM_PER_CHANNEL = ANEURALNETWORKS_TENSOR_QUANT8_SYMM_PER_CHANNEL,
 };
 
 enum class ExecutePreference {
@@ -58,18 +61,48 @@ enum class Result {
     BAD_STATE = ANEURALNETWORKS_BAD_STATE,
 };
 
+struct SymmPerChannelQuantParams {
+    ANeuralNetworksSymmPerChannelQuantParams params;
+    std::vector<float> scales;
+
+    SymmPerChannelQuantParams(std::vector<float> scalesVec, uint32_t channelDim)
+        : scales(std::move(scalesVec)) {
+        params = {.scaleCount = static_cast<uint32_t>(scales.size()),
+                  .scales = scales.size() > 0 ? scales.data() : nullptr,
+                  .channelDim = channelDim};
+    }
+};
+
 struct OperandType {
     ANeuralNetworksOperandType operandType;
     std::vector<uint32_t> dimensions;
 
+    SymmPerChannelQuantParams channelQuant;
+
     OperandType(Type type, std::vector<uint32_t> d, float scale = 0.0f, int32_t zeroPoint = 0)
-        : dimensions(std::move(d)) {
+        : dimensions(std::move(d)), channelQuant({}, 0) {
         operandType = {
                 .type = static_cast<int32_t>(type),
                 .dimensionCount = static_cast<uint32_t>(dimensions.size()),
                 .dimensions = dimensions.size() > 0 ? dimensions.data() : nullptr,
                 .scale = scale,
                 .zeroPoint = zeroPoint,
+        };
+    }
+
+    OperandType(Type type, std::vector<uint32_t> data, float scale, int32_t zeroPoint,
+                SymmPerChannelQuantParams&& channelQuant)
+        : dimensions(std::move(data)), channelQuant(std::move(channelQuant)) {
+        operandType = {
+                .type = static_cast<int32_t>(type),
+                .dimensionCount = static_cast<uint32_t>(dimensions.size()),
+                .dimensions = dimensions.size() > 0 ? dimensions.data() : nullptr,
+                .scale = scale,
+                .zeroPoint = zeroPoint,
+                .extraParams =
+                        {
+                                .channelQuant = channelQuant.params,
+                        },
         };
     }
 };
