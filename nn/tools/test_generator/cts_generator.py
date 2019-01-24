@@ -29,6 +29,7 @@ import math
 import os
 import re
 import sys
+import traceback
 
 # Stuff from test generator
 import test_generator as tg
@@ -131,7 +132,7 @@ def DumpCtsModel(model, model_fd):
     print("void %s(Model *model) {"%(model.createFunctionName), file=model_fd)
 
     # Phase 0: types
-    for t in tg.Type.GetAllTypes():
+    for t in model.GetTypes():
         if t.scale == 0.0 and t.zeroPoint == 0:
             typeDef = "OperandType %s(Type::%s, %s);"%(t, t.type, t.GetDimensionsString())
         else:
@@ -171,11 +172,24 @@ def DumpCtsModel(model, model_fd):
     model.dumped = True
 
 def DumpMixedType(operands, feedDict):
-    typedMap = {}
+    supportedTensors = [
+        "TENSOR_FLOAT16",
+        "TENSOR_FLOAT32",
+        "TENSOR_INT32",
+        "TENSOR_QUANT8_ASYMM",
+        "TENSOR_OEM_BYTE",
+        "TENSOR_QUANT16_SYMM",
+        "TENSOR_FLOAT16",
+    ]
+    typedMap = {t: [] for t in supportedTensors}
     FeedAndGet = lambda op, d: op.Feed(d).GetListInitialization()
     # group the operands by type
     for operand in operands:
-        typedMap.setdefault(operand.type.type, []).append(FeedAndGet(operand, feedDict))
+        try:
+            typedMap[operand.type.type].append(FeedAndGet(operand, feedDict))
+        except KeyError as e:
+            traceback.print_exc()
+            sys.exit("Cannot dump tensor of type {}".format(operand.type.type))
     mixedTypeTemplate = """\
 {{ // See tools/test_generator/include/TestHarness.h:MixedTyped
   // int -> FLOAT32 map
@@ -183,23 +197,34 @@ def DumpMixedType(operands, feedDict):
   // int -> INT32 map
   {{{int32_map}}},
   // int -> QUANT8_ASYMM map
-  {{{uint8_map}}}\n}}"""
+  {{{uint8_map}}},
+  // int -> QUANT16_SYMM map
+  {{{int16_map}}},
+  // int -> FLOAT16 map
+  {{{float16_map}}},
+}}"""
     return mixedTypeTemplate.format(
         float32_map=tg.GetJointStr(typedMap.get("TENSOR_FLOAT32", [])),
         int32_map=tg.GetJointStr(typedMap.get("TENSOR_INT32", [])),
         uint8_map=tg.GetJointStr(typedMap.get("TENSOR_QUANT8_ASYMM", []) +
-                                 typedMap.get("TENSOR_OEM_BYTE", [])))
+                                 typedMap.get("TENSOR_OEM_BYTE", [])),
+        int16_map=tg.GetJointStr(typedMap.get("TENSOR_QUANT16_SYMM", [])),
+        float16_map=tg.GetJointStr(typedMap.get("TENSOR_FLOAT16", [])))
 
 # Dump Example file for Cts tests
 def DumpCtsExample(example, example_fd):
     print("std::vector<MixedTypedExample> %s = {"%(example.examplesName), file=example_fd)
     for inputFeedDict, outputFeedDict in example.feedDicts:
         print ('// Begin of an example', file = example_fd)
-        print ('{', file = example_fd)
+        print ('{\n.operands = {', file = example_fd)
         inputs = DumpMixedType(example.model.GetInputs(), inputFeedDict)
         outputs = DumpMixedType(example.model.GetOutputs(), outputFeedDict)
         print ('//Input(s)\n%s,' % inputs , file = example_fd)
         print ('//Output(s)\n%s' % outputs, file = example_fd)
+        print ('},', file = example_fd)
+        if example.expectedMultinomialDistributionTolerance is not None:
+          print ('.expectedMultinomialDistributionTolerance = %f' %
+                 example.expectedMultinomialDistributionTolerance, file = example_fd)
         print ('}, // End of an example', file = example_fd)
     print("};\n", file=example_fd)
 
@@ -222,7 +247,8 @@ if __name__ == '__main__':
     ParseCmdLine()
     while tg.FileNames.NextFile():
         if Configuration.force_regenerate or NeedRegenerate():
-            exec (open(tg.FileNames.specFile, "r").read())
+            print("Generating test(s) from spec: %s" % tg.FileNames.specFile, file=sys.stderr)
+            exec(open(tg.FileNames.specFile, "r").read())
             print("Output CTS model: %s" % tg.FileNames.modelFile, file=sys.stderr)
             print("Output example:%s" % tg.FileNames.exampleFile, file=sys.stderr)
             print("Output CTS test: %s" % tg.FileNames.testFile, file=sys.stderr)
