@@ -39,7 +39,7 @@
 #endif
 
 namespace generated_tests {
-using namespace android::nn::wrapper;
+using namespace android::nn::test_wrapper;
 using namespace test_helper;
 
 namespace {
@@ -74,7 +74,9 @@ static void printAll(std::ostream& os, const MixedTyped& test) {
     print<uint8_t>(os, test);
     print<int16_t>(os, test);
     print<_Float16>(os, test);
-    static_assert(5 == std::tuple_size<MixedTyped>::value,
+    print<bool8>(os, test);
+    print<int8_t>(os, test);
+    static_assert(7 == std::tuple_size<MixedTyped>::value,
                   "Number of types in MixedTyped changed, but printAll function wasn't updated");
 }
 

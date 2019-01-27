@@ -20,9 +20,34 @@ cc_library_headers {
     export_include_dirs: ["include"],
 }
 
+cc_defaults {
+    name: "neuralnetworks_operations",
+    srcs: [
+        "OperationResolver.cpp",
+        "operations/ChannelShuffle.cpp",
+        "operations/Comparisons.cpp",
+        "operations/Elementwise.cpp",
+        "operations/EmbeddingLookupSparse.cpp",
+        "operations/Gather.cpp",
+        "operations/GenerateProposals.cpp",
+        "operations/HeatmapMaxKeypoint.cpp",
+        "operations/InstanceNormalization.cpp",
+        "operations/LogicalAndOr.cpp",
+        "operations/LogicalNot.cpp",
+        "operations/LogSoftmax.cpp",
+        "operations/Neg.cpp",
+        "operations/PRelu.cpp",
+        "operations/Reduce.cpp",
+        "operations/RoiAlign.cpp",
+        "operations/RoiPooling.cpp",
+        "operations/Select.cpp",
+        "operations/SparseToDense.cpp",
+    ],
+}
+
 cc_library_static {
     name: "libneuralnetworks_utils",
-    defaults: ["neuralnetworks_defaults"],
+    defaults: ["neuralnetworks_defaults", "neuralnetworks_operations"],
     host_supported: false,
     vendor_available: true,
     export_include_dirs: ["include"],
@@ -31,6 +56,9 @@ cc_library_static {
     ],
     header_libs: [
         "libneuralnetworks_headers",
+        "libeigen",
+        "gemmlowp_headers",
+        "tensorflow_headers",
     ],
     shared_libs: [
         "libhidltransport",
@@ -41,17 +69,29 @@ cc_library_static {
         "android.hidl.allocator@1.0",
         "android.hidl.memory@1.0",
     ],
+    cflags: [
+        "-Werror",
+        "-Wall",
+        "-Wextra",
+        "-Wno-extern-c-compat",
+        "-Wno-sign-compare",
+        "-Wno-unused-local-typedef",
+        "-Wno-unused-parameter",
+        "-Wno-unused-variable",
+        "-Wno-invalid-partial-specialization",
+    ],
 }
 
 cc_library_static {
     name: "libneuralnetworks_common",
-    defaults: ["neuralnetworks_defaults"],
+    defaults: ["neuralnetworks_defaults", "neuralnetworks_operations"],
     host_supported: false,
     vendor_available: true,
     // b/109953668, disable OpenMP
     // openmp: true,
-    export_include_dirs: ["include"],
-
+    export_include_dirs: [
+        "include",
+    ],
     srcs: [
         "CpuExecutor.cpp",
         "GraphDump.cpp",
@@ -62,18 +102,14 @@ cc_library_static {
         "operations/Activation.cpp",
         "operations/ArgMinMax.cpp",
         "operations/Cast.cpp",
-        "operations/ChannelShuffle.cpp",
         "operations/Concatenation.cpp",
         "operations/Conv2D.cpp",
         "operations/DepthwiseConv2D.cpp",
         "operations/EmbeddingLookup.cpp",
         "operations/ExpandDims.cpp",
         "operations/FullyConnected.cpp",
-        "operations/Gather.cpp",
-        "operations/GenerateProposals.cpp",
         "operations/GroupedConv2D.cpp",
         "operations/HashtableLookup.cpp",
-        "operations/HeatmapMaxKeypoint.cpp",
         "operations/LSHProjection.cpp",
         "operations/LSTM.cpp",
         "operations/MaximumMinimum.cpp",
@@ -81,12 +117,12 @@ cc_library_static {
         "operations/Normalization.cpp",
         "operations/Pooling.cpp",
         "operations/Pow.cpp",
-	"operations/TopK_V2.cpp",
+        "operations/TopK_V2.cpp",
         "operations/QuantizedLSTM.cpp",
         "operations/Reshape.cpp",
         "operations/RNN.cpp",
-        "operations/RoiAlign.cpp",
         "operations/SimpleMath.cpp",
+        "operations/Slice.cpp",
         "operations/Split.cpp",
         "operations/StridedSlice.cpp",
         "operations/SVDF.cpp",
@@ -121,6 +157,7 @@ cc_library_static {
     ],
 
     cflags: [
+        "-DNN_INCLUDE_CPU_IMPLEMENTATION",
         "-DNAMESPACE_FOR_HASH_FUNCTIONS=farmhash",
         "-Werror",
         "-Wall",
@@ -132,7 +169,6 @@ cc_library_static {
         "-Wno-unused-variable",
         "-Wno-invalid-partial-specialization",
     ],
-
 }
 
 cc_test {

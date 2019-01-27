@@ -1,6 +1,7 @@
 // clang-format off
 // Generated file (from: lsh_projection_weights_as_inputs.mod.py). Do not edit
-std::vector<MixedTypedExample> examples = {
+std::vector<MixedTypedExample>& get_examples() {
+static std::vector<MixedTypedExample> examples = {
 // Begin of an example
 {
 .operands = {
@@ -16,6 +17,10 @@ std::vector<MixedTypedExample> examples = {
   {},
   // int -> FLOAT16 map
   {},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
+  {},
 },
 //Output(s)
 { // See tools/test_generator/include/TestHarness.h:MixedTyped
@@ -29,8 +34,14 @@ std::vector<MixedTypedExample> examples = {
   {},
   // int -> FLOAT16 map
   {},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
+  {},
 }
 },
 }, // End of an example
+};
+return examples;
 };
 

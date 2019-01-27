@@ -18,6 +18,7 @@
 
 #include "ValidateHal.h"
 #include "NeuralNetworks.h"
+#include "OperationsUtils.h"
 #include "Tracing.h"
 #include "Utils.h"
 
@@ -55,6 +56,59 @@ private:
     std::vector<size_t> mPoolSizes;
 };
 
+static bool validateOperandExtraParams(const V1_2::Operand& operand, uint32_t index) {
+    switch (operand.type) {
+        case OperandType::FLOAT32:
+        case OperandType::INT32:
+        case OperandType::UINT32:
+        case OperandType::BOOL:
+        case OperandType::TENSOR_FLOAT32:
+        case OperandType::TENSOR_FLOAT16:
+        case OperandType::TENSOR_INT32:
+        case OperandType::TENSOR_QUANT8_ASYMM:
+        case OperandType::TENSOR_QUANT16_SYMM:
+        case OperandType::TENSOR_BOOL8:
+            NN_RET_CHECK(operand.extraParams.getDiscriminator() ==
+                         V1_2::Operand::ExtraParams::hidl_discriminator::none)
+                    << "Operand " << index << ": Operand of type "
+                    << getOperandTypeName(operand.type) << " with a Channel Quantization params";
+            break;
+        case OperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL: {
+            NN_RET_CHECK(operand.extraParams.getDiscriminator() ==
+                         V1_2::Operand::ExtraParams::hidl_discriminator::channelQuant)
+                    << "Operand " << index << ": Operand of type "
+                    << getOperandTypeName(operand.type) << " without a Channel Quantization params";
+            auto& channelQuant = operand.extraParams.channelQuant();
+
+            size_t count = operand.dimensions.size();
+            NN_RET_CHECK_LT(channelQuant.channelDim, count)
+                    << "Operand " << index << ": Operand of type "
+                    << getOperandTypeName(operand.type)
+                    << " with an invalid channelQuant.channelDim " << channelQuant.channelDim
+                    << ", must be valid dimension index in range [0, " << count << ")";
+            uint32_t expected = operand.dimensions[channelQuant.channelDim];
+            NN_RET_CHECK_EQ(channelQuant.scales.size(), expected)
+                    << "Operand " << index << ": Operand of type "
+                    << getOperandTypeName(operand.type) << " with a wrong-sized scales, "
+                    << "expected " << expected << " was " << channelQuant.scales.size();
+            NN_RET_CHECK_NE(expected, 0)
+                    << "Operand " << index << ": Operand of type "
+                    << getOperandTypeName(operand.type) << " channel dimension "
+                    << channelQuant.channelDim << " is underspecified (can't be 0)";
+            for (uint32_t i = 0; i < expected; ++i) {
+                NN_RET_CHECK_GT(channelQuant.scales[i], .0f)
+                        << "Operand " << index << ": Operand of type "
+                        << getOperandTypeName(operand.type) << " with a negative value in scales["
+                        << i << "]=" << channelQuant.scales[i];
+            }
+        } break;
+        default:
+            // No validation for the OEM types.
+            break;
+    }
+    return true;
+}
+
 template <typename VersionedOperand>
 static bool validateOperands(const hidl_vec<VersionedOperand>& operands,
                              const hidl_vec<uint8_t>& operandValues,
@@ -72,6 +126,7 @@ static bool validateOperands(const hidl_vec<VersionedOperand>& operands,
         V1_2::Operand operand = convertToV1_2(versionedOperand);
         // Validate type and dimensions.
         switch (operand.type) {
+            case OperandType::FLOAT16:
             case OperandType::FLOAT32:
             case OperandType::INT32:
             case OperandType::UINT32:
@@ -90,6 +145,8 @@ static bool validateOperands(const hidl_vec<VersionedOperand>& operands,
             case OperandType::TENSOR_INT32:
             case OperandType::TENSOR_QUANT8_ASYMM:
             case OperandType::TENSOR_QUANT16_SYMM:
+            case OperandType::TENSOR_BOOL8:
+            case OperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL:
             case OperandType::TENSOR_OEM_BYTE: {
                 if (operand.dimensions.size() == 0) {
                     LOG(ERROR) << "Operand " << index << ": Tensor has dimensions of rank 0";
@@ -110,12 +167,15 @@ static bool validateOperands(const hidl_vec<VersionedOperand>& operands,
 
         // Validate the scale.
         switch (operand.type) {
+            case OperandType::FLOAT16:
             case OperandType::FLOAT32:
             case OperandType::INT32:
             case OperandType::UINT32:
             case OperandType::BOOL:
             case OperandType::TENSOR_FLOAT16:
             case OperandType::TENSOR_FLOAT32:
+            case OperandType::TENSOR_BOOL8:
+            case OperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL:
                 if (operand.scale != 0.f) {
                     LOG(ERROR) << "Operand " << index << ": Operand of type "
                                << getOperandTypeName(operand.type) << " with a non-zero scale ("
@@ -154,6 +214,7 @@ static bool validateOperands(const hidl_vec<VersionedOperand>& operands,
 
         // Validate the zeroPoint.
         switch (operand.type) {
+            case OperandType::FLOAT16:
             case OperandType::FLOAT32:
             case OperandType::INT32:
             case OperandType::UINT32:
@@ -161,6 +222,8 @@ static bool validateOperands(const hidl_vec<VersionedOperand>& operands,
             case OperandType::TENSOR_FLOAT16:
             case OperandType::TENSOR_FLOAT32:
             case OperandType::TENSOR_INT32:
+            case OperandType::TENSOR_BOOL8:
+            case OperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL:
                 if (operand.zeroPoint != 0) {
                     LOG(ERROR) << "Operand " << index << ": Operand of type "
                                << getOperandTypeName(operand.type) << " with an non-zero zeroPoint "
@@ -188,6 +251,8 @@ static bool validateOperands(const hidl_vec<VersionedOperand>& operands,
                 // No validation for the OEM types.
                 break;
         }
+
+        validateOperandExtraParams(operand, index);
 
         // Validate the lifetime and the location.
         const DataLocation& location = operand.location;
@@ -363,6 +428,10 @@ template<typename VersionedModel>
 static bool validateModelVersioned(const VersionedModel& model) {
     NNTRACE_FULL(NNTRACE_LAYER_UTILITY, NNTRACE_PHASE_UNSPECIFIED,
                  "validateModelVersioned");
+    if (model.operations.size() == 0 || model.operands.size() == 0) {
+        LOG(ERROR) << "Invalid empty model.";
+        return false;
+    }
     // We only need versioned operands for their validation. For all the other
     // validations we can use operands upcasted to the latest version.
     const hidl_vec<Operand> latestVersionOperands = convertToV1_2(model.operands);
@@ -508,6 +577,7 @@ bool validOperandType(V1_0::OperandType operandType) {
 
 bool validOperandType(V1_2::OperandType operandType) {
     switch (operandType) {
+        case V1_2::OperandType::FLOAT16:
         case V1_2::OperandType::FLOAT32:
         case V1_2::OperandType::INT32:
         case V1_2::OperandType::UINT32:
@@ -517,6 +587,8 @@ bool validOperandType(V1_2::OperandType operandType) {
         case V1_2::OperandType::TENSOR_INT32:
         case V1_2::OperandType::TENSOR_QUANT8_ASYMM:
         case V1_2::OperandType::TENSOR_QUANT16_SYMM:
+        case V1_2::OperandType::TENSOR_BOOL8:
+        case V1_2::OperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL:
         case V1_2::OperandType::OEM:
         case V1_2::OperandType::TENSOR_OEM_BYTE:
             return true;

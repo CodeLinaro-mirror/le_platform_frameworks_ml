@@ -55,16 +55,116 @@ inline tflite::RuntimeShape convertShapeToTflshape(const Shape& shape) {
 }
 
 inline void convertFloat16ToFloat32(const _Float16* input, std::vector<float>* output) {
+    CHECK(input != nullptr);
+    CHECK(output != nullptr);
     for (int i = 0; i < output->size(); ++i) {
         (*output)[i] = static_cast<float>(input[i]);
     }
 }
 
 inline void convertFloat32ToFloat16(const std::vector<float>& input, _Float16* output) {
+    CHECK(output != nullptr);
     for (int i = 0; i < input.size(); ++i) {
         output[i] = input[i];
     }
 }
+
+template <typename T>
+inline bool convertNchwToNhwc(const T* nchw, const Shape& nchwShape, std::vector<T>* nhwc,
+                              Shape* nhwcShape) {
+    NN_RET_CHECK_EQ(getNumberOfDimensions(nchwShape), 4)
+            << "Error converting a non-4-D tensor to NHWC layout";
+    *nhwcShape = nchwShape;
+    const auto& fromDim = nchwShape.dimensions;
+    nhwcShape->dimensions = {fromDim[0], fromDim[2], fromDim[3], fromDim[1]};
+    nhwc->resize(getNumberOfElements(nchwShape));
+    auto to = nhwc->data();
+    uint32_t spatialSize = fromDim[2] * fromDim[3];
+    for (uint32_t n = 0; n < fromDim[0]; n++) {
+        for (uint32_t hw = 0; hw < spatialSize; hw++) {
+            for (uint32_t c = 0; c < fromDim[1]; c++) {
+                uint32_t fromIndex = n * fromDim[1] * spatialSize + c * spatialSize + hw;
+                *to++ = nchw[fromIndex];
+            }
+        }
+    }
+    return true;
+}
+
+template <typename T>
+inline bool convertNhwcToNchw(const std::vector<T>& nhwc, const Shape& nhwcShape, T* nchw) {
+    NN_RET_CHECK_EQ(getNumberOfDimensions(nhwcShape), 4)
+            << "Error converting a non-4-D tensor to NCHW layout";
+    const auto& fromDim = nhwcShape.dimensions;
+    const auto from = nhwc.data();
+    uint32_t spatialSize = fromDim[1] * fromDim[2];
+    for (uint32_t n = 0; n < fromDim[0]; n++) {
+        for (uint32_t c = 0; c < fromDim[3]; c++) {
+            for (uint32_t hw = 0; hw < spatialSize; hw++) {
+                uint32_t fromIndex = n * spatialSize * fromDim[3] + hw * fromDim[3] + c;
+                *nchw++ = from[fromIndex];
+            }
+        }
+    }
+    return true;
+}
+
+template <typename T>
+class InputWithLayout {
+   public:
+    InputWithLayout(bool useNchw) : mDataOriginal(nullptr), mUseNchw(useNchw) {}
+
+    bool initialize(const T* data, const Shape& shape) {
+        mDataOriginal = data;
+        mShape = shape;
+        if (mUseNchw) {
+            return convertNchwToNhwc(mDataOriginal, shape, &mDataNhwc, &mShape);
+        }
+        return true;
+    }
+
+    const T* getNhwcBuffer() { return mUseNchw ? mDataNhwc.data() : mDataOriginal; }
+    const Shape& getNhwcShape() { return mShape; }
+
+   private:
+    const T* mDataOriginal;
+    std::vector<T> mDataNhwc;
+    Shape mShape;
+    bool mUseNchw;
+};
+
+template <typename T>
+class OutputWithLayout {
+   public:
+    OutputWithLayout(bool useNchw) : mDataOriginal(nullptr), mUseNchw(useNchw) {}
+
+    bool initialize(T* data, const Shape& shape) {
+        NN_RET_CHECK_EQ(getNumberOfDimensions(shape), 4);
+        mDataOriginal = data;
+        mShape = shape;
+        if (mUseNchw) {
+            const auto& dim = shape.dimensions;
+            mShape.dimensions = {dim[0], dim[2], dim[3], dim[1]};
+            mDataNhwc.resize(getNumberOfElements(shape));
+        }
+        return true;
+    }
+
+    T* getNhwcBuffer() { return mUseNchw ? mDataNhwc.data() : mDataOriginal; }
+    const Shape& getNhwcShape() { return mShape; }
+    bool commit() {
+        if (mUseNchw) {
+            return convertNhwcToNchw(mDataNhwc, mShape, mDataOriginal);
+        }
+        return true;
+    }
+
+   private:
+    T* mDataOriginal;
+    std::vector<T> mDataNhwc;
+    Shape mShape;
+    bool mUseNchw;
+};
 
 } // nn
 } // android

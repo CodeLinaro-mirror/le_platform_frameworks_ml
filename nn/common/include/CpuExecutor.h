@@ -55,6 +55,8 @@ struct RunTimeOperandInfo {
     // always 0.
     uint32_t numberOfUsesLeft;
 
+    Operand::ExtraParams extraParams;
+
     Shape shape() const {
         return Shape{.type = type, .dimensions = dimensions, .scale = scale, .offset = zeroPoint};
     }
@@ -178,9 +180,9 @@ namespace {
 
 template <typename T>
 T getScalarData(const RunTimeOperandInfo& info) {
-  // TODO: Check buffer is at least as long as size of data.
-  T* data = reinterpret_cast<T*>(info.buffer);
-  return data[0];
+    // TODO: Check buffer is at least as long as size of data.
+    T* data = reinterpret_cast<T*>(info.buffer);
+    return data[0];
 }
 
 inline bool IsNullInput(const RunTimeOperandInfo *input) {

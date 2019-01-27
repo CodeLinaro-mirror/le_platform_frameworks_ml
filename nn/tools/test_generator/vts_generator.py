@@ -27,6 +27,7 @@ from __future__ import print_function
 import argparse
 from functools import reduce
 import math
+import numpy as np
 import os
 import re
 import struct
@@ -42,6 +43,7 @@ from test_generator import Configuration
 from test_generator import DataTypeConverter
 from test_generator import DataLayoutConverter
 from test_generator import Example
+from test_generator import Float16Scalar
 from test_generator import Float32Scalar
 from test_generator import Float32Vector
 from test_generator import IgnoredOutput
@@ -56,6 +58,7 @@ from test_generator import Parameter
 from test_generator import ParameterAsInputConverter
 from test_generator import RelaxedModeConverter
 from test_generator import SmartOpen
+from test_generator import SymmPerChannelQuantParams
 
 # Dumping methods that shared with CTS generator
 from cts_generator import DumpCtsExample
@@ -86,11 +89,12 @@ def generate_vts_operands(model):
             .scale = {scale},
             .zeroPoint = {zero_point},
             .lifetime = OperandLifeTime::{lifetime},
-            .location = {{.poolIndex = 0, .offset = {offset}, .length = {length}}},
+            .location = {{.poolIndex = 0, .offset = {offset}, .length = {length}}},{extraParams}
         }}"""
   offset = 0
   op_definitions = []
-  for o in model.operands:
+  extra_params_definitions = []
+  for index, o in enumerate(model.operands):
     length = o.type.GetByteSize() if isinstance(o, Parameter) else 0
     op = {
         "operand_type": o.type.type,
@@ -100,15 +104,30 @@ def generate_vts_operands(model):
         "zero_point": str(int(o.type.zeroPoint)),
         "lifetime": o.lifetime,
         "offset": offset if isinstance(o, Parameter) else 0,
-        "length": length
+        "length": length,
+        "extraParams": "" if o.type.extraParams is None else "\n            .extraParams = std::move(extraParams%d)," % (index,),
     }
     offset += length
     op_definitions.append(op_def.format(**op))
 
-  op_vec = """\
+    extra_params_def = """\
+    Operand::ExtraParams extraParams{index};
+    extraParams{index}.{setMethodName}({param});
+"""
+
+    ep = o.type.extraParams
+    if ep is not None:
+      op = {
+          "index": index,
+          "setMethodName": ep.GetVtsSetter(),
+          "param": ep.GetVtsConstructor(),
+      }
+      extra_params_definitions.append(extra_params_def.format(**op))
+
+  op_vec = """{0}\
     const std::vector<Operand> operands = {{
-{0}
-    }};""".format(",\n".join(op_definitions))
+{1}
+    }};""".format(",\n".join(extra_params_definitions), ",\n".join(op_definitions))
   return op_vec
 
 # Generate VTS operand values
@@ -117,10 +136,14 @@ def generate_vts_operand_values(operands):
     binit = []
     for w in weights:
         ty = w.type.type
-        if ty == "TENSOR_QUANT8_ASYMM":
+        if ty in ("TENSOR_QUANT8_ASYMM", "TENSOR_QUANT8_SYMM_PER_CHANNEL"):
             binit += w.value
-        elif ty == "BOOL":
+        elif ty == "BOOL" or ty == "TENSOR_BOOL8":
             binit += [1 if x else 0 for x in w.value]
+        elif ty == "TENSOR_FLOAT16" or ty == "FLOAT16":
+            for f in w.value:
+                # The pack format for float16 is not available until Python 3.6.
+                binit += [int(x) for x in np.float16(f).tostring()]
         elif ty in {"TENSOR_FLOAT32", "FLOAT32", "TENSOR_INT32", "INT32"}:
             fmt = "f" if (ty == "TENSOR_FLOAT32" or ty == "FLOAT32") else "i"
             for f in w.value:
@@ -242,11 +265,11 @@ TEST_F(NeuralnetworksHidlTest, {test_name}) {{
   generated_tests::Execute(device,
                            {namespace}::{create_model_name},
                            {namespace}::{is_ignored_name},
-                           {namespace}::{examples_name});\n}}
+                           {namespace}::get_{examples_name}());\n}}
 
 TEST_F(ValidationTest, {test_name}) {{
   const Model model = {namespace}::{create_model_name}();
-  const std::vector<Request> requests = createRequests({namespace}::{examples_name});
+  const std::vector<Request> requests = createRequests({namespace}::get_{examples_name}());
   validateModel(model);
   validateRequests(model, requests);
 }}\n

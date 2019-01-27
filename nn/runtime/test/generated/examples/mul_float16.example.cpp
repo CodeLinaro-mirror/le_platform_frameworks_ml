@@ -1,6 +1,7 @@
 // clang-format off
 // Generated file (from: mul_float16.mod.py). Do not edit
-std::vector<MixedTypedExample> examples = {
+std::vector<MixedTypedExample>& get_examples() {
+static std::vector<MixedTypedExample> examples = {
 // Begin of an example
 {
 .operands = {
@@ -16,6 +17,10 @@ std::vector<MixedTypedExample> examples = {
   {},
   // int -> FLOAT16 map
   {{0, {1.0009765625f, 1.0f, 2.5f}}, {1, {2.0f, 0.0001f, 3.5f}}},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
+  {},
 },
 //Output(s)
 { // See tools/test_generator/include/TestHarness.h:MixedTyped
@@ -29,8 +34,14 @@ std::vector<MixedTypedExample> examples = {
   {},
   // int -> FLOAT16 map
   {{0, {2.001953125f, 0.0001000165f, 8.75f}}},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
+  {},
 }
 },
 }, // End of an example
+};
+return examples;
 };
 

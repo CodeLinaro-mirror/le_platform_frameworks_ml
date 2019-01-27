@@ -22,12 +22,13 @@
 #include "Memory.h"
 #include "ModelBuilder.h"
 #include "NeuralNetworks.h"
+#include "VersionedInterfaces.h"
 
 #include <unordered_map>
 #include <vector>
 
-using ::android::hardware::neuralnetworks::V1_0::implementation::ExecutionCallback;
-using ::android::hardware::neuralnetworks::V1_0::implementation::PreparedModelCallback;
+using ::android::hardware::neuralnetworks::V1_2::implementation::ExecutionCallback;
+using ::android::hardware::neuralnetworks::V1_2::implementation::PreparedModelCallback;
 
 namespace android {
 namespace nn {
@@ -76,11 +77,20 @@ public:
                   size_t length);
     int setOutputFromMemory(uint32_t index, const ANeuralNetworksOperandType* type,
                             const Memory* memory, size_t offset, size_t length);
-    int startCompute(sp<ExecutionCallback>* synchronizationCallback);
+
+    int computeAsynchronously(sp<ExecutionCallback>* synchronizationCallback) {
+        CHECK(synchronizationCallback != nullptr);
+        return compute(synchronizationCallback);
+    }
+    int computeSynchronously() { return compute(nullptr); }
 
     const ModelBuilder* getModel() const { return mModel; }
 
-private:
+   private:
+    // If a callback is provided, then this is asynchronous. If a callback is
+    // not provided (i.e., is nullptr), then this is synchronous.
+    int compute(sp<ExecutionCallback>* synchronizationCallback);
+
     const ModelBuilder* mModel;
     const ExecutionPlan* mPlan;
 
@@ -108,7 +118,7 @@ private:
 // with that step is executed in its entirety on a single device (or
 // on the CPU).
 class StepExecutor {
-public:
+   public:
     // executionBuilder
     //     Describes the full (possibly multiple-"step") execution.
     // model
@@ -118,9 +128,8 @@ public:
     //     The device on which to execute the "step", and the prepared
     //     model to execute on that device.  (Both are nullptr in the
     //     case of CPU.)
-    StepExecutor(const ExecutionBuilder* executionBuilder,
-                 const ModelBuilder* model,
-                 VersionedIDevice* driver, sp<IPreparedModel> preparedModel);
+    StepExecutor(const ExecutionBuilder* executionBuilder, const ModelBuilder* model,
+                 VersionedIDevice* driver, std::shared_ptr<VersionedIPreparedModel> preparedModel);
 
     // Map inputs and outputs from ExecutionBuilder to StepExecutor,
     // in the case where we have a single-"step" execution (i.e., the executor
@@ -131,12 +140,10 @@ public:
     // one at a time.  Note that these are input/output indexes, not
     // operand indexes.
     void mapInput(uint32_t builderIndex, uint32_t executorIndex) {
-        mapInputOrOutput(mExecutionBuilder->mInputs[builderIndex],
-                         &mInputs[executorIndex]);
+        mapInputOrOutput(mExecutionBuilder->mInputs[builderIndex], &mInputs[executorIndex]);
     }
     void mapOutput(uint32_t builderIndex, uint32_t executorIndex) {
-        mapInputOrOutput(mExecutionBuilder->mOutputs[builderIndex],
-                         &mOutputs[executorIndex]);
+        mapInputOrOutput(mExecutionBuilder->mOutputs[builderIndex], &mOutputs[executorIndex]);
     }
     void mapOutputToInput(uint32_t builderIndex, uint32_t executorIndex) {
         mapInputOrOutput(mExecutionBuilder->mOutputs[builderIndex],
@@ -165,7 +172,7 @@ public:
 
     bool isCpu() const { return mDriver == nullptr; }
 
-private:
+   private:
     int allocatePointerArgumentsToPool(std::vector<ModelArgumentInfo>* args, Memory* memory);
     int startComputeOnDevice(sp<ExecutionCallback>* synchronizationCallback);
 
@@ -183,7 +190,8 @@ private:
     // compiled forms; and device on which to execute it
     const ModelBuilder* mModel;
     VersionedIDevice* mDriver;          // nullptr if CPU execution
-    sp<IPreparedModel> mPreparedModel;  // nullptr if CPU execution or if bypassing ExecutionPlan
+    std::shared_ptr<VersionedIPreparedModel>
+            mPreparedModel;  // nullptr if CPU execution or if bypassing ExecutionPlan
 
     // The information we'll send to the driver about the inputs and outputs.
     // Note that we build this in two steps:

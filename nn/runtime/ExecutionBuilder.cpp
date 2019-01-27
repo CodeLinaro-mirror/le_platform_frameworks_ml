@@ -272,7 +272,7 @@ static void asyncStartComputePartitioned(const ExecutionBuilder* executionBuilde
                                          std::shared_ptr<ExecutionPlan::Controller> controller,
                                          bool allowFallback,
                                          const sp<ExecutionCallback>& executionCallback) {
-    VLOG(EXECUTION) << "ExecutionBuilder::startCompute (from plan, iteratively)";
+    VLOG(EXECUTION) << "ExecutionBuilder::compute (from plan, iteratively)";
     while (true) {
         std::shared_ptr<StepExecutor> executor;
         VLOG(EXECUTION) << "looking for next StepExecutor";
@@ -327,93 +327,63 @@ static void asyncStartComputePartitioned(const ExecutionBuilder* executionBuilde
     }
 }
 
-int ExecutionBuilder::startCompute(sp<ExecutionCallback>* synchronizationCallback) {
-    *synchronizationCallback = nullptr;
+int ExecutionBuilder::compute(sp<ExecutionCallback>* synchronizationCallback) {
+    const bool synchronous = (synchronizationCallback == nullptr);
+
+    if (!synchronous) {
+        *synchronizationCallback = nullptr;
+    }
 
     // TODO validate that we have full types for all inputs and outputs,
     // that the graph is not cyclic,
 
+    auto name = [synchronous] { return synchronous ? "compute" : "startCompute"; };
     for (auto& p : mInputs) {
         if (p.state == ModelArgumentInfo::UNSPECIFIED) {
-            LOG(ERROR) << "ANeuralNetworksExecution_startCompute not all inputs specified";
+            LOG(ERROR) << "ANeuralNetworksExecution_" << name() << " not all inputs specified";
             return ANEURALNETWORKS_BAD_DATA;
         }
     }
     for (auto& p : mOutputs) {
         if (p.state == ModelArgumentInfo::UNSPECIFIED) {
-            LOG(ERROR) << "ANeuralNetworksExecution_startCompute not all outputs specified";
+            LOG(ERROR) << "ANeuralNetworksExecution_" << name() << " not all outputs specified";
             return ANEURALNETWORKS_BAD_DATA;
         }
     }
 
-#ifndef DISABLE_PARTITIONED_EXECUTION
-    {
-        // TODO: Remove the non-plan-based path once we've fully integrated ExecutionPlan
-        // with the compilation and execution phases of the NN API?  Or retain that path
-        // as a fallback in the case of partitioning failure?
-        //
-        // TODO: Entire plan-based-path should run in an asynchronous thread --
-        // take the asynchronous thread logic out of startComputeOnCpu() and use
-        // it to wrap the plan-based-path.
-        if (mPartitioning > 0) {
-            const bool allowFallback = DeviceManager::partitioningAllowsFallback(mPartitioning);
-            std::shared_ptr<ExecutionPlan::Controller> controller = mPlan->makeController(this);
-            if (controller == nullptr) {
-                if (!allowFallback) {
-                    return ANEURALNETWORKS_OP_FAILED;
-                }
-            } else {
-                // TODO: use a thread pool
+    // TODO: For asynchronous execution, entire plan-based-path should run in an
+    // asynchronous thread -- take the asynchronous thread logic out of
+    // startComputeOnCpu() and use it to wrap the plan-based-path.
+    const bool allowFallback = DeviceManager::partitioningAllowsFallback(mPartitioning);
+    std::shared_ptr<ExecutionPlan::Controller> controller = mPlan->makeController(this);
+    if (synchronous) {
+        VLOG(EXECUTION) << "ExecutionBuilder::compute (synchronous API)";
+        sp<ExecutionCallback> localSynchronizationCallback = new ExecutionCallback();
+        asyncStartComputePartitioned(this, mPlan, controller, allowFallback,
+                                     localSynchronizationCallback);
+        localSynchronizationCallback->wait();
+        return convertErrorStatusToResultCode(localSynchronizationCallback->getStatus());
+    } else /* asynchronous */ {
+        // TODO: use a thread pool
 
-                // Prepare the callback for asynchronous execution.
-                // sp<ExecutionCallback> object is returned when the
-                // execution has been successfully launched, otherwise a
-                // nullptr is returned.  The executionCallback is
-                // abstracted in the NN API as an "event".
-                sp<ExecutionCallback> executionCallback = new ExecutionCallback();
-                std::thread thread(asyncStartComputePartitioned, this, mPlan, controller,
-                                   allowFallback,
-                                   executionCallback);
-                executionCallback->bind_thread(std::move(thread));
-                *synchronizationCallback = executionCallback;
-                return ANEURALNETWORKS_NO_ERROR;
-            }
+        // Prepare the callback for asynchronous execution.
+        // sp<ExecutionCallback> object is returned when the
+        // execution has been successfully launched, otherwise a
+        // nullptr is returned.  The executionCallback is
+        // abstracted in the NN API as an "event".
+        sp<ExecutionCallback> executionCallback = new ExecutionCallback();
+        if (DeviceManager::get()->syncExecRuntime()) {
+            VLOG(EXECUTION) << "ExecutionBuilder::compute (asynchronous API, non-threaded)";
+            asyncStartComputePartitioned(this, mPlan, controller, allowFallback, executionCallback);
+        } else {
+            VLOG(EXECUTION) << "ExecutionBuilder::compute (asynchronous API)";
+            std::thread thread(asyncStartComputePartitioned, this, mPlan, controller, allowFallback,
+                               executionCallback);
+            executionCallback->bind_thread(std::move(thread));
         }
+        *synchronizationCallback = executionCallback;
+        return ANEURALNETWORKS_NO_ERROR;
     }
-#else
-    {
-        // Find a driver that can handle all the operations.
-        // TODO: Does not handle CPU fallback (which is tricky because
-        //       StepExecutor::startCompute() is designed as
-        //       asynchronous).
-        // TODO: Does not actually behave asynchronously (because
-        //       StepExecutor::startCompute() isn't actually asynchronous
-        //       on a device as opposed to a CPU).
-        Model hidlModel;
-        mModel->setHidlModel(&hidlModel);
-        const std::vector<std::shared_ptr<Device>>& devices = DeviceManager::get()->getDrivers();
-        for (const auto& device : devices) {
-            hidl_vec<bool> supports;
-            VLOG(EXECUTION) << "Checking " << device->getName();
-            device->getSupportedOperations(hidlModel, &supports);
-            if (std::find(supports.begin(), supports.end(), false) == supports.end()) {
-                VLOG(EXECUTION) << "ExecutionBuilder::startCompute (without plan) on " << device->getName();
-                StepExecutor executor(this, mModel, device->getInterface(),
-                                      nullptr /* no IPreparedModel, so compile */);
-                executor.mapInputsAndOutputsTrivially();
-                return executor.startCompute(synchronizationCallback);
-            }
-        }
-    }
-#endif  // DISABLE_PARTITIONED_EXECUTION
-
-    // Run on the CPU.
-    VLOG(EXECUTION) << "ExecutionBuilder::startCompute (without plan) on CPU";
-    StepExecutor executor(this, mModel,
-                          nullptr /* no VersionedIDevice, so CPU */,
-                          nullptr /* no IPreparedModel */);
-    executor.mapInputsAndOutputsTrivially();
-    return executor.startCompute(synchronizationCallback);
 }
 
 // Figures out how to place each of the input or outputs in a buffer. This just does the layout,
@@ -433,8 +403,8 @@ int StepExecutor::allocatePointerArgumentsToPool(std::vector<ModelArgumentInfo>*
         }
     };
     if (total > 0xFFFFFFFF) {
-        LOG(ERROR) << "ANeuralNetworksExecution_startCompute Size of all inputs or outputs exceeds "
-                      "2^32.";
+        LOG(ERROR) << "StepExecutor::allocatePointerArgumentsToPool: ANeuralNetworksExecution: "
+                      "Size of all inputs or outputs exceeds 2^32.";
         return ANEURALNETWORKS_BAD_DATA;
     }
     hidl_memory hidlMemory;
@@ -458,12 +428,15 @@ static void setRequestArgumentArray(const std::vector<ModelArgumentInfo>& argume
     }
 }
 
-StepExecutor::StepExecutor(const ExecutionBuilder* executionBuilder,
-                           const ModelBuilder* model,
-                           VersionedIDevice* driver, sp<IPreparedModel> preparedModel) :
-    mExecutionBuilder(executionBuilder), mModel(model),
-    mDriver(driver), mPreparedModel(preparedModel),
-    mInputs(model->inputCount()), mOutputs(model->outputCount()) {}
+StepExecutor::StepExecutor(const ExecutionBuilder* executionBuilder, const ModelBuilder* model,
+                           VersionedIDevice* driver,
+                           std::shared_ptr<VersionedIPreparedModel> preparedModel)
+    : mExecutionBuilder(executionBuilder),
+      mModel(model),
+      mDriver(driver),
+      mPreparedModel(preparedModel),
+      mInputs(model->inputCount()),
+      mOutputs(model->outputCount()) {}
 
 void StepExecutor::mapInputsAndOutputsTrivially() {
     mInputs = mExecutionBuilder->mInputs;
@@ -573,7 +546,9 @@ int StepExecutor::startComputeOnDevice(sp<ExecutionCallback>* synchronizationCal
         // TODO: change to asynchronous later
         preparedModelCallback->wait();
         ErrorStatus prepareReturnStatus = preparedModelCallback->getStatus();
-        mPreparedModel = preparedModelCallback->getPreparedModel();
+        if (auto preparedModel = preparedModelCallback->getPreparedModel()) {
+            mPreparedModel = std::make_shared<VersionedIPreparedModel>(preparedModel);
+        }
         if (prepareReturnStatus != ErrorStatus::NONE) {
             return convertErrorStatusToResultCode(prepareReturnStatus);
         }
@@ -638,20 +613,28 @@ int StepExecutor::startComputeOnDevice(sp<ExecutionCallback>* synchronizationCal
     // in the design document.
     sp<ExecutionCallback> executionCallback = new ExecutionCallback();
 
-    VLOG(EXECUTION) << "Before mPreparedModel->execute() " << SHOW_IF_DEBUG(toString(request));
-    // Execute.
-    // TODO: What happens to the Callback if the service dies abnormally
-    // -- won't that keep the Callback live forever, because the service
-    // never has the opportunity to bump the reference count down? Or
-    // maybe the HIDL infrastructure handles this magically? At worst,
-    // it seems like this is a small memory leak, if the Callback stays
-    // alive forever.
-    Return<ErrorStatus> executeStatus = mPreparedModel->execute(request, executionCallback);
-    if (!executeStatus.isOk() || executeStatus != ErrorStatus::NONE) {
-        VLOG(EXECUTION) << "**Execute failed**";
-        return executeStatus.isOk()
-                ? convertErrorStatusToResultCode(executeStatus)
-                : ANEURALNETWORKS_OP_FAILED;
+    if (DeviceManager::get()->syncExecHal()) {
+        VLOG(EXECUTION) << "Before mPreparedModel->executeSynchronously() "
+                        << SHOW_IF_DEBUG(toString(request));
+        Return<ErrorStatus> syncCallbackStatus = mPreparedModel->executeSynchronously(request);
+        executionCallback->notify(syncCallbackStatus.isOk()
+                                          ? static_cast<ErrorStatus>(syncCallbackStatus)
+                                          : ErrorStatus::GENERAL_FAILURE);
+    } else {
+        VLOG(EXECUTION) << "Before mPreparedModel->execute() " << SHOW_IF_DEBUG(toString(request));
+        // Execute.
+        // TODO: What happens to the Callback if the service dies abnormally
+        // -- won't that keep the Callback live forever, because the service
+        // never has the opportunity to bump the reference count down? Or
+        // maybe the HIDL infrastructure handles this magically? At worst,
+        // it seems like this is a small memory leak, if the Callback stays
+        // alive forever.
+        Return<ErrorStatus> executeStatus = mPreparedModel->execute(request, executionCallback);
+        if (!executeStatus.isOk() || executeStatus != ErrorStatus::NONE) {
+            VLOG(EXECUTION) << "**Execute launch failed**";
+            return executeStatus.isOk() ? convertErrorStatusToResultCode(executeStatus)
+                                        : ANEURALNETWORKS_OP_FAILED;
+        }
     }
 
     // TODO: Remove this synchronization point when the block of code below is
@@ -661,7 +644,7 @@ int StepExecutor::startComputeOnDevice(sp<ExecutionCallback>* synchronizationCal
                         "StepExecutor::startComputeOnDevice::waited");
     Return<ErrorStatus> callbackStatus = executionCallback->getStatus();
     if (!callbackStatus.isOk() || callbackStatus != ErrorStatus::NONE) {
-        VLOG(EXECUTION) << "**Execute async failed**";
+        VLOG(EXECUTION) << "**Execution failed**";
         return callbackStatus.isOk()
                 ? convertErrorStatusToResultCode(callbackStatus)
                 : ANEURALNETWORKS_OP_FAILED;
@@ -689,14 +672,14 @@ int StepExecutor::startComputeOnDevice(sp<ExecutionCallback>* synchronizationCal
     return ANEURALNETWORKS_NO_ERROR;
 }
 
-static void asyncStartComputeOnCpu(const Model& model, const Request& request,
-                                   const std::vector<RunTimePoolInfo>& modelPoolInfos,
-                                   const std::vector<RunTimePoolInfo>& requestPoolInfos,
-                                   const sp<IExecutionCallback>& executionCallback) {
-    NNTRACE_RT(NNTRACE_PHASE_EXECUTION, "asyncStartComputeOnCpu");
+static void computeOnCpu(const Model& model, const Request& request,
+                         const std::vector<RunTimePoolInfo>& modelPoolInfos,
+                         const std::vector<RunTimePoolInfo>& requestPoolInfos,
+                         const sp<IExecutionCallback>& executionCallback) {
+    NNTRACE_RT(NNTRACE_PHASE_EXECUTION, "computeOnCpu");
     CpuExecutor executor;
     int err = executor.run(model, request, modelPoolInfos, requestPoolInfos);
-    executionCallback->notify(convertResultCodeToErrorStatus(err));
+    executionCallback->notify_1_2(convertResultCodeToErrorStatus(err));
 }
 
 int StepExecutor::startComputeOnCpu(sp<ExecutionCallback>* synchronizationCallback) {
@@ -746,11 +729,14 @@ int StepExecutor::startComputeOnCpu(sp<ExecutionCallback>* synchronizationCallba
     setRequestArgumentArray(mInputs, &request.inputs);
     setRequestArgumentArray(mOutputs, &request.outputs);
 
-    // TODO: should model be moved with a std::cref?
-    std::thread thread(asyncStartComputeOnCpu, model, std::move(request),
-                       std::move(modelPoolInfos), std::move(requestPoolInfos),
-                       executionCallback);
-    executionCallback->bind_thread(std::move(thread));
+    if (DeviceManager::get()->syncExecCpu()) {
+        computeOnCpu(model, request, modelPoolInfos, requestPoolInfos, executionCallback);
+    } else {
+        // TODO: should model be moved with a std::cref?
+        std::thread thread(computeOnCpu, model, std::move(request), std::move(modelPoolInfos),
+                           std::move(requestPoolInfos), executionCallback);
+        executionCallback->bind_thread(std::move(thread));
+    }
 
     *synchronizationCallback = executionCallback;
     return ANEURALNETWORKS_NO_ERROR;
