@@ -36,6 +36,12 @@ enum class Type {
     TENSOR_FLOAT32 = ANEURALNETWORKS_TENSOR_FLOAT32,
     TENSOR_INT32 = ANEURALNETWORKS_TENSOR_INT32,
     TENSOR_QUANT8_ASYMM = ANEURALNETWORKS_TENSOR_QUANT8_ASYMM,
+    BOOL = ANEURALNETWORKS_BOOL,
+    TENSOR_QUANT16_SYMM = ANEURALNETWORKS_TENSOR_QUANT16_SYMM,
+    TENSOR_FLOAT16 = ANEURALNETWORKS_TENSOR_FLOAT16,
+    TENSOR_BOOL8 = ANEURALNETWORKS_TENSOR_BOOL8,
+    FLOAT16 = ANEURALNETWORKS_FLOAT16,
+    TENSOR_QUANT8_SYMM_PER_CHANNEL = ANEURALNETWORKS_TENSOR_QUANT8_SYMM_PER_CHANNEL,
 };
 
 enum class ExecutePreference {
@@ -55,18 +61,48 @@ enum class Result {
     BAD_STATE = ANEURALNETWORKS_BAD_STATE,
 };
 
+struct SymmPerChannelQuantParams {
+    ANeuralNetworksSymmPerChannelQuantParams params;
+    std::vector<float> scales;
+
+    SymmPerChannelQuantParams(std::vector<float> scalesVec, uint32_t channelDim)
+        : scales(std::move(scalesVec)) {
+        params = {.scaleCount = static_cast<uint32_t>(scales.size()),
+                  .scales = scales.size() > 0 ? scales.data() : nullptr,
+                  .channelDim = channelDim};
+    }
+};
+
 struct OperandType {
     ANeuralNetworksOperandType operandType;
     std::vector<uint32_t> dimensions;
 
+    SymmPerChannelQuantParams channelQuant;
+
     OperandType(Type type, std::vector<uint32_t> d, float scale = 0.0f, int32_t zeroPoint = 0)
-        : dimensions(std::move(d)) {
+        : dimensions(std::move(d)), channelQuant({}, 0) {
         operandType = {
                 .type = static_cast<int32_t>(type),
                 .dimensionCount = static_cast<uint32_t>(dimensions.size()),
                 .dimensions = dimensions.size() > 0 ? dimensions.data() : nullptr,
                 .scale = scale,
                 .zeroPoint = zeroPoint,
+        };
+    }
+
+    OperandType(Type type, std::vector<uint32_t> data, float scale, int32_t zeroPoint,
+                SymmPerChannelQuantParams&& channelQuant)
+        : dimensions(std::move(data)), channelQuant(std::move(channelQuant)) {
+        operandType = {
+                .type = static_cast<int32_t>(type),
+                .dimensionCount = static_cast<uint32_t>(dimensions.size()),
+                .dimensions = dimensions.size() > 0 ? dimensions.data() : nullptr,
+                .scale = scale,
+                .zeroPoint = zeroPoint,
+                .extraParams =
+                        {
+                                .channelQuant = channelQuant.params,
+                        },
         };
     }
 };
@@ -355,21 +391,34 @@ class Execution {
     }
 
     Result compute() {
-        ANeuralNetworksEvent* event = nullptr;
-        Result result =
-                static_cast<Result>(ANeuralNetworksExecution_startCompute(mExecution, &event));
-        if (result != Result::NO_ERROR) {
+        if (!mComputeUsesSychronousAPI) {
+            ANeuralNetworksEvent* event = nullptr;
+            Result result =
+                    static_cast<Result>(ANeuralNetworksExecution_startCompute(mExecution, &event));
+            if (result != Result::NO_ERROR) {
+                return result;
+            }
+            // TODO how to manage the lifetime of events when multiple waiters is not
+            // clear.
+            result = static_cast<Result>(ANeuralNetworksEvent_wait(event));
+            ANeuralNetworksEvent_free(event);
             return result;
         }
-        // TODO how to manage the lifetime of events when multiple waiters is not
-        // clear.
-        result = static_cast<Result>(ANeuralNetworksEvent_wait(event));
-        ANeuralNetworksEvent_free(event);
-        return result;
+
+        return static_cast<Result>(ANeuralNetworksExecution_compute(mExecution));
     }
+
+    // By default, compute() uses the synchronous API.
+    // setComputeUsesSynchronousAPI() can be used to change the behavior of
+    // compute() to instead use the asynchronous API and then wait for
+    // computation to complete.
+    static void setComputeUsesSynchronousAPI(bool val) { mComputeUsesSychronousAPI = val; }
 
    private:
     ANeuralNetworksExecution* mExecution = nullptr;
+
+    // Initialized to true in TestNeuralNetworksWrapper.cpp.
+    static bool mComputeUsesSychronousAPI;
 };
 
 }  // namespace test_wrapper

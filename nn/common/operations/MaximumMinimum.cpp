@@ -18,6 +18,7 @@
 
 #include "MaximumMinimum.h"
 #include "IndexedShapeWrapper.h"
+#include "OperationsUtils.h"
 #include "Tracing.h"
 
 namespace android {
@@ -52,6 +53,34 @@ bool evalGeneric(const T* aData, const Shape& aShape, const T* bData, const Shap
     return true;
 }
 
+bool evalQuant8(const uint8_t* aData, const Shape& aShape, const uint8_t* bData,
+                const Shape& bShape, bool isMinimum, uint8_t* outputData,
+                const Shape& outputShape) {
+    IndexedShapeWrapper aShapeIndexed(aShape);
+    IndexedShapeWrapper bShapeIndexed(bShape);
+    IndexedShapeWrapper outputShapeIndexed(outputShape);
+
+    std::vector<uint32_t> curIndex(outputShape.dimensions.size(), 0);
+    bool lastIndex = false;
+    do {
+        uint32_t outputFlatIndex;
+        NN_CHECK(outputShapeIndexed.indexToFlatIndex(curIndex, &outputFlatIndex));
+        uint32_t aFlatIndex;
+        NN_CHECK(aShapeIndexed.broadcastedIndexToFlatIndex(curIndex, &aFlatIndex));
+        uint32_t bFlatIndex;
+        NN_CHECK(bShapeIndexed.broadcastedIndexToFlatIndex(curIndex, &bFlatIndex));
+
+        uint8_t aValue = requantize(aData[aFlatIndex], aShape, outputShape);
+        uint8_t bValue = requantize(bData[bFlatIndex], bShape, outputShape);
+        outputData[outputFlatIndex] =
+                isMinimum ? std::min(aValue, bValue) : std::max(aValue, bValue);
+
+        NN_CHECK(outputShapeIndexed.nextIndexInplace(&curIndex, &lastIndex));
+    } while (!lastIndex);
+
+    return true;
+}
+
 }  // namespace
 
 bool prepare(const Shape& in1, const Shape& in2, Shape* out) {
@@ -79,9 +108,9 @@ bool eval(const void* in1, const Shape& shape1, const void* in2, const Shape& sh
                                reinterpret_cast<int32_t*>(output), outputShape);
         }
         case OperandType::TENSOR_QUANT8_ASYMM: {
-            return evalGeneric(reinterpret_cast<const uint8_t*>(in1), shape1,
-                               reinterpret_cast<const uint8_t*>(in2), shape2, isMinimum,
-                               reinterpret_cast<uint8_t*>(output), outputShape);
+            return evalQuant8(reinterpret_cast<const uint8_t*>(in1), shape1,
+                              reinterpret_cast<const uint8_t*>(in2), shape2, isMinimum,
+                              reinterpret_cast<uint8_t*>(output), outputShape);
         }
         default: {
             LOG(ERROR) << "Unsupported data type: " << toString(shape1.type);

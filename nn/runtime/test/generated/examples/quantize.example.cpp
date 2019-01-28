@@ -1,6 +1,7 @@
 // clang-format off
 // Generated file (from: quantize.mod.py). Do not edit
-std::vector<MixedTypedExample> examples_quant8 = {
+std::vector<MixedTypedExample>& get_examples_quant8() {
+static std::vector<MixedTypedExample> examples_quant8 = {
 // Begin of an example
 {
 .operands = {
@@ -15,6 +16,10 @@ std::vector<MixedTypedExample> examples_quant8 = {
   // int -> QUANT16_SYMM map
   {},
   // int -> FLOAT16 map
+  {},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
   {},
 },
 //Output(s)
@@ -29,12 +34,19 @@ std::vector<MixedTypedExample> examples_quant8 = {
   {},
   // int -> FLOAT16 map
   {},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
+  {},
 }
 },
 }, // End of an example
 };
+return examples_quant8;
+};
 
-std::vector<MixedTypedExample> examples_quant8_2 = {
+std::vector<MixedTypedExample>& get_examples_quant8_2() {
+static std::vector<MixedTypedExample> examples_quant8_2 = {
 // Begin of an example
 {
 .operands = {
@@ -49,6 +61,10 @@ std::vector<MixedTypedExample> examples_quant8_2 = {
   // int -> QUANT16_SYMM map
   {},
   // int -> FLOAT16 map
+  {},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
   {},
 },
 //Output(s)
@@ -63,12 +79,19 @@ std::vector<MixedTypedExample> examples_quant8_2 = {
   {},
   // int -> FLOAT16 map
   {},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
+  {},
 }
 },
 }, // End of an example
 };
+return examples_quant8_2;
+};
 
-std::vector<MixedTypedExample> examples_quant8_3 = {
+std::vector<MixedTypedExample>& get_examples_quant8_3() {
+static std::vector<MixedTypedExample> examples_quant8_3 = {
 // Begin of an example
 {
 .operands = {
@@ -83,6 +106,10 @@ std::vector<MixedTypedExample> examples_quant8_3 = {
   // int -> QUANT16_SYMM map
   {},
   // int -> FLOAT16 map
+  {},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
   {},
 },
 //Output(s)
@@ -97,12 +124,19 @@ std::vector<MixedTypedExample> examples_quant8_3 = {
   {},
   // int -> FLOAT16 map
   {},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
+  {},
 }
 },
 }, // End of an example
 };
+return examples_quant8_3;
+};
 
-std::vector<MixedTypedExample> examples_quant8_4 = {
+std::vector<MixedTypedExample>& get_examples_quant8_4() {
+static std::vector<MixedTypedExample> examples_quant8_4 = {
 // Begin of an example
 {
 .operands = {
@@ -118,6 +152,10 @@ std::vector<MixedTypedExample> examples_quant8_4 = {
   {},
   // int -> FLOAT16 map
   {},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
+  {},
 },
 //Output(s)
 { // See tools/test_generator/include/TestHarness.h:MixedTyped
@@ -131,8 +169,14 @@ std::vector<MixedTypedExample> examples_quant8_4 = {
   {},
   // int -> FLOAT16 map
   {},
+  // int -> BOOL8 map
+  {},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
+  {},
 }
 },
 }, // End of an example
+};
+return examples_quant8_4;
 };
 
