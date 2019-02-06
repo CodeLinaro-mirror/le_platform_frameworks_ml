@@ -32,9 +32,44 @@
 
 using ::android::hardware::neuralnetworks::V1_2::implementation::ExecutionCallback;
 using ::android::hardware::neuralnetworks::V1_2::implementation::PreparedModelCallback;
+using HidlToken = hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
 
 namespace android {
 namespace nn {
+
+uint32_t Device::getSizeOfData(const Operand& operand,
+                               const std::map<std::string, uint16_t>& extensionNameToPrefix) const {
+    if (!isExtensionOperandType(operand.type)) {
+        return sizeOfData(operand);
+    }
+
+    // A slow naive implementation.
+    // TODO(b/123178734): Speed it up.
+    uint32_t operandType = static_cast<uint32_t>(operand.type);
+    uint8_t kLowBitsType = static_cast<uint8_t>(Model::ExtensionTypeEncoding::LOW_BITS_TYPE);
+    uint16_t prefix = operandType >> kLowBitsType;
+    uint16_t typeWithinExtension = operandType & ((1 << kLowBitsType) - 1);
+    for (const Extension& extension : getSupportedExtensions()) {
+        if (extensionNameToPrefix.at(extension.name) != prefix) {
+            continue;
+        }
+        for (auto& extensionOperandType : extension.operandTypes) {
+            if (extensionOperandType.type == typeWithinExtension) {
+                uint32_t numElements = 1;
+                if (extensionOperandType.isTensor) {
+                    for (auto dimension : operand.dimensions) {
+                        numElements *= dimension;
+                    }
+                }
+                return numElements * extensionOperandType.byteSize;
+            }
+        }
+    }
+
+    CHECK(false) << "Cannot determine the size of extension operand type "
+                 << toString(operand.type);
+    return 0;
+}
 
 // A Device with actual underlying driver
 class DriverDevice : public Device {
@@ -51,23 +86,37 @@ class DriverDevice : public Device {
     VersionedIDevice* getInterface() override { return &mInterface; }
     int64_t getFeatureLevel() override { return mInterface.getFeatureLevel(); }
     int32_t getType() const override { return mInterface.getType(); }
-    void getSupportedOperations(const Model& hidlModel, hidl_vec<bool>* supported) override;
+    hidl_vec<Extension> getSupportedExtensions() const override;
+    void getSupportedOperations(const Model& hidlModel,
+                                hidl_vec<bool>* supportedOperations) override;
     PerformanceInfo getFloat32Performance() const override { return mFloat32Performance; }
     PerformanceInfo getQuantized8Performance() const override { return mQuantized8Performance; }
     PerformanceInfo getRelaxedFloat32toFloat16Performance() const override {
         return mRelaxedFloat32toFloat16Performance;
     }
+    bool isCachingSupported() const override { return mIsCachingSupported; }
 
     int prepareModel(const Model& hidlModel, ExecutionPreference executionPreference,
                      std::shared_ptr<VersionedIPreparedModel>* preparedModel) override;
+    int prepareModelFromCache(const hidl_handle& cache1, const hidl_handle& cache2,
+                              const HidlToken& token,
+                              std::shared_ptr<VersionedIPreparedModel>* preparedModel);
 
    private:
+    int prepareModelHelper(
+            const std::function<Return<ErrorStatus>(const sp<IPreparedModelCallback>& callback)>&
+                    prepare,
+            const std::string& prepareName,
+            std::shared_ptr<VersionedIPreparedModel>* preparedModel);
+
     std::string mName;
     std::string mVersionString;
     VersionedIDevice mInterface;
     PerformanceInfo mFloat32Performance;
     PerformanceInfo mQuantized8Performance;
     PerformanceInfo mRelaxedFloat32toFloat16Performance;
+    hidl_vec<Extension> mSupportedExtensions;
+    bool mIsCachingSupported = false;
 
 #ifdef NN_DEBUGGABLE
     // For debugging: behavior of IDevice::getSupportedOperations for SampleDriver.
@@ -91,28 +140,43 @@ bool DriverDevice::initialize() {
 #endif  // NN_DEBUGGABLE
 
     ErrorStatus status = ErrorStatus::GENERAL_FAILURE;
+
     Capabilities capabilities;
     std::tie(status, capabilities) = mInterface.getCapabilities();
-
     if (status != ErrorStatus::NONE) {
         LOG(ERROR) << "IDevice::getCapabilities returned the error " << toString(status);
-    } else {
-        VLOG(MANAGER) << "Capab " << capabilities.float32Performance.execTime;
-        VLOG(MANAGER) << "Capab " << capabilities.quantized8Performance.execTime;
-        VLOG(MANAGER) << "Capab " << capabilities.relaxedFloat32toFloat16Performance.execTime;
-        mFloat32Performance = capabilities.float32Performance;
-        mQuantized8Performance = capabilities.quantized8Performance;
-        mRelaxedFloat32toFloat16Performance = capabilities.relaxedFloat32toFloat16Performance;
+        return false;
+    }
+    VLOG(MANAGER) << "Capab " << capabilities.float32Performance.execTime;
+    VLOG(MANAGER) << "Capab " << capabilities.quantized8Performance.execTime;
+    VLOG(MANAGER) << "Capab " << capabilities.relaxedFloat32toFloat16Performance.execTime;
+    mFloat32Performance = capabilities.float32Performance;
+    mQuantized8Performance = capabilities.quantized8Performance;
+    mRelaxedFloat32toFloat16Performance = capabilities.relaxedFloat32toFloat16Performance;
+
+    std::tie(status, mVersionString) = mInterface.getVersionString();
+    // TODO(miaowang): add a validation test case for in case of error.
+    if (status != ErrorStatus::NONE) {
+        LOG(ERROR) << "IDevice::getVersionString returned the error " << toString(status);
+        return false;
     }
 
-    auto result = mInterface.getVersionString();
-    // TODO(miaowang): add a validation test case for in case of error.
-    if (result.first != ErrorStatus::NONE) {
-        LOG(ERROR) << "IDevice::getVersionString returned the error " << toString(status);
-    } else {
-        mVersionString = result.second;
+    std::tie(status, mSupportedExtensions) = mInterface.getSupportedExtensions();
+    if (status != ErrorStatus::NONE) {
+        LOG(ERROR) << "IDevice::getSupportedExtensions returned the error " << toString(status);
+        return false;
     }
-    return status == ErrorStatus::NONE;
+
+    std::tie(status, mIsCachingSupported) = mInterface.isCachingSupported();
+    if (status != ErrorStatus::NONE) {
+        LOG(WARNING) << "IDevice::isCachingSupported returned the error " << toString(status);
+        mIsCachingSupported = false;
+    }
+    return true;
+}
+
+hidl_vec<Extension> DriverDevice::getSupportedExtensions() const {
+    return mSupportedExtensions;
 }
 
 void DriverDevice::getSupportedOperations(const Model& hidlModel,
@@ -180,23 +244,21 @@ void DriverDevice::getSupportedOperations(const Model& hidlModel,
 }
 
 // Compilation logic copied from StepExecutor::startComputeOnDevice().
-int DriverDevice::prepareModel(const Model& hidlModel, ExecutionPreference executionPreference,
-                               std::shared_ptr<VersionedIPreparedModel>* preparedModel) {
+int DriverDevice::prepareModelHelper(
+        const std::function<Return<ErrorStatus>(const sp<IPreparedModelCallback>& callback)>&
+                prepare,
+        const std::string& prepareName, std::shared_ptr<VersionedIPreparedModel>* preparedModel) {
     *preparedModel = nullptr;
     sp<PreparedModelCallback> preparedModelCallback = new PreparedModelCallback();
 
-    // Note that some work within VersionedIDevice will be subtracted from the
-    // IPC layer
-    NNTRACE_FULL(NNTRACE_LAYER_IPC, NNTRACE_PHASE_COMPILATION, "prepareModel");
-    Return<ErrorStatus> prepareLaunchStatus =
-            mInterface.prepareModel(hidlModel, executionPreference, preparedModelCallback);
+    Return<ErrorStatus> prepareLaunchStatus = prepare(preparedModelCallback);
     if (!prepareLaunchStatus.isOk()) {
-        LOG(ERROR) << "ExecutionStep::finishSubModel compilation failed due to transport error: "
+        LOG(ERROR) << prepareName << " compilation failed due to transport error: "
                    << prepareLaunchStatus.description();
         return ANEURALNETWORKS_OP_FAILED;
     }
     if (prepareLaunchStatus != ErrorStatus::NONE) {
-        LOG(ERROR) << "ExecutionStep::finishSubModel compilation failed with error: "
+        LOG(ERROR) << prepareName << " compilation failed with error: "
                    << toString(static_cast<ErrorStatus>(prepareLaunchStatus));
         return ANEURALNETWORKS_OP_FAILED;
     }
@@ -207,12 +269,35 @@ int DriverDevice::prepareModel(const Model& hidlModel, ExecutionPreference execu
         *preparedModel = std::make_shared<VersionedIPreparedModel>(returnedPreparedModel);
     }
     if (prepareReturnStatus != ErrorStatus::NONE || *preparedModel == nullptr) {
-        LOG(ERROR) << "ExecutionPlan compilation on " << getName() << " failed:"
+        LOG(ERROR) << prepareName << " on " << getName() << " failed:"
                    << " prepareReturnStatus=" << toString(prepareReturnStatus)
                    << ", preparedModel=" << preparedModel->get();
         return ANEURALNETWORKS_OP_FAILED;
     }
     return ANEURALNETWORKS_NO_ERROR;
+}
+
+int DriverDevice::prepareModel(const Model& hidlModel, ExecutionPreference executionPreference,
+                               std::shared_ptr<VersionedIPreparedModel>* preparedModel) {
+    // Note that some work within VersionedIDevice will be subtracted from the IPC layer
+    NNTRACE_FULL(NNTRACE_LAYER_IPC, NNTRACE_PHASE_COMPILATION, "prepareModel");
+    return prepareModelHelper(
+            [this, &hidlModel, &executionPreference](const sp<IPreparedModelCallback>& callback) {
+                return mInterface.prepareModel(hidlModel, executionPreference, callback);
+            },
+            "prepareModel", preparedModel);
+}
+
+int DriverDevice::prepareModelFromCache(const hidl_handle& cache1, const hidl_handle& cache2,
+                                        const HidlToken& token,
+                                        std::shared_ptr<VersionedIPreparedModel>* preparedModel) {
+    // Note that some work within VersionedIDevice will be subtracted from the IPC layer
+    NNTRACE_FULL(NNTRACE_LAYER_IPC, NNTRACE_PHASE_COMPILATION, "prepareModelFromCache");
+    return prepareModelHelper(
+            [this, &cache1, &cache2, &token](const sp<IPreparedModelCallback>& callback) {
+                return mInterface.prepareModelFromCache(cache1, cache2, token, callback);
+            },
+            "prepareModelFromCache", preparedModel);
 }
 
 // A special abstracted device for the CPU. Only one instance of this class will exist.
@@ -232,13 +317,21 @@ class CpuDevice : public Device {
     VersionedIDevice* getInterface() override { return nullptr; }
     int64_t getFeatureLevel() override { return kFeatureLevel; }
     int32_t getType() const override { return ANEURALNETWORKS_DEVICE_CPU; }
-    void getSupportedOperations(const Model& hidlModel, hidl_vec<bool>* supported) override;
+    hidl_vec<Extension> getSupportedExtensions() const override { return {/* No extensions. */}; }
+    void getSupportedOperations(const Model& hidlModel,
+                                hidl_vec<bool>* supportedOperations) override;
     PerformanceInfo getFloat32Performance() const override { return kPerformance; }
     PerformanceInfo getQuantized8Performance() const override { return kPerformance; }
     PerformanceInfo getRelaxedFloat32toFloat16Performance() const override { return kPerformance; }
+    bool isCachingSupported() const override { return false; }
 
     int prepareModel(const Model& hidlModel, ExecutionPreference executionPreference,
                      std::shared_ptr<VersionedIPreparedModel>* preparedModel) override;
+    int prepareModelFromCache(const hidl_handle&, const hidl_handle&, const HidlToken&,
+                              std::shared_ptr<VersionedIPreparedModel>*) override {
+        CHECK(false) << "Should never call prepareModelFromCache on CpuDevice";
+        return ANEURALNETWORKS_OP_FAILED;
+    }
 
    private:
     CpuDevice() = default;
@@ -250,19 +343,16 @@ class CpuDevice : public Device {
     const PerformanceInfo kPerformance = {.execTime = 1.0f, .powerUsage = 1.0f};
 };
 
-void CpuDevice::getSupportedOperations(const Model& hidlModel, hidl_vec<bool>* supported) {
+void CpuDevice::getSupportedOperations(const Model& hidlModel,
+                                       hidl_vec<bool>* supportedOperations) {
     const size_t count = hidlModel.operations.size();
-    hidl_vec<bool> supportedOperations(count);
+    hidl_vec<bool> result(count);
     for (size_t i = 0; i < count; i++) {
         // TODO(b/119870033): Decide whether and how post-P operations would be supported on CPU.
         // CPU fallback should support all the operations except for OEM_OPERATION
-        if (hidlModel.operations[i].type == OperationType::OEM_OPERATION) {
-            supportedOperations[i] = false;
-        } else {
-            supportedOperations[i] = true;
-        }
+        result[i] = hidlModel.operations[i].type != OperationType::OEM_OPERATION;
     }
-    *supported = std::move(supportedOperations);
+    *supportedOperations = std::move(result);
 }
 
 int CpuDevice::prepareModel(const Model& hidlModel, ExecutionPreference executionPreference,

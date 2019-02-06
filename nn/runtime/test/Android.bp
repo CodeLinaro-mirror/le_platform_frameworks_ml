@@ -24,10 +24,12 @@ cc_defaults {
         "libandroid",
         "libbase",
         "libcutils",
+        "libfmq",
         "libhidlbase",
         "libhidltransport",
         "libhidlmemory",
         "liblog",
+        "libnativewindow",
         "libtextclassifier_hash",
         "libutils",
         "android.hardware.neuralnetworks@1.0",
@@ -35,6 +37,9 @@ cc_defaults {
         "android.hardware.neuralnetworks@1.2",
         "android.hidl.allocator@1.0",
         "android.hidl.memory@1.0",
+    ],
+    static_libs: [
+        "libcrypto",
     ],
     header_libs: [
         "libneuralnetworks_generated_test_harness_headers",
@@ -57,6 +62,7 @@ cc_defaults {
         "TestOperandExtraParams.cpp",
         "TestTrivialModel.cpp",
         "TestUnknownDimensions.cpp",
+        "TestUnspecifiedDimensions.cpp",
         "TestValidateOperations.cpp",
         "TestValidation.cpp",
         "TestWrapper.cpp",
@@ -90,6 +96,7 @@ cc_defaults {
         "Bridge.cpp",
         // Tests that rely on non-public functionality (i.e., symbols
         // not exported from libneuralnetworks.so).
+        "TestCompilationCaching.cpp",
         "TestCompliance.cpp",
         "TestExecution.cpp",
         "TestMemoryInternal.cpp",
@@ -98,6 +105,7 @@ cc_defaults {
         "TestPartitioning.cpp",
         "TestPartitioningRandom.cpp",
         "TestIntrospectionControl.cpp",
+        "TestExtensions.cpp",
     ],
     static_libs: [
         "libgmock",

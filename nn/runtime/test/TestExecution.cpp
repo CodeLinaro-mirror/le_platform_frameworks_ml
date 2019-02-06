@@ -37,6 +37,7 @@ using CompilationBuilder = nn::CompilationBuilder;
 using Device = nn::Device;
 using DeviceManager = nn::DeviceManager;
 using HidlModel = hardware::neuralnetworks::V1_2::Model;
+using HidlToken = hardware::hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
 using PreparedModelCallback = hardware::neuralnetworks::V1_2::implementation::PreparedModelCallback;
 using Result = nn::test_wrapper::Result;
 using SampleDriver = nn::sample_driver::SampleDriver;
@@ -47,7 +48,12 @@ using WrapperModel = nn::test_wrapper::Model;
 using WrapperOperandType = nn::test_wrapper::OperandType;
 using WrapperType = nn::test_wrapper::Type;
 
+template <typename T>
+using MQDescriptorSync = ::android::hardware::MQDescriptorSync<T>;
+
 namespace {
+
+const Timing kBadTiming = {.timeOnDevice = UINT64_MAX, .timeInDriver = UINT64_MAX};
 
 // Wraps an V1_2::IPreparedModel to allow dummying up the execution status.
 class TestPreparedModel12 : public V1_2::IPreparedModel {
@@ -72,28 +78,56 @@ class TestPreparedModel12 : public V1_2::IPreparedModel {
         }
     }
 
-    Return<ErrorStatus> execute_1_2(const Request& request,
+    Return<ErrorStatus> execute_1_2(const Request& request, MeasureTiming measure,
                                     const sp<V1_2::IExecutionCallback>& callback) override {
         CHECK(mPreparedModelV1_2 != nullptr) << "V1_2 prepared model is nullptr.";
         if (mErrorStatus == ErrorStatus::NONE) {
-            return mPreparedModelV1_2->execute_1_2(request, callback);
+            return mPreparedModelV1_2->execute_1_2(request, measure, callback);
+        } else if (mErrorStatus == ErrorStatus::OUTPUT_INSUFFICIENT_SIZE) {
+            OutputShape shape = {.dimensions = {1}, .isSufficient = false};
+            callback->notify_1_2(mErrorStatus, {shape}, kBadTiming);
+            return ErrorStatus::NONE;
         } else {
-            callback->notify_1_2(mErrorStatus, {});
+            callback->notify_1_2(mErrorStatus, {}, kBadTiming);
             return ErrorStatus::NONE;
         }
     }
 
-    Return<void> executeSynchronously(const Request& request, executeSynchronously_cb cb) override {
+    Return<void> executeSynchronously(const Request& request, MeasureTiming measure,
+                                      executeSynchronously_cb cb) override {
         CHECK(mPreparedModelV1_2 != nullptr) << "V1_2 prepared model is nullptr.";
         if (mErrorStatus == ErrorStatus::NONE) {
             return mPreparedModelV1_2->executeSynchronously(
-                    request, [&cb](ErrorStatus error, const hidl_vec<OutputShape>& outputShapes) {
-                        cb(error, outputShapes);
-                    });
+                    request, measure,
+                    [&cb](ErrorStatus error, const hidl_vec<OutputShape>& outputShapes,
+                          const Timing& timing) { cb(error, outputShapes, timing); });
+        } else if (mErrorStatus == ErrorStatus::OUTPUT_INSUFFICIENT_SIZE) {
+            OutputShape shape = {.dimensions = {1}, .isSufficient = false};
+            cb(mErrorStatus, {shape}, kBadTiming);
+            return Void();
         } else {
-            cb(mErrorStatus, {});
+            cb(mErrorStatus, {}, kBadTiming);
             return Void();
         }
+    }
+
+    Return<void> configureExecutionBurst(
+            const sp<V1_2::IBurstCallback>& callback,
+            const MQDescriptorSync<V1_2::FmqRequestDatum>& requestChannel,
+            const MQDescriptorSync<V1_2::FmqResultDatum>& resultChannel,
+            configureExecutionBurst_cb cb) override {
+        if (mErrorStatus == ErrorStatus::NONE) {
+            return mPreparedModelV1_2->configureExecutionBurst(callback, requestChannel,
+                                                               resultChannel, cb);
+        } else {
+            cb(mErrorStatus, nullptr);
+            return Void();
+        }
+    }
+
+    Return<ErrorStatus> saveToCache(const hidl_handle&, const hidl_handle&,
+                                    const HidlToken&) override {
+        return ErrorStatus::GENERAL_FAILURE;
     }
 
    private:
@@ -301,20 +335,68 @@ public:
     }
 };
 
-template<class DriverClass>
-class ExecutionTestTemplate :
-            public ::testing::TestWithParam<std::tuple<ErrorStatus, Result>> {
-public:
-    ExecutionTestTemplate() :
-            kName(toString(std::get<0>(GetParam()))),
-            kForceErrorStatus(std::get<0>(GetParam())),
-            kExpectResult(std::get<1>(GetParam())),
-            mModel(makeModel()),
-            mCompilation(&mModel, kName, kForceErrorStatus) {}
+// This class has roughly the same functionality as TestCompilation class.
+// The major difference is that Introspection API is used to select the device.
+template <typename DriverClass>
+class TestIntrospectionCompilation : public WrapperCompilation {
+   public:
+    TestIntrospectionCompilation(const WrapperModel* model, const std::string& deviceName) {
+        std::vector<ANeuralNetworksDevice*> mDevices;
+        uint32_t numDevices = 0;
+        EXPECT_EQ(ANeuralNetworks_getDeviceCount(&numDevices), ANEURALNETWORKS_NO_ERROR);
+        EXPECT_GE(numDevices, (uint32_t)1);
 
-protected:
+        for (uint32_t i = 0; i < numDevices; i++) {
+            ANeuralNetworksDevice* device = nullptr;
+            EXPECT_EQ(ANeuralNetworks_getDevice(i, &device), ANEURALNETWORKS_NO_ERROR);
+            const char* buffer = nullptr;
+            int result = ANeuralNetworksDevice_getName(device, &buffer);
+            if (result == ANEURALNETWORKS_NO_ERROR && deviceName.compare(buffer) == 0) {
+                mDevices.push_back(device);
+            }
+        }
+        // In CPU only mode, DeviceManager::getDrivers() will not be able to
+        // provide the actual device list. We will not be able to find the test
+        // driver with specified deviceName.
+        if (!DeviceManager::get()->getUseCpuOnly()) {
+            EXPECT_EQ(mDevices.size(), (uint32_t)1);
+
+            int result = ANeuralNetworksCompilation_createForDevices(
+                    model->getHandle(), mDevices.data(), mDevices.size(), &mCompilation);
+            EXPECT_EQ(result, ANEURALNETWORKS_NO_ERROR);
+        }
+    }
+};
+
+template <class DriverClass>
+class ExecutionTestTemplate
+    : public ::testing::TestWithParam<std::tuple<ErrorStatus, Result, bool>> {
+   public:
+    ExecutionTestTemplate()
+        : kName(toString(std::get<0>(GetParam()))),
+          kForceErrorStatus(std::get<0>(GetParam())),
+          kExpectResult(std::get<1>(GetParam())),
+          kUseIntrospectionAPI(std::get<2>(GetParam())),
+          mModel(makeModel()) {
+        if (kUseIntrospectionAPI) {
+            DeviceManager::get()->forTest_registerDevice(kName.c_str(),
+                                                         new DriverClass(kName, kForceErrorStatus));
+            mCompilation = TestIntrospectionCompilation<DriverClass>(&mModel, kName);
+        } else {
+            mCompilation = TestCompilation<DriverClass>(&mModel, kName, kForceErrorStatus);
+        }
+    }
+
+   protected:
     // Unit test method
     void TestWait();
+
+    virtual void TearDown() {
+        // Reinitialize the device list since Introspection API path altered it.
+        if (kUseIntrospectionAPI) {
+            DeviceManager::get()->forTest_reInitializeDeviceList();
+        }
+    }
 
     const std::string kName;
 
@@ -329,8 +411,11 @@ protected:
     // equivalent of kForceErrorStatus.)
     const Result kExpectResult;
 
+    // Whether mCompilation is created via Introspection API or not.
+    const bool kUseIntrospectionAPI;
+
     WrapperModel mModel;
-    TestCompilation<DriverClass> mCompilation;
+    WrapperCompilation mCompilation;
 
     void setInputOutput(WrapperExecution* execution) {
         mInputBuffer = kInputBuffer;
@@ -344,8 +429,9 @@ protected:
     float mInputBuffer;
     float mOutputBuffer;
     const float kOutputBufferExpected = 3;
+    const std::vector<uint32_t> kOutputDimensionsExpected = {1};
 
-private:
+   private:
     static WrapperModel makeModel() {
         static const WrapperOperandType tensorType(WrapperType::TENSOR_FLOAT32, { 1 });
 
@@ -362,6 +448,11 @@ private:
 
 template<class DriverClass> void ExecutionTestTemplate<DriverClass>::TestWait() {
     SCOPED_TRACE(kName);
+    // Skip Introspection API tests when CPU only flag is forced on.
+    if (kUseIntrospectionAPI && DeviceManager::get()->getUseCpuOnly()) {
+        GTEST_SKIP();
+    }
+
     ASSERT_EQ(mCompilation.finish(), Result::NO_ERROR);
 
     {
@@ -374,6 +465,18 @@ template<class DriverClass> void ExecutionTestTemplate<DriverClass>::TestWait() 
         if (kExpectResult == Result::NO_ERROR) {
             ASSERT_EQ(mOutputBuffer, kOutputBufferExpected);
         }
+        std::vector<uint32_t> dimensions;
+        if (kExpectResult == Result::OUTPUT_INSUFFICIENT_SIZE) {
+            // Only one output operand, hardcoded as index 0.
+            ASSERT_EQ(execution.getOutputOperandDimensions(0, &dimensions),
+                      Result::OUTPUT_INSUFFICIENT_SIZE);
+        } else {
+            ASSERT_EQ(execution.getOutputOperandDimensions(0, &dimensions), Result::NO_ERROR);
+        }
+        if (kExpectResult == Result::NO_ERROR ||
+            kExpectResult == Result::OUTPUT_INSUFFICIENT_SIZE) {
+            ASSERT_EQ(dimensions, kOutputDimensionsExpected);
+        }
     }
     {
         SCOPED_TRACE("compute");
@@ -383,15 +486,31 @@ template<class DriverClass> void ExecutionTestTemplate<DriverClass>::TestWait() 
         if (kExpectResult == Result::NO_ERROR) {
             ASSERT_EQ(mOutputBuffer, kOutputBufferExpected);
         }
+        std::vector<uint32_t> dimensions;
+        if (kExpectResult == Result::OUTPUT_INSUFFICIENT_SIZE) {
+            // Only one output operand, hardcoded as index 0.
+            ASSERT_EQ(execution.getOutputOperandDimensions(0, &dimensions),
+                      Result::OUTPUT_INSUFFICIENT_SIZE);
+        } else {
+            ASSERT_EQ(execution.getOutputOperandDimensions(0, &dimensions), Result::NO_ERROR);
+        }
+        if (kExpectResult == Result::NO_ERROR ||
+            kExpectResult == Result::OUTPUT_INSUFFICIENT_SIZE) {
+            ASSERT_EQ(dimensions, kOutputDimensionsExpected);
+        }
     }
 }
 
 auto kTestValues = ::testing::Values(
-        std::make_tuple(ErrorStatus::NONE, Result::NO_ERROR),
-        std::make_tuple(ErrorStatus::DEVICE_UNAVAILABLE, Result::OP_FAILED),
-        std::make_tuple(ErrorStatus::GENERAL_FAILURE, Result::OP_FAILED),
-        std::make_tuple(ErrorStatus::OUTPUT_INSUFFICIENT_SIZE, Result::OUTPUT_INSUFFICIENT_SIZE),
-        std::make_tuple(ErrorStatus::INVALID_ARGUMENT, Result::BAD_DATA));
+        std::make_tuple(ErrorStatus::NONE, Result::NO_ERROR, /* kUseIntrospectionAPI */ false),
+        std::make_tuple(ErrorStatus::DEVICE_UNAVAILABLE, Result::UNAVAILABLE_DEVICE,
+                        /* kUseIntrospectionAPI */ false),
+        std::make_tuple(ErrorStatus::GENERAL_FAILURE, Result::OP_FAILED,
+                        /* kUseIntrospectionAPI */ false),
+        std::make_tuple(ErrorStatus::OUTPUT_INSUFFICIENT_SIZE, Result::OUTPUT_INSUFFICIENT_SIZE,
+                        /* kUseIntrospectionAPI */ false),
+        std::make_tuple(ErrorStatus::INVALID_ARGUMENT, Result::BAD_DATA,
+                        /* kUseIntrospectionAPI */ false));
 
 class ExecutionTest12 : public ExecutionTestTemplate<TestDriver12> {};
 TEST_P(ExecutionTest12, Wait) {
@@ -401,15 +520,30 @@ INSTANTIATE_TEST_CASE_P(Flavor, ExecutionTest12, kTestValues);
 
 class ExecutionTest11 : public ExecutionTestTemplate<TestDriver11> {};
 TEST_P(ExecutionTest11, Wait) {
+    if (kForceErrorStatus == ErrorStatus::OUTPUT_INSUFFICIENT_SIZE) return;
     TestWait();
 }
 INSTANTIATE_TEST_CASE_P(Flavor, ExecutionTest11, kTestValues);
 
 class ExecutionTest10 : public ExecutionTestTemplate<TestDriver10> {};
 TEST_P(ExecutionTest10, Wait) {
+    if (kForceErrorStatus == ErrorStatus::OUTPUT_INSUFFICIENT_SIZE) return;
     TestWait();
 }
 INSTANTIATE_TEST_CASE_P(Flavor, ExecutionTest10, kTestValues);
+
+auto kIntrospectionTestValues = ::testing::Values(
+        std::make_tuple(ErrorStatus::NONE, Result::NO_ERROR, /* kUseIntrospectionAPI */ true),
+        std::make_tuple(ErrorStatus::DEVICE_UNAVAILABLE, Result::UNAVAILABLE_DEVICE,
+                        /* kUseIntrospectionAPI */ true),
+        std::make_tuple(ErrorStatus::GENERAL_FAILURE, Result::OP_FAILED,
+                        /* kUseIntrospectionAPI */ true),
+        std::make_tuple(ErrorStatus::OUTPUT_INSUFFICIENT_SIZE, Result::OUTPUT_INSUFFICIENT_SIZE,
+                        /* kUseIntrospectionAPI */ true),
+        std::make_tuple(ErrorStatus::INVALID_ARGUMENT, Result::BAD_DATA,
+                        /* kUseIntrospectionAPI */ true));
+
+INSTANTIATE_TEST_CASE_P(IntrospectionFlavor, ExecutionTest12, kIntrospectionTestValues);
 
 }  // namespace
 }  // namespace android

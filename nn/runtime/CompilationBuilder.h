@@ -26,6 +26,7 @@
 namespace android {
 namespace nn {
 
+class BurstBuilder;
 class Device;
 class ExecutionBuilder;
 class ModelBuilder;
@@ -41,9 +42,13 @@ public:
 
     int setPartitioning(uint32_t partitioning);
 
+    int setCaching(const std::string& cacheDir, const uint8_t* token);
+
     int finish();
 
     int createExecution(ExecutionBuilder** execution);
+
+    int createBurst(BurstBuilder** burst);
 
     const ExecutionPlan& forTest_getExecutionPlan() const { return mPlan; }
 
@@ -67,6 +72,11 @@ private:
     // The set of devices that the partitioning algorithm operates on when
     // finish() is called.
     std::vector<std::shared_ptr<Device>> mDevices;
+
+    // Compilation caching information.
+    std::string mCacheDir;
+    uint8_t mToken[ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN];
+    bool mIsCacheInfoProvided = false;
 };
 
 } // namespace nn

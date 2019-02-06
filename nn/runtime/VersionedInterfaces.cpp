@@ -17,20 +17,24 @@
 #include "VersionedInterfaces.h"
 
 #include "Callbacks.h"
+#include "ExecutionBurstController.h"
 #include "Tracing.h"
 #include "Utils.h"
 
 #include <android-base/logging.h>
 
 using ::android::hardware::neuralnetworks::V1_2::implementation::ExecutionCallback;
+using HidlToken = hidl_array<uint8_t, static_cast<uint32_t>(Constant::BYTE_SIZE_OF_CACHE_TOKEN)>;
 
 namespace android {
 namespace nn {
 
-ErrorStatus VersionedIPreparedModel::execute(const Request& request,
+const Timing kBadTiming = {.timeOnDevice = UINT64_MAX, .timeInDriver = UINT64_MAX};
+
+ErrorStatus VersionedIPreparedModel::execute(const Request& request, MeasureTiming measure,
                                              const sp<IExecutionCallback>& callback) {
     if (mPreparedModelV1_2 != nullptr) {
-        Return<ErrorStatus> ret = mPreparedModelV1_2->execute_1_2(request, callback);
+        Return<ErrorStatus> ret = mPreparedModelV1_2->execute_1_2(request, measure, callback);
         if (!ret.isOk()) {
             LOG(ERROR) << "execute_1_2 failure: " << ret.description();
             return ErrorStatus::GENERAL_FAILURE;
@@ -49,29 +53,60 @@ ErrorStatus VersionedIPreparedModel::execute(const Request& request,
     }
 }
 
-std::pair<ErrorStatus, hidl_vec<OutputShape>> VersionedIPreparedModel::executeSynchronously(
-        const Request& request) {
+std::tuple<ErrorStatus, hidl_vec<OutputShape>, Timing>
+VersionedIPreparedModel::executeSynchronously(const Request& request, MeasureTiming measure) {
     if (mPreparedModelV1_2 != nullptr) {
-        std::pair<ErrorStatus, hidl_vec<OutputShape>> result;
+        std::tuple<ErrorStatus, hidl_vec<OutputShape>, Timing> result;
         Return<void> ret = mPreparedModelV1_2->executeSynchronously(
-                request, [&result](ErrorStatus error, const hidl_vec<OutputShape>& outputShapes) {
-                    result = {error, outputShapes};
+                request, measure,
+                [&result](ErrorStatus error, const hidl_vec<OutputShape>& outputShapes,
+                          const Timing& timing) {
+                    result = std::make_tuple(error, outputShapes, timing);
                 });
         if (!ret.isOk()) {
             LOG(ERROR) << "executeSynchronously failure: " << ret.description();
-            return {ErrorStatus::GENERAL_FAILURE, {}};
+            return {ErrorStatus::GENERAL_FAILURE, {}, kBadTiming};
         }
         return result;
     } else {
         // Simulate synchronous execution.
         sp<ExecutionCallback> callback = new ExecutionCallback();
-        ErrorStatus ret = execute(request, callback);
+        ErrorStatus ret = execute(request, measure, callback);
         if (ret != ErrorStatus::NONE) {
-            return {ret, {}};
+            return {ret, {}, kBadTiming};
         }
         callback->wait();
         // callback->getOutputShapes() will always return an empty hidl vector.
-        return {callback->getStatus(), callback->getOutputShapes()};
+        // callback->getTiming() will always return values indicating no measurement.
+        return {callback->getStatus(), callback->getOutputShapes(), callback->getTiming()};
+    }
+}
+
+std::unique_ptr<ExecutionBurstController> VersionedIPreparedModel::configureExecutionBurst(
+        bool blocking) const {
+    if (mPreparedModelV1_2 != nullptr) {
+        return createExecutionBurstController(mPreparedModelV1_2, blocking);
+    } else {
+        return nullptr;
+    }
+}
+
+ErrorStatus VersionedIPreparedModel::saveToCache(const hidl_handle& cache1,
+                                                 const hidl_handle& cache2,
+                                                 const HidlToken& token) {
+    if (mPreparedModelV1_2 != nullptr) {
+        Return<ErrorStatus> ret = mPreparedModelV1_2->saveToCache(cache1, cache2, token);
+        if (!ret.isOk()) {
+            LOG(ERROR) << "saveToCache failure: " << ret.description();
+            return ErrorStatus::GENERAL_FAILURE;
+        }
+        return static_cast<ErrorStatus>(ret);
+    } else if (mPreparedModelV1_0 != nullptr) {
+        LOG(ERROR) << "saveToCache called on V1_0 preparedModel";
+        return ErrorStatus::GENERAL_FAILURE;
+    } else {
+        LOG(ERROR) << "saveToCache called with no preparedModel";
+        return ErrorStatus::GENERAL_FAILURE;
     }
 }
 
@@ -119,6 +154,27 @@ std::pair<ErrorStatus, Capabilities> VersionedIDevice::getCapabilities() {
     }
 
     return result;
+}
+
+std::pair<ErrorStatus, hidl_vec<Extension>> VersionedIDevice::getSupportedExtensions() {
+    NNTRACE_FULL(NNTRACE_LAYER_IPC, NNTRACE_PHASE_COMPILATION, "getSupportedExtensions");
+    if (mDeviceV1_2 != nullptr) {
+        std::pair<ErrorStatus, hidl_vec<Extension>> result;
+        Return<void> ret = mDeviceV1_2->getSupportedExtensions(
+                [&result](ErrorStatus error, const hidl_vec<Extension>& extensions) {
+                    result = std::make_pair(error, extensions);
+                });
+        if (!ret.isOk()) {
+            LOG(ERROR) << "getSupportedExtensions failure: " << ret.description();
+            return {ErrorStatus::GENERAL_FAILURE, {}};
+        }
+        return result;
+    } else if (mDeviceV1_0 != nullptr) {
+        return {ErrorStatus::NONE, {/* No extensions. */}};
+    } else {
+        LOG(ERROR) << "Device not available!";
+        return {ErrorStatus::DEVICE_UNAVAILABLE, {}};
+    }
 }
 
 std::pair<ErrorStatus, hidl_vec<bool>> VersionedIDevice::getSupportedOperations(
@@ -236,6 +292,27 @@ ErrorStatus VersionedIDevice::prepareModel(const Model& model, ExecutionPreferen
     }
 }
 
+ErrorStatus VersionedIDevice::prepareModelFromCache(const hidl_handle& cache1,
+                                                    const hidl_handle& cache2,
+                                                    const HidlToken& token,
+                                                    const sp<IPreparedModelCallback>& callback) {
+    if (mDeviceV1_2 != nullptr) {
+        Return<ErrorStatus> ret =
+                mDeviceV1_2->prepareModelFromCache(cache1, cache2, token, callback);
+        if (!ret.isOk()) {
+            LOG(ERROR) << "prepareModelFromCache failure: " << ret.description();
+            return ErrorStatus::GENERAL_FAILURE;
+        }
+        return static_cast<ErrorStatus>(ret);
+    } else if (mDeviceV1_1 != nullptr || mDeviceV1_0 != nullptr) {
+        LOG(ERROR) << "prepareModelFromCache called on V1_1 or V1_0 device";
+        return ErrorStatus::GENERAL_FAILURE;
+    } else {
+        LOG(ERROR) << "prepareModelFromCache called with no device";
+        return ErrorStatus::GENERAL_FAILURE;
+    }
+}
+
 DeviceStatus VersionedIDevice::getStatus() {
     if (mDeviceV1_0 == nullptr) {
         LOG(ERROR) << "Device not available!";
@@ -300,6 +377,27 @@ std::pair<ErrorStatus, hidl_string> VersionedIDevice::getVersionString() {
     } else {
         LOG(ERROR) << "Could not handle getVersionString";
         return {ErrorStatus::GENERAL_FAILURE, ""};
+    }
+}
+
+std::pair<ErrorStatus, bool> VersionedIDevice::isCachingSupported() {
+    std::pair<ErrorStatus, bool> result;
+
+    if (mDeviceV1_2 != nullptr) {
+        Return<void> ret =
+                mDeviceV1_2->isCachingSupported([&result](ErrorStatus error, bool supported) {
+                    result = std::make_pair(error, supported);
+                });
+        if (!ret.isOk()) {
+            LOG(ERROR) << "isCachingSupported failure: " << ret.description();
+            return {ErrorStatus::GENERAL_FAILURE, false};
+        }
+        return result;
+    } else if (mDeviceV1_1 != nullptr || mDeviceV1_0 != nullptr) {
+        return {ErrorStatus::NONE, false};
+    } else {
+        LOG(ERROR) << "Could not handle isCachingSupported";
+        return {ErrorStatus::GENERAL_FAILURE, false};
     }
 }
 
