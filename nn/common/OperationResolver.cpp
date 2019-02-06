@@ -26,6 +26,7 @@ namespace nn {
 // TODO(b/119608412): Find a way to not reference every operation here.
 const OperationRegistration* register_ABS();
 const OperationRegistration* register_AXIS_ALIGNED_BBOX_TRANSFORM();
+const OperationRegistration* register_BOX_WITH_NMS_LIMIT();
 const OperationRegistration* register_CHANNEL_SHUFFLE();
 const OperationRegistration* register_EMBEDDING_LOOKUP_SPARSE();
 const OperationRegistration* register_EQUAL();
@@ -53,7 +54,6 @@ const OperationRegistration* register_REDUCE_PROD();
 const OperationRegistration* register_REDUCE_SUM();
 const OperationRegistration* register_ROI_ALIGN();
 const OperationRegistration* register_ROI_POOLING();
-const OperationRegistration* register_ROTATED_BBOX_TRANSFORM();
 const OperationRegistration* register_RSQRT();
 const OperationRegistration* register_SELECT();
 const OperationRegistration* register_SIN();
@@ -63,6 +63,7 @@ const OperationRegistration* register_SQRT();
 OperationResolver::OperationResolver() {
     registerOperation(register_ABS());
     registerOperation(register_AXIS_ALIGNED_BBOX_TRANSFORM());
+    registerOperation(register_BOX_WITH_NMS_LIMIT());
     registerOperation(register_CHANNEL_SHUFFLE());
     registerOperation(register_EMBEDDING_LOOKUP_SPARSE());
     registerOperation(register_EQUAL());
@@ -90,7 +91,6 @@ OperationResolver::OperationResolver() {
     registerOperation(register_REDUCE_SUM());
     registerOperation(register_ROI_ALIGN());
     registerOperation(register_ROI_POOLING());
-    registerOperation(register_ROTATED_BBOX_TRANSFORM());
     registerOperation(register_RSQRT());
     registerOperation(register_SELECT());
     registerOperation(register_SIN());

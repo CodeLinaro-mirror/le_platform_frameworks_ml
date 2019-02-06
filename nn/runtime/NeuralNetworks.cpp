@@ -27,8 +27,8 @@
 #include "ExecutionBuilder.h"
 #include "Manager.h"
 #include "Memory.h"
-#include "NeuralNetworksOEM.h"
 #include "ModelBuilder.h"
+#include "NeuralNetworksOEM.h"
 #include "Tracing.h"
 #include "Utils.h"
 
@@ -54,6 +54,8 @@ static_assert(ANEURALNETWORKS_TENSOR_BOOL8 == 9, "ANEURALNETWORKS_TENSOR_BOOL8 h
 static_assert(ANEURALNETWORKS_FLOAT16 == 10, "ANEURALNETWORKS_FLOAT16 has changed");
 static_assert(ANEURALNETWORKS_TENSOR_QUANT8_SYMM_PER_CHANNEL == 11,
               "ANEURALNETWORKS_TENSOR_QUANT8_SYMM_PER_CHANNEL has changed");
+static_assert(ANEURALNETWORKS_TENSOR_QUANT16_ASYMM == 12,
+              "ANEURALNETWORKS_TENSOR_QUANT16_ASYMM has changed");
 static_assert(ANEURALNETWORKS_OEM_SCALAR == 10000, "ANEURALNETWORKS_OEM_SCALAR has changed");
 static_assert(ANEURALNETWORKS_TENSOR_OEM_BYTE == 10001,
               "ANEURALNETWORKS_TENSOR_OEM_BYTE has changed");
@@ -61,20 +63,17 @@ static_assert(ANEURALNETWORKS_TENSOR_OEM_BYTE == 10001,
 // IMPORTANT: When adding new values, update kNumberOfOperationTypes or
 // kNumberOfOperationTypesOEMin Utils.h.
 static_assert(ANEURALNETWORKS_ADD == 0, "ANEURALNETWORKS_ADD has changed");
-static_assert(ANEURALNETWORKS_AVERAGE_POOL_2D == 1,
-              "ANEURALNETWORKS_AVERAGE_POOL_2D has changed");
+static_assert(ANEURALNETWORKS_AVERAGE_POOL_2D == 1, "ANEURALNETWORKS_AVERAGE_POOL_2D has changed");
 static_assert(ANEURALNETWORKS_CONCATENATION == 2, "ANEURALNETWORKS_CONCATENATION has changed");
 static_assert(ANEURALNETWORKS_CONV_2D == 3, "ANEURALNETWORKS_CONV_2D has changed");
 static_assert(ANEURALNETWORKS_DEPTHWISE_CONV_2D == 4,
               "ANEURALNETWORKS_DEPTHWISE_CONV_2D has changed");
-static_assert(ANEURALNETWORKS_DEPTH_TO_SPACE == 5,
-              "ANEURALNETWORKS_DEPTH_TO_SPACE has changed");
+static_assert(ANEURALNETWORKS_DEPTH_TO_SPACE == 5, "ANEURALNETWORKS_DEPTH_TO_SPACE has changed");
 static_assert(ANEURALNETWORKS_DEQUANTIZE == 6, "ANEURALNETWORKS_DEQUANTIZE has changed");
 static_assert(ANEURALNETWORKS_EMBEDDING_LOOKUP == 7,
               "ANEURALNETWORKS_EMBEDDING_LOOKUP has changed");
 static_assert(ANEURALNETWORKS_FLOOR == 8, "ANEURALNETWORKS_FLOOR has changed");
-static_assert(ANEURALNETWORKS_FULLY_CONNECTED == 9,
-              "ANEURALNETWORKS_FULLY_CONNECTED has changed");
+static_assert(ANEURALNETWORKS_FULLY_CONNECTED == 9, "ANEURALNETWORKS_FULLY_CONNECTED has changed");
 static_assert(ANEURALNETWORKS_HASHTABLE_LOOKUP == 10,
               "ANEURALNETWORKS_HASHTABLE_LOOKUP has changed");
 static_assert(ANEURALNETWORKS_L2_NORMALIZATION == 11,
@@ -83,8 +82,7 @@ static_assert(ANEURALNETWORKS_L2_POOL_2D == 12, "ANEURALNETWORKS_L2_POOL has cha
 static_assert(ANEURALNETWORKS_LOCAL_RESPONSE_NORMALIZATION == 13,
               "ANEURALNETWORKS_LOCAL_RESPONSE_NORMALIZATION has changed");
 static_assert(ANEURALNETWORKS_LOGISTIC == 14, "ANEURALNETWORKS_LOGISTIC has changed");
-static_assert(ANEURALNETWORKS_LSH_PROJECTION == 15,
-              "ANEURALNETWORKS_LSH_PROJECTION has changed");
+static_assert(ANEURALNETWORKS_LSH_PROJECTION == 15, "ANEURALNETWORKS_LSH_PROJECTION has changed");
 static_assert(ANEURALNETWORKS_LSTM == 16, "ANEURALNETWORKS_LSTM has changed");
 static_assert(ANEURALNETWORKS_MAX_POOL_2D == 17, "ANEURALNETWORKS_MAX_POOL has changed");
 static_assert(ANEURALNETWORKS_MUL == 18, "ANEURALNETWORKS_MUL has changed");
@@ -92,27 +90,26 @@ static_assert(ANEURALNETWORKS_RELU == 19, "ANEURALNETWORKS_RELU has changed");
 static_assert(ANEURALNETWORKS_RELU1 == 20, "ANEURALNETWORKS_RELU1 has changed");
 static_assert(ANEURALNETWORKS_RELU6 == 21, "ANEURALNETWORKS_RELU6 has changed");
 static_assert(ANEURALNETWORKS_RESHAPE == 22, "ANEURALNETWORKS_RESHAPE has changed");
-static_assert(ANEURALNETWORKS_RESIZE_BILINEAR == 23,
-              "ANEURALNETWORKS_RESIZE_BILINEAR has changed");
+static_assert(ANEURALNETWORKS_RESIZE_BILINEAR == 23, "ANEURALNETWORKS_RESIZE_BILINEAR has changed");
 static_assert(ANEURALNETWORKS_RNN == 24, "ANEURALNETWORKS_RNN has changed");
 static_assert(ANEURALNETWORKS_SOFTMAX == 25, "ANEURALNETWORKS_SOFTMAX has changed");
-static_assert(ANEURALNETWORKS_SPACE_TO_DEPTH == 26,
-              "ANEURALNETWORKS_SPACE_TO_DEPTH has changed");
+static_assert(ANEURALNETWORKS_SPACE_TO_DEPTH == 26, "ANEURALNETWORKS_SPACE_TO_DEPTH has changed");
 static_assert(ANEURALNETWORKS_SVDF == 27, "ANEURALNETWORKS_SVDF has changed");
 static_assert(ANEURALNETWORKS_TANH == 28, "ANEURALNETWORKS_TANH has changed");
 
-static_assert(ANEURALNETWORKS_BATCH_TO_SPACE_ND == 29, "ANEURALNETWORKS_BATCH_TO_SPACE_ND has changed");
+static_assert(ANEURALNETWORKS_BATCH_TO_SPACE_ND == 29,
+              "ANEURALNETWORKS_BATCH_TO_SPACE_ND has changed");
 static_assert(ANEURALNETWORKS_DIV == 30, "ANEURALNETWORKS_DIV has changed");
 static_assert(ANEURALNETWORKS_MEAN == 31, "ANEURALNETWORKS_MEAN has changed");
 static_assert(ANEURALNETWORKS_PAD == 32, "ANEURALNETWORKS_PAD has changed");
-static_assert(ANEURALNETWORKS_SPACE_TO_BATCH_ND == 33, "ANEURALNETWORKS_SPACE_TO_BATCH_ND has changed");
+static_assert(ANEURALNETWORKS_SPACE_TO_BATCH_ND == 33,
+              "ANEURALNETWORKS_SPACE_TO_BATCH_ND has changed");
 static_assert(ANEURALNETWORKS_SQUEEZE == 34, "ANEURALNETWORKS_SQUEEZE has changed");
 static_assert(ANEURALNETWORKS_STRIDED_SLICE == 35, "ANEURALNETWORKS_STRIDED_SLICE has changed");
 static_assert(ANEURALNETWORKS_SUB == 36, "ANEURALNETWORKS_TANH has changed");
 static_assert(ANEURALNETWORKS_TRANSPOSE == 37, "ANEURALNETWORKS_TRANSPOSE has changed");
 
-static_assert(ANEURALNETWORKS_OEM_OPERATION == 10000,
-              "ANEURALNETWORKS_OEM_OPERATION has changed");
+static_assert(ANEURALNETWORKS_OEM_OPERATION == 10000, "ANEURALNETWORKS_OEM_OPERATION has changed");
 
 static_assert(ANEURALNETWORKS_FUSED_NONE == 0, "ANEURALNETWORKS_FUSED_NONE has changed");
 static_assert(ANEURALNETWORKS_FUSED_RELU == 1, "ANEURALNETWORKS_FUSED_RELU has changed");
@@ -129,14 +126,23 @@ static_assert(ANEURALNETWORKS_PREFER_SUSTAINED_SPEED == 2,
 static_assert(ANEURALNETWORKS_NO_ERROR == 0, "ANEURALNETWORKS_NO_ERROR has changed");
 static_assert(ANEURALNETWORKS_OUT_OF_MEMORY == 1, "ANEURALNETWORKS_OUT_OF_MEMORY has changed");
 static_assert(ANEURALNETWORKS_INCOMPLETE == 2, "ANEURALNETWORKS_INCOMPLETE has changed");
-static_assert(ANEURALNETWORKS_UNEXPECTED_NULL == 3,
-              "ANEURALNETWORKS_UNEXPECTED_NULL has changed");
+static_assert(ANEURALNETWORKS_UNEXPECTED_NULL == 3, "ANEURALNETWORKS_UNEXPECTED_NULL has changed");
 static_assert(ANEURALNETWORKS_BAD_DATA == 4, "ANEURALNETWORKS_BAD_DATA has changed");
 static_assert(ANEURALNETWORKS_OP_FAILED == 5, "ANEURALNETWORKS_OP_FAILED has changed");
 static_assert(ANEURALNETWORKS_BAD_STATE == 6, "ANEURALNETWORKS_BAD_STATE has changed");
+static_assert(ANEURALNETWORKS_UNMAPPABLE == 7, "ANEURALNETWORKS_UNMAPPABLE has changed");
+static_assert(ANEURALNETWORKS_OUTPUT_INSUFFICIENT_SIZE == 8,
+              "ANEURALNETWORKS_OUTPUT_INSUFFICIENT_SIZE has changed");
 
 static_assert(ANEURALNETWORKS_MAX_SIZE_OF_IMMEDIATELY_COPIED_VALUES == 128,
               "ANEURALNETWORKS_MAX_SIZE_OF_IMMEDIATELY_COPIED_VALUES has changed");
+
+static_assert(ANEURALNETWORKS_DEVICE_UNKNOWN == 0, "ANEURALNETWORKS_DEVICE_UNKNOWN has changed");
+static_assert(ANEURALNETWORKS_DEVICE_OTHER == 1, "ANEURALNETWORKS_DEVICE_OTHER has changed");
+static_assert(ANEURALNETWORKS_DEVICE_CPU == 2, "ANEURALNETWORKS_DEVICE_CPU has changed");
+static_assert(ANEURALNETWORKS_DEVICE_GPU == 3, "ANEURALNETWORKS_DEVICE_GPU has changed");
+static_assert(ANEURALNETWORKS_DEVICE_ACCELERATOR == 4,
+              "ANEURALNETWORKS_DEVICE_ACCELERATOR has changed");
 
 // Make sure that the constants are compatible with the values defined in
 // hardware/interfaces/neuralnetworks/1.0/types.hal.
@@ -155,7 +161,7 @@ static_assert(static_cast<int32_t>(OperandType::TENSOR_FLOAT16) == ANEURALNETWOR
 static_assert(static_cast<int32_t>(OperandType::TENSOR_FLOAT32) == ANEURALNETWORKS_TENSOR_FLOAT32,
               "TENSOR_FLOAT32 != ANEURALNETWORKS_TENSOR_FLOAT32");
 static_assert(static_cast<int32_t>(OperandType::TENSOR_QUANT8_ASYMM) ==
-                          ANEURALNETWORKS_TENSOR_QUANT8_ASYMM,
+                      ANEURALNETWORKS_TENSOR_QUANT8_ASYMM,
               "TENSOR_QUANT8_ASYMM != ANEURALNETWORKS_TENSOR_QUANT8_ASYMM");
 static_assert(static_cast<int32_t>(OperandType::BOOL) == ANEURALNETWORKS_BOOL,
               "BOOL != ANEURALNETWORKS_BOOL");
@@ -171,42 +177,40 @@ static_assert(static_cast<int32_t>(OperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL) 
 static_assert(static_cast<int32_t>(OperationType::ADD) == ANEURALNETWORKS_ADD,
               "OperationType::ADD != ANEURALNETWORKS_ADD");
 static_assert(static_cast<int32_t>(OperationType::AVERAGE_POOL_2D) ==
-                          ANEURALNETWORKS_AVERAGE_POOL_2D,
+                      ANEURALNETWORKS_AVERAGE_POOL_2D,
               "OperationType::AVERAGE_POOL_2D != ANEURALNETWORKS_AVERAGE_POOL_2D");
 static_assert(static_cast<int32_t>(OperationType::CONV_2D) == ANEURALNETWORKS_CONV_2D,
               "OperationType::CONV_2D != ANEURALNETWORKS_CONV_2D");
 static_assert(static_cast<int32_t>(OperationType::DEPTHWISE_CONV_2D) ==
-                          ANEURALNETWORKS_DEPTHWISE_CONV_2D,
+                      ANEURALNETWORKS_DEPTHWISE_CONV_2D,
               "OperationType::DEPTHWISE_CONV_2D != ANEURALNETWORKS_DEPTHWISE_CONV_2D");
-static_assert(static_cast<int32_t>(OperationType::DEPTH_TO_SPACE) ==
-                          ANEURALNETWORKS_DEPTH_TO_SPACE,
+static_assert(static_cast<int32_t>(OperationType::DEPTH_TO_SPACE) == ANEURALNETWORKS_DEPTH_TO_SPACE,
               "OperationType::DEPTH_TO_SPACE != ANEURALNETWORKS_DEPTH_TO_SPACE");
 static_assert(static_cast<int32_t>(OperationType::DEQUANTIZE) == ANEURALNETWORKS_DEQUANTIZE,
               "OperationType::DEQUANTIZE != ANEURALNETWORKS_DEQUANTIZE");
 static_assert(static_cast<int32_t>(OperationType::EMBEDDING_LOOKUP) ==
-                          ANEURALNETWORKS_EMBEDDING_LOOKUP,
+                      ANEURALNETWORKS_EMBEDDING_LOOKUP,
               "OperationType::EMBEDDING_LOOKUP != ANEURALNETWORKS_EMBEDDING_LOOKUP");
 static_assert(static_cast<int32_t>(OperationType::FLOOR) == ANEURALNETWORKS_FLOOR,
               "OperationType::FLOOR != ANEURALNETWORKS_FLOOR");
 static_assert(static_cast<int32_t>(OperationType::FULLY_CONNECTED) ==
-                          ANEURALNETWORKS_FULLY_CONNECTED,
+                      ANEURALNETWORKS_FULLY_CONNECTED,
               "OperationType::FULLY_CONNECTED != ANEURALNETWORKS_FULLY_CONNECTED");
 static_assert(static_cast<int32_t>(OperationType::HASHTABLE_LOOKUP) ==
-                          ANEURALNETWORKS_HASHTABLE_LOOKUP,
+                      ANEURALNETWORKS_HASHTABLE_LOOKUP,
               "OperationType::HASHTABLE_LOOKUP != ANEURALNETWORKS_HASHTABLE_LOOKUP");
 static_assert(static_cast<int32_t>(OperationType::L2_NORMALIZATION) ==
-                          ANEURALNETWORKS_L2_NORMALIZATION,
+                      ANEURALNETWORKS_L2_NORMALIZATION,
               "OperationType::L2_NORMALIZATION != ANEURALNETWORKS_L2_NORMALIZATION");
 static_assert(static_cast<int32_t>(OperationType::L2_POOL_2D) == ANEURALNETWORKS_L2_POOL_2D,
               "OperationType::L2_POOL_2D != ANEURALNETWORKS_L2_POOL_2D");
 static_assert(static_cast<int32_t>(OperationType::LOCAL_RESPONSE_NORMALIZATION) ==
-                          ANEURALNETWORKS_LOCAL_RESPONSE_NORMALIZATION,
+                      ANEURALNETWORKS_LOCAL_RESPONSE_NORMALIZATION,
               "OperationType::LOCAL_RESPONSE_NORMALIZATION != "
               "ANEURALNETWORKS_LOCAL_RESPONSE_NORMALIZATION");
 static_assert(static_cast<int32_t>(OperationType::LOGISTIC) == ANEURALNETWORKS_LOGISTIC,
               "OperationType::LOGISTIC != ANEURALNETWORKS_LOGISTIC");
-static_assert(static_cast<int32_t>(OperationType::LSH_PROJECTION) ==
-                          ANEURALNETWORKS_LSH_PROJECTION,
+static_assert(static_cast<int32_t>(OperationType::LSH_PROJECTION) == ANEURALNETWORKS_LSH_PROJECTION,
               "OperationType::LSH_PROJECTION != ANEURALNETWORKS_LSH_PROJECTION");
 static_assert(static_cast<int32_t>(OperationType::LSTM) == ANEURALNETWORKS_LSTM,
               "OperationType::LSTM != ANEURALNETWORKS_LSTM");
@@ -223,21 +227,21 @@ static_assert(static_cast<int32_t>(OperationType::RELU6) == ANEURALNETWORKS_RELU
 static_assert(static_cast<int32_t>(OperationType::RESHAPE) == ANEURALNETWORKS_RESHAPE,
               "OperationType::RESHAPE != ANEURALNETWORKS_RESHAPE");
 static_assert(static_cast<int32_t>(OperationType::RESIZE_BILINEAR) ==
-                          ANEURALNETWORKS_RESIZE_BILINEAR,
+                      ANEURALNETWORKS_RESIZE_BILINEAR,
               "OperationType::RESIZE_BILINEAR != ANEURALNETWORKS_RESIZE_BILINEAR");
 static_assert(static_cast<int32_t>(OperationType::RNN) == ANEURALNETWORKS_RNN,
               "OperationType::RNN != ANEURALNETWORKS_RNN");
 static_assert(static_cast<int32_t>(OperationType::SOFTMAX) == ANEURALNETWORKS_SOFTMAX,
               "OperationType::SOFTMAX != ANEURALNETWORKS_SOFTMAX");
-static_assert(static_cast<int32_t>(OperationType::SPACE_TO_DEPTH) ==
-                          ANEURALNETWORKS_SPACE_TO_DEPTH,
+static_assert(static_cast<int32_t>(OperationType::SPACE_TO_DEPTH) == ANEURALNETWORKS_SPACE_TO_DEPTH,
               "OperationType::SPACE_TO_DEPTH != ANEURALNETWORKS_SPACE_TO_DEPTH");
 static_assert(static_cast<int32_t>(OperationType::SVDF) == ANEURALNETWORKS_SVDF,
               "OperationType::SVDF != ANEURALNETWORKS_SVDF");
 static_assert(static_cast<int32_t>(OperationType::TANH) == ANEURALNETWORKS_TANH,
               "OperationType::TANH != ANEURALNETWORKS_TANH");
 
-static_assert(static_cast<int32_t>(OperationType::BATCH_TO_SPACE_ND) == ANEURALNETWORKS_BATCH_TO_SPACE_ND,
+static_assert(static_cast<int32_t>(OperationType::BATCH_TO_SPACE_ND) ==
+                      ANEURALNETWORKS_BATCH_TO_SPACE_ND,
               "OperationType::BATCH_TO_SPACE_ND != ANEURALNETWORKS_BATCH_TO_SPACE_ND");
 static_assert(static_cast<int32_t>(OperationType::DIV) == ANEURALNETWORKS_DIV,
               "OperationType::DIV != ANEURALNETWORKS_DIV");
@@ -246,12 +250,11 @@ static_assert(static_cast<int32_t>(OperationType::MEAN) == ANEURALNETWORKS_MEAN,
 static_assert(static_cast<int32_t>(OperationType::PAD) == ANEURALNETWORKS_PAD,
               "OperationType::PAD != ANEURALNETWORKS_PAD");
 static_assert(static_cast<int32_t>(OperationType::SPACE_TO_BATCH_ND) ==
-                          ANEURALNETWORKS_SPACE_TO_BATCH_ND,
+                      ANEURALNETWORKS_SPACE_TO_BATCH_ND,
               "OperationType::SPACE_TO_BATCH_ND != ANEURALNETWORKS_SPACE_TO_BATCH_ND");
 static_assert(static_cast<int32_t>(OperationType::SQUEEZE) == ANEURALNETWORKS_SQUEEZE,
               "OperationType::SQUEEZE != ANEURALNETWORKS_SQUEEZE");
-static_assert(static_cast<int32_t>(OperationType::STRIDED_SLICE) ==
-                          ANEURALNETWORKS_STRIDED_SLICE,
+static_assert(static_cast<int32_t>(OperationType::STRIDED_SLICE) == ANEURALNETWORKS_STRIDED_SLICE,
               "OperationType::STRIDED_SLICE != ANEURALNETWORKS_STRIDED_SLICE");
 static_assert(static_cast<int32_t>(OperationType::SUB) == ANEURALNETWORKS_SUB,
               "OperationType::SUB != ANEURALNETWORKS_SUB");
@@ -267,6 +270,17 @@ static_assert(static_cast<int32_t>(FusedActivationFunc::RELU1) == ANEURALNETWORK
 static_assert(static_cast<int32_t>(FusedActivationFunc::RELU6) == ANEURALNETWORKS_FUSED_RELU6,
               "FusedActivationFunc::RELU6 != ANEURALNETWORKS_FUSED_RELU6");
 
+// Make sure that the constants are compatible with the values defined in
+// hardware/interfaces/neuralnetworks/1.2/types.hal.
+static_assert(static_cast<int32_t>(DeviceType::OTHER) == ANEURALNETWORKS_DEVICE_OTHER,
+              "DeviceType::OTHER != ANEURALNETWORKS_DEVICE_OTHER");
+static_assert(static_cast<int32_t>(DeviceType::CPU) == ANEURALNETWORKS_DEVICE_CPU,
+              "DeviceType::CPU != ANEURALNETWORKS_DEVICE_CPU");
+static_assert(static_cast<int32_t>(DeviceType::GPU) == ANEURALNETWORKS_DEVICE_GPU,
+              "DeviceType::GPU != ANEURALNETWORKS_DEVICE_GPU");
+static_assert(static_cast<int32_t>(DeviceType::ACCELERATOR) == ANEURALNETWORKS_DEVICE_ACCELERATOR,
+              "DeviceType::ACCELERATOR != ANEURALNETWORKS_DEVICE_ACCELERATOR");
+
 // Asserts for ANeuralNetworksOperandType memory layout
 static_assert(offsetof(ANeuralNetworksOperandType, type) == 0,
               "ANeuralNetworksOperandType.type offset != 0");
@@ -278,22 +292,18 @@ static_assert(offsetof(ANeuralNetworksOperandType, scale) == 8 + sizeof(void*),
               "ANeuralNetworksOperandType.scale offset != 8 + sizeof(void*)");
 static_assert(offsetof(ANeuralNetworksOperandType, zeroPoint) == 12 + sizeof(void*),
               "ANeuralNetworksOperandType.zeroPoint offset != 12 + sizeof(void*)");
-static_assert(offsetof(ANeuralNetworksOperandType, extraParams) == 16 + sizeof(void*),
-              "ANeuralNetworksOperandType.extraParams offset != 16 + sizeof(void*)");
-static_assert(sizeof(ANeuralNetworksOperandType) ==
-                      offsetof(ANeuralNetworksOperandType, extraParams) +
-                              sizeof(ANeuralNetworksOperandType::extraParams),
+static_assert(sizeof(ANeuralNetworksOperandType) == 16 + sizeof(void*),
               "ANeuralNetworksOperandType size changed");
 static_assert(alignof(ANeuralNetworksOperandType) == alignof(void*),
               "ANeuralNetworksOperandType alignment changed");
 
 // Asserts for ANeuralNetworksSymmPerChannelQuantParams memory layout
-static_assert(offsetof(ANeuralNetworksSymmPerChannelQuantParams, scales) == 0,
-              "ANeuralNetworksSymmPerChannelQuantParams.scales offset != 0");
-static_assert(offsetof(ANeuralNetworksSymmPerChannelQuantParams, scaleCount) == sizeof(void*),
-              "ANeuralNetworksSymmPerChannelQuantParams.scaleCount offset != sizeof(void*)");
-static_assert(offsetof(ANeuralNetworksSymmPerChannelQuantParams, channelDim) == 4 + sizeof(void*),
+static_assert(offsetof(ANeuralNetworksSymmPerChannelQuantParams, channelDim) == 0,
               "ANeuralNetworksSymmPerChannelQuantParams.channelDim offset != 4 + sizeof(void*)");
+static_assert(offsetof(ANeuralNetworksSymmPerChannelQuantParams, scaleCount) == 4,
+              "ANeuralNetworksSymmPerChannelQuantParams.scaleCount offset != 0");
+static_assert(offsetof(ANeuralNetworksSymmPerChannelQuantParams, scales) == 8,
+              "ANeuralNetworksSymmPerChannelQuantParams.scales offset != 4");
 static_assert(sizeof(ANeuralNetworksSymmPerChannelQuantParams) == 8 + sizeof(void*),
               "ANeuralNetworksSymmPerChannelQuantParams size != 8 + sizeof(void*)");
 static_assert(alignof(ANeuralNetworksSymmPerChannelQuantParams) == alignof(void*),
@@ -342,6 +352,20 @@ int ANeuralNetworksDevice_getVersion(const ANeuralNetworksDevice* device, const 
     }
     const Device* d = reinterpret_cast<const Device*>(device);
     *version = d->getVersionString();
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
+int ANeuralNetworksDevice_getType(const ANeuralNetworksDevice* device, int32_t* type) {
+    if (device == nullptr || type == nullptr) {
+        LOG(ERROR) << "ANeuralNetworksDevice_getType passed a nullptr";
+        return ANEURALNETWORKS_UNEXPECTED_NULL;
+    }
+    const Device* d = reinterpret_cast<const Device*>(device);
+    int32_t dType = d->getType();
+    if (dType < 0) {
+        return ANEURALNETWORKS_OP_FAILED;
+    }
+    *type = d->getType();
     return ANEURALNETWORKS_NO_ERROR;
 }
 
@@ -575,6 +599,19 @@ int ANeuralNetworksModel_addOperation(ANeuralNetworksModel* model,
     return m->addOperation(type, inputCount, inputs, outputCount, outputs);
 }
 
+int ANeuralNetworksModel_setOperandSymmPerChannelQuantParams(
+        ANeuralNetworksModel* model, int32_t index,
+        const ANeuralNetworksSymmPerChannelQuantParams* channelQuant) {
+    NNTRACE_RT(NNTRACE_PHASE_PREPARATION,
+               "ANeuralNetworksModel_setOperandSymmPerChannelQuantParams");
+    if (!model || !channelQuant) {
+        LOG(ERROR) << "ANeuralNetworksModel_setOperandSymmPerChannelQuantParams passed a nullptr";
+        return ANEURALNETWORKS_UNEXPECTED_NULL;
+    }
+    ModelBuilder* m = reinterpret_cast<ModelBuilder*>(model);
+    return m->setOperandSymmPerChannelQuantParams(index, *channelQuant);
+}
+
 int ANeuralNetworksModel_identifyInputsAndOutputs(ANeuralNetworksModel* model, uint32_t inputCount,
                                                   const uint32_t* inputs, uint32_t outputCount,
                                                   const uint32_t* outputs) {
@@ -587,8 +624,7 @@ int ANeuralNetworksModel_identifyInputsAndOutputs(ANeuralNetworksModel* model, u
     return m->identifyInputsAndOutputs(inputCount, inputs, outputCount, outputs);
 }
 
-int ANeuralNetworksModel_relaxComputationFloat32toFloat16(ANeuralNetworksModel* model,
-                                                          bool allow) {
+int ANeuralNetworksModel_relaxComputationFloat32toFloat16(ANeuralNetworksModel* model, bool allow) {
     NNTRACE_RT(NNTRACE_PHASE_PREPARATION, "ANeuralNetworksModel_relaxComputationFloat32toFloat16");
     if (!model) {
         LOG(ERROR) << ("ANeuralNetworksModel_relaxComputationFloat32toFloat16 passed a nullptr");
