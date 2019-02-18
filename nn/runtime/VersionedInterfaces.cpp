@@ -49,23 +49,29 @@ ErrorStatus VersionedIPreparedModel::execute(const Request& request,
     }
 }
 
-ErrorStatus VersionedIPreparedModel::executeSynchronously(const Request& request) {
+std::pair<ErrorStatus, hidl_vec<OutputShape>> VersionedIPreparedModel::executeSynchronously(
+        const Request& request) {
     if (mPreparedModelV1_2 != nullptr) {
-        Return<ErrorStatus> ret = mPreparedModelV1_2->executeSynchronously(request);
+        std::pair<ErrorStatus, hidl_vec<OutputShape>> result;
+        Return<void> ret = mPreparedModelV1_2->executeSynchronously(
+                request, [&result](ErrorStatus error, const hidl_vec<OutputShape>& outputShapes) {
+                    result = {error, outputShapes};
+                });
         if (!ret.isOk()) {
             LOG(ERROR) << "executeSynchronously failure: " << ret.description();
-            return ErrorStatus::GENERAL_FAILURE;
+            return {ErrorStatus::GENERAL_FAILURE, {}};
         }
-        return static_cast<ErrorStatus>(ret);
+        return result;
     } else {
         // Simulate synchronous execution.
         sp<ExecutionCallback> callback = new ExecutionCallback();
         ErrorStatus ret = execute(request, callback);
         if (ret != ErrorStatus::NONE) {
-            return ret;
+            return {ret, {}};
         }
         callback->wait();
-        return callback->getStatus();
+        // callback->getOutputShapes() will always return an empty hidl vector.
+        return {callback->getStatus(), callback->getOutputShapes()};
     }
 }
 
@@ -255,6 +261,24 @@ int64_t VersionedIDevice::getFeatureLevel() {
     } else {
         LOG(ERROR) << "Device not available!";
         return -1;
+    }
+}
+
+int32_t VersionedIDevice::getType() const {
+    std::pair<ErrorStatus, DeviceType> result;
+    if (mDeviceV1_2 != nullptr) {
+        Return<void> ret =
+                mDeviceV1_2->getType([&result](ErrorStatus error, DeviceType deviceType) {
+                    result = std::make_pair(error, deviceType);
+                });
+        if (!ret.isOk()) {
+            LOG(ERROR) << "getType failure: " << ret.description();
+            return -1;
+        }
+        return static_cast<int32_t>(result.second);
+    } else {
+        LOG(INFO) << "Unkown NNAPI device type.";
+        return ANEURALNETWORKS_DEVICE_UNKNOWN;
     }
 }
 

@@ -167,8 +167,24 @@ class VersionedIDevice {
      * @return featureLevel The API level of the most advanced feature this driver implements.
      *                      For example, if the driver implements the features introduced in
      *                      Android P, the value would be 28.
+     *                      Return -1 if the driver is offline or busy, or the query resulted in
+     *                      an unspecified error.
      */
     int64_t getFeatureLevel();
+
+    /**
+     * Returns the device type of a driver.
+     *
+     * @return deviceType The type of a given device, which can help application developers
+     *                    developers to distribute Machine Learning workloads and other workloads
+     *                    such as graphical rendering. E.g., for an app which renders AR scenes
+     *                    based on real time object detection results, the developer could choose
+     *                    an ACCELERATOR type device for ML workloads, and reserve GPU for
+     *                    graphical rendering.
+     *                    Return -1 if the driver is offline or busy, or the query resulted in
+     *                    an unspecified error.
+     */
+    int32_t getType() const;
 
     /**
      * Get the version string of the driver implementation.
@@ -336,12 +352,18 @@ class VersionedIPreparedModel {
      *                - NONE if execution is performed successfully
      *                - DEVICE_UNAVAILABLE if driver is offline or busy
      *                - GENERAL_FAILURE if there is an unspecified error
-     *                - OUTPUT_INSUFFICIENT_SIZE if provided output buffer is
-     *                  not large enough to store the resultant values
+     *                - OUTPUT_INSUFFICIENT_SIZE if at least one output
+     *                  operand buffer is not large enough to store the
+     *                  corresponding output
      *                - INVALID_ARGUMENT if one of the input arguments is
      *                  invalid
+     * @return outputShapes A list of shape information of model output operands.
+     *                      The index into "outputShapes" corresponds with the index
+     *                      of the output operand in the Request outputs vector.
+     *                      outputShapes nust be empty unless the status is either
+     *                      NONE or OUTPUT_INSUFFICIENT_SIZE.
      */
-    ErrorStatus executeSynchronously(const Request& request);
+    std::pair<ErrorStatus, hidl_vec<OutputShape>> executeSynchronously(const Request& request);
 
     /**
      * Returns whether this handle to an IPreparedModel object is valid or not.
