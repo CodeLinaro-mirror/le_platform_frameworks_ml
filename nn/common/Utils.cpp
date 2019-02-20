@@ -281,8 +281,19 @@ uint32_t sizeOfData(OperandType type, const std::vector<uint32_t>& dimensions) {
 }
 
 bool hasUnspecifiedDimensions(int type, const uint32_t* dim, uint32_t dimCount) {
-    return (tableLookup(kScalarDataType, kScalarDataTypeOEM, type) == false) &&
-           (dimCount == 0 || std::find(dim, dim + dimCount, 0) != (dim + dimCount));
+    if (isExtensionOperandType(type)) {
+        // We don't know if the extension type is a scalar or tensor type without
+        // asking an extension-enabled driver.
+        if (dimCount == 0) {
+            // Assume it's a scalar type.
+            return false;
+        } else {
+            // It must be a tensor type.
+            return std::find(dim, dim + dimCount, 0) != (dim + dimCount);
+        }
+    }
+    bool isTensorType = !tableLookup(kScalarDataType, kScalarDataTypeOEM, type);
+    return isTensorType && (dimCount == 0 || std::find(dim, dim + dimCount, 0) != (dim + dimCount));
 }
 
 bool hasUnspecifiedDimensions(const ANeuralNetworksOperandType* type) {
@@ -1389,49 +1400,6 @@ int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
                                                  outputCount, outputIndexes,
                                                  outExpectedTypes);
         }
-        case ANEURALNETWORKS_RESIZE_BILINEAR: {
-            if ((inputCount != 4 && inputCount != 3) || outputCount != 1) {
-                LOG(ERROR) << "Invalid number of input operands (" << inputCount
-                           << ", expected 4 or 3) or output operands (" << outputCount
-                           << ", expected 1) for operation " << getOperationName(opType);
-                return ANEURALNETWORKS_BAD_DATA;
-            }
-            auto inputType = operands[inputIndexes[0]].type;
-            std::vector<OperandType> inExpectedTypes;
-            std::vector<OperandType> outExpectedTypes;
-            if (inputType == OperandType::TENSOR_FLOAT32) {
-                NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, HalVersion::V1_0));
-                inExpectedTypes = {
-                        OperandType::TENSOR_FLOAT32,
-                        OperandType::INT32,
-                        OperandType::INT32,
-                };
-                outExpectedTypes = {OperandType::TENSOR_FLOAT32};
-            } else if (inputType == OperandType::TENSOR_FLOAT16) {
-                NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, HalVersion::V1_2));
-                inExpectedTypes = {
-                        OperandType::TENSOR_FLOAT16,
-                        OperandType::INT32,
-                        OperandType::INT32,
-                };
-                outExpectedTypes = {OperandType::TENSOR_FLOAT16};
-            } else {
-                LOG(ERROR) << "Unsupported input tensor type for operation "
-                           << getOperationName(opType);
-                return ANEURALNETWORKS_BAD_DATA;
-            }
-            if (inputCount == 4) {
-                inExpectedTypes.push_back(OperandType::BOOL);
-                NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, HalVersion::V1_2));
-            } else {
-                NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, HalVersion::V1_0));
-            }
-            return validateOperationOperandTypes(operands,
-                                                 inputCount, inputIndexes,
-                                                 inExpectedTypes,
-                                                 outputCount, outputIndexes,
-                                                 outExpectedTypes);
-        }
         case ANEURALNETWORKS_DEPTH_TO_SPACE: {
             if ((inputCount != 3 && inputCount != 2) || outputCount != 1) {
                 LOG(ERROR) << "Invalid number of input operands (" << inputCount
@@ -2526,7 +2494,8 @@ int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
         }
         default: {
             const OperationRegistration* operationRegistration =
-                    OperationResolver::get()->findOperation(static_cast<OperationType>(opType));
+                    BuiltinOperationResolver::get()->findOperation(
+                            static_cast<OperationType>(opType));
             if (operationRegistration == nullptr) {
                 if (0 <= opType && opType < kNumberOfOperationTypes) {
                     LOG(ERROR) << getOperationName(opType) << " not registered";
