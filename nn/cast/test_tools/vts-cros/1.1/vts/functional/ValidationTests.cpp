@@ -17,7 +17,11 @@
 #define LOG_TAG "neuralnetworks_hidl_hal_test"
 
 #include "Models.h"
+#if defined(_LE_NN_)
+#include "VtsHalNeuralnetworksLib.h"
+#else
 #include "VtsHalNeuralnetworks.h"
+#endif
 
 namespace android {
 namespace hardware {

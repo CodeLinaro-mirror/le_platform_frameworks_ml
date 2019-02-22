@@ -22,7 +22,12 @@
 #include "TestHarness.h"
 #include "Utils.h"
 
+#if defined(_LE_NN_)
+#include "external/android-base/logging.h"
+#else
 #include <android-base/logging.h>
+#endif
+
 #include <android/hidl/memory/1.0/IMemory.h>
 #include <hidlmemory/mapping.h>
 
@@ -168,13 +173,14 @@ std::vector<Request> createRequests(const std::vector<MixedTypedExampleType>& ex
         // The contents are copied over below.
         for_all(inputs, [&inputs_info, &inputSize](int index, auto, auto s) {
             if (inputs_info.size() <= static_cast<size_t>(index)) inputs_info.resize(index + 1);
-            RequestArgument arg = {
-                .location = {.poolIndex = INPUT, .offset = 0, .length = static_cast<uint32_t>(s)},
-                .dimensions = {},
-            };
-            RequestArgument arg_empty = {
-                .hasNoValue = true,
-            };
+            RequestArgument arg{};
+            arg.location.poolIndex = INPUT;
+            arg.location.offset = 0;
+            arg.location.length = static_cast<uint32_t>(s);
+
+            RequestArgument arg_empty{};
+            arg_empty.hasNoValue = true;
+
             inputs_info[index] = s ? arg : arg_empty;
             inputSize += s;
         });
@@ -190,10 +196,11 @@ std::vector<Request> createRequests(const std::vector<MixedTypedExampleType>& ex
         // Go through all outputs, initialize RequestArgument descriptors
         for_all(outputs, [&outputs_info, &outputSize](int index, auto, auto s) {
             if (outputs_info.size() <= static_cast<size_t>(index)) outputs_info.resize(index + 1);
-            RequestArgument arg = {
-                .location = {.poolIndex = OUTPUT, .offset = 0, .length = static_cast<uint32_t>(s)},
-                .dimensions = {},
-            };
+            RequestArgument arg{};
+            arg.location.poolIndex = OUTPUT;
+            arg.location.offset = 0;
+            arg.location.length = static_cast<uint32_t>(s);
+
             outputs_info[index] = arg;
             outputSize += s;
         });

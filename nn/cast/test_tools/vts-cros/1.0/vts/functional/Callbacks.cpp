@@ -15,7 +15,12 @@
  */
 
 #include "Callbacks.h"
+
+#if defined(_LE_NN_)
+#include "external/android-base/logging.h"
+#else
 #include <android-base/logging.h>
+#endif
 
 namespace android {
 namespace hardware {

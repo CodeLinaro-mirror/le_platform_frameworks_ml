@@ -16,16 +16,24 @@
 
 #include "VtsHalHidlTargetTestBase.h"
 
+#if defined(_LE_NN_)
+#else
 #include <sys/system_properties.h>
+#endif  // defined(_LE_NN_)
 
 using namespace std;
 
 namespace testing {
 
 string VtsHalHidlTargetTestBase::PropertyGet(const char* name) {
+#if defined(_LE_NN_)
+  (void)name;
+  return "";
+#else
   char value[PROP_VALUE_MAX] = {0};
   __system_property_get(name, value);
   return value;
+#endif  // defined(_LE_NN_)
 }
 
 bool VtsHalHidlTargetTestBase::VtsGetStub() {

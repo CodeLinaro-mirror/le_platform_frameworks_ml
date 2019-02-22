@@ -20,7 +20,11 @@
 
 #include <string>
 
-#include <utils/Log.h>
+#if defined(_LE_NN_)
+#include "external/android-base/logging.h"
+#else
+#include <log/log.h>
+#endif
 
 static constexpr const char* kListFlag = "--list_registered_services";
 static constexpr const char* kServiceInstanceFlag = "--hal_service_instance";
