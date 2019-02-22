@@ -34,7 +34,10 @@ class ExecutionPlan;
 class Memory;
 
 class ModelBuilder {
-public:
+   public:
+    ModelBuilder();
+    // Returns an operand/operation type corresponding to a given extension operand/operation type.
+    int getExtensionType(const char* extensionName, uint16_t typeWithinExtension, int32_t* type);
     // Adds an operand to the model.
     int addOperand(const ANeuralNetworksOperandType& type);
     int setOperandValue(uint32_t index, const void* buffer, size_t length);
@@ -42,6 +45,7 @@ public:
                                   size_t length);
     int setOperandSymmPerChannelQuantParams(
             uint32_t index, const ANeuralNetworksSymmPerChannelQuantParams& extraParams);
+    int setOperandExtensionData(uint32_t index, const void* data, size_t length);
 
     int addOperation(ANeuralNetworksOperationType type, uint32_t inputCount, const uint32_t* inputs,
                      uint32_t outputCount, const uint32_t* outputs);
@@ -50,14 +54,19 @@ public:
     int relaxComputationFloat32toFloat16(bool allow);
     bool isComputationFloat32RelaxedToFloat16() const { return mRelaxComputationFloat32toFloat16; }
 
+    void setExtensionNameToPrefixMap(const std::map<std::string, uint16_t>&);
+    const std::map<std::string, uint16_t>& getExtensionNameToPrefixMap() const;
+
     int finish();
     bool isFinished() const { return mCompletedModel; }
     bool isValid() const { return !mInvalidModel; }
 
     bool hasOEMOperation() const { return mHasOEMOperation; }
+    bool hasExtensionOperation() const { return mHasExtensionOperation; }
 
     int createCompilation(CompilationBuilder** compilation,
-                          const std::vector<std::shared_ptr<Device>>& devices);
+                          const std::vector<std::shared_ptr<Device>>& devices,
+                          bool forceNoFallback = false);
 
     void setHidlModel(Model* model) const;
 
@@ -72,9 +81,7 @@ public:
     uint32_t inputCount() const { return static_cast<uint32_t>(mInputIndexes.size()); }
     uint32_t outputCount() const { return static_cast<uint32_t>(mOutputIndexes.size()); }
     uint32_t getInputOperandIndex(uint32_t i) const { return mInputIndexes[i]; }
-    const Operand& getInputOperand(uint32_t i) const {
-        return mOperands[getInputOperandIndex(i)];
-    }
+    const Operand& getInputOperand(uint32_t i) const { return mOperands[getInputOperandIndex(i)]; }
     uint32_t getOutputOperandIndex(uint32_t i) const { return mOutputIndexes[i]; }
     const Operand& getOutputOperand(uint32_t i) const {
         return mOperands[getOutputOperandIndex(i)];
@@ -90,8 +97,8 @@ public:
         return mSmallOperandValues.data() + offset;
     }
 
-    int partitionTheWork(const std::vector<std::shared_ptr<Device>>& devices,
-                         uint32_t preference, ExecutionPlan* plan) const;
+    int partitionTheWork(const std::vector<std::shared_ptr<Device>>& devices, uint32_t preference,
+                         ExecutionPlan* plan) const;
 
    private:
     // TODO: move partitionTheWork, findBestDeviceForEachOperation,
@@ -120,6 +127,8 @@ public:
     std::vector<uint32_t> mSortedOperationIndexMap;
     // Is at least one of those operations an OEM_OPERATION?
     bool mHasOEMOperation = false;
+    // Is at least one of those operations an extension operation?
+    bool mHasExtensionOperation = false;
     // The description of the operands of the graph.
     std::vector<Operand> mOperands;
     // Specifies where to find the list of indexes identifying
@@ -151,11 +160,20 @@ public:
     // No further modifications are allowed to the model.
     bool mInvalidModel = false;
 
+    // True if Extensions can be used in the model.
+    bool mExtensionsAllowed = false;
+
     // 'true' indicates TENSOR_FLOAT32 may be calculated with range and/or
     // precision as low as that of the IEEE 754 16-bit floating-point format.
     // 'false' indicates TENSOR_FLOAT32 must be calculated using at least the
     // range and precision of the IEEE 754 32-bit floating-point format.
     bool mRelaxComputationFloat32toFloat16 = false;
+
+    // Maps extension names to numeric "prefixes" of operand and operation
+    // type values. Devices rely on these prefixes to interpret extension types.
+    // TODO(b/123523457): Have a global name-to-prefix mapping instead of
+    // storing it here.
+    std::map<std::string, uint16_t> mExtensionNameToPrefix;
 };
 
 }  // namespace nn
