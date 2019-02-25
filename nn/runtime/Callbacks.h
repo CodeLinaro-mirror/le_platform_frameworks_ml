@@ -268,7 +268,10 @@ class PreparedModelCallback : public CallbackBase, public IPreparedModelCallback
  * IPreparedModel::execute.
  */
 class ExecutionCallback : public CallbackBase,  public IExecutionCallback {
- public:
+    using ExecutionFinish =
+            std::function<ErrorStatus(ErrorStatus, const std::vector<OutputShape>&)>;
+
+   public:
     ExecutionCallback();
     ~ExecutionCallback() override;
 
@@ -315,12 +318,19 @@ class ExecutionCallback : public CallbackBase,  public IExecutionCallback {
      *                     of the output operand in the Request outputs vector.
      *                     outputShapes must be empty unless the status is either
      *                     NONE or OUTPUT_INSUFFICIENT_SIZE.
+     * @return Timing Duration of execution. Unless MeasureTiming::YES was passed when
+     *                launching the execution and status is NONE, all times must
+     *                be reported as UINT64_MAX. A driver may choose to report
+     *                any time as UINT64_MAX, indicating that particular measurement is
+     *                not available.
      */
-    Return<void> notify_1_2(ErrorStatus status, const hidl_vec<OutputShape>& outputShapes) override;
+    Return<void> notify_1_2(ErrorStatus status, const hidl_vec<OutputShape>& outputShapes,
+                            const Timing& timing) override;
 
     // An overload of the latest notify interface to hide the version from ExecutionBuilder.
-    Return<void> notify(ErrorStatus status, const hidl_vec<OutputShape>& outputShapes) {
-        return notify_1_2(status, outputShapes);
+    Return<void> notify(ErrorStatus status, const hidl_vec<OutputShape>& outputShapes,
+                        const Timing& timing) {
+        return notify_1_2(status, outputShapes, timing);
     }
 
     /**
@@ -358,13 +368,38 @@ class ExecutionCallback : public CallbackBase,  public IExecutionCallback {
      *                      The index into "outputShapes" corresponds to the index
      *                      of the output operand in the Request outputs vector.
      *                      outputShapes must be empty unless the status is either
-     *                      NONE or OUTPUT_INSUFFICIENT_SIZE.
+     *                      NONE or OUTPUT_INSUFFICIENT_SIZE. outputShaps may be
+     *                      empty if the status is NONE and all model output operands
+     *                      are fully-specified at execution time. outputShapes must
+     *                      have the same number of elements as the number of model
+     *                      output operands if the status is OUTPUT_INSUFFICIENT_SIZE,
+     *                      or if the status is NONE and the model has at least one
+     *                      output operand that is not fully-specified.
      */
     const std::vector<OutputShape>& getOutputShapes();
 
+    /**
+     * Retrieves the duration of execution ofthe asynchronous task launched
+     * by IPreparedModel::execute_1_2. If IPreparedModel::execute_1_2 has not finished
+     * asynchronously executing, this call will block until the asynchronous task
+     * notifies the object.
+     *
+     * If the asynchronous task was launched by IPreparedModel::execute, every time
+     * must be UINT64_MAX.
+     *
+     * @return timing Duration of the execution. Every time must be UINT64_MAX unless
+     *                the status is NONE.
+     */
+    Timing getTiming();
+
+    // The callback will invoke finish(mErrorStatus) on finish.
+    void setOnFinish(const ExecutionFinish& finish) { mOnFinish = finish; }
+
    private:
-    ErrorStatus mErrorStatus;
-    std::vector<OutputShape> mOutputShapes;
+    ErrorStatus mErrorStatus = ErrorStatus::GENERAL_FAILURE;
+    std::vector<OutputShape> mOutputShapes = {};
+    Timing mTiming = {};
+    ExecutionFinish mOnFinish;
 };
 
 

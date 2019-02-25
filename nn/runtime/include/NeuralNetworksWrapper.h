@@ -20,9 +20,11 @@
 #define ANDROID_ML_NN_RUNTIME_NEURAL_NETWORKS_WRAPPER_H
 
 #include "NeuralNetworks.h"
+#include "NeuralNetworksExtensions.h"
 
 #include <math.h>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace android {
@@ -61,6 +63,7 @@ enum class Result {
     UNMAPPABLE = ANEURALNETWORKS_UNMAPPABLE,
     BAD_STATE = ANEURALNETWORKS_BAD_STATE,
     OUTPUT_INSUFFICIENT_SIZE = ANEURALNETWORKS_OUTPUT_INSUFFICIENT_SIZE,
+    UNAVAILABLE_DEVICE = ANEURALNETWORKS_UNAVAILABLE_DEVICE,
 };
 
 struct SymmPerChannelQuantParams {
@@ -110,6 +113,11 @@ class Memory {
 public:
     Memory(size_t size, int protect, int fd, size_t offset) {
         mValid = ANeuralNetworksMemory_createFromFd(size, protect, fd, offset, &mMemory) ==
+                 ANEURALNETWORKS_NO_ERROR;
+    }
+
+    Memory(AHardwareBuffer* buffer) {
+        mValid = ANeuralNetworksMemory_createFromAHardwareBuffer(buffer, &mMemory) ==
                  ANEURALNETWORKS_NO_ERROR;
     }
 
@@ -185,6 +193,26 @@ public:
         } else {
             return Result::BAD_STATE;
         }
+    }
+
+    int32_t getExtensionOperandType(const char* extensionName, uint16_t typeWithinExtension) {
+        int32_t result;
+        if (ANeuralNetworksModel_getExtensionOperandType(mModel, extensionName, typeWithinExtension,
+                                                         &result) != ANEURALNETWORKS_NO_ERROR) {
+            mValid = false;
+        }
+        return result;
+    }
+
+    ANeuralNetworksOperationType getExtensionOperationType(const char* extensionName,
+                                                           uint16_t typeWithinExtension) {
+        ANeuralNetworksOperationType result;
+        if (ANeuralNetworksModel_getExtensionOperationType(mModel, extensionName,
+                                                           typeWithinExtension,
+                                                           &result) != ANEURALNETWORKS_NO_ERROR) {
+            mValid = false;
+        }
+        return result;
     }
 
     uint32_t addOperand(const OperandType* type) {
@@ -325,6 +353,14 @@ public:
                     mCompilation, static_cast<int32_t>(preference)));
     }
 
+    Result setCaching(const std::string& cacheDir, const std::vector<uint8_t>& token) {
+        if (token.size() != ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN) {
+            return Result::BAD_DATA;
+        }
+        return static_cast<Result>(ANeuralNetworksCompilation_setCaching(
+                mCompilation, cacheDir.c_str(), token.data()));
+    }
+
     Result finish() { return static_cast<Result>(ANeuralNetworksCompilation_finish(mCompilation)); }
 
     ANeuralNetworksCompilation* getHandle() const { return mCompilation; }
@@ -395,6 +431,20 @@ public:
     }
 
     Result compute() { return static_cast<Result>(ANeuralNetworksExecution_compute(mExecution)); }
+
+    Result getOutputOperandDimensions(uint32_t index, std::vector<uint32_t>* dimensions) {
+        uint32_t rank = 0;
+        Result result = static_cast<Result>(
+                ANeuralNetworksExecution_getOutputOperandRank(mExecution, index, &rank));
+        dimensions->resize(rank);
+        if ((result != Result::NO_ERROR && result != Result::OUTPUT_INSUFFICIENT_SIZE) ||
+            rank == 0) {
+            return result;
+        }
+        result = static_cast<Result>(ANeuralNetworksExecution_getOutputOperandDimensions(
+                mExecution, index, dimensions->data()));
+        return result;
+    }
 
    private:
     ANeuralNetworksExecution* mExecution = nullptr;
