@@ -20,12 +20,13 @@
 
 #include <cfloat>
 #include <cmath>
+#include <numeric>
 
 #include "Tracing.h"
 
 namespace android {
 namespace nn {
-namespace generate_proposals {
+namespace bbox_ops {
 
 namespace {
 
@@ -145,10 +146,7 @@ inline bool bboxTransformQuant(const uint16_t* roiData, const Shape& roiShape,
 }
 
 // Taking two indices of bounding boxes, return the intersection-of-union.
-float getIoUAxisAligned(const float* roiBase, uint32_t ind1, uint32_t ind2) {
-    const uint32_t kRoiDim = 4;
-    const float* roi1 = roiBase + ind1 * kRoiDim;
-    const float* roi2 = roiBase + ind2 * kRoiDim;
+float getIoUAxisAligned(const float* roi1, const float* roi2) {
     const float area1 = (roi1[2] - roi1[0]) * (roi1[3] - roi1[1]);
     const float area2 = (roi2[2] - roi2[0]) * (roi2[3] - roi2[1]);
     const float x1 = std::max(roi1[0], roi2[0]);
@@ -301,10 +299,14 @@ constexpr uint32_t kOutputBatchSplitTensor = 3;
 namespace {
 
 // Inplace hard NMS within range [select, select + selectLength).
-uint32_t* hardNmsSingleClass(const float* scoresData, const float* roiData, float iouThreshold,
-                             uint32_t* select, uint32_t selectLength) {
-    uint32_t *selectStart = select, *selectEnd = select + selectLength;
-    while (selectStart < selectEnd) {
+uint32_t* hardNmsSingleClass(const float* scoresData, float iouThreshold, int32_t maxNumDetections,
+                             std::function<const float*(uint32_t)> getRoiBase, uint32_t* select,
+                             uint32_t selectLength) {
+    uint32_t *selectStart = select, *selectEnd = select + selectLength, numDetections = 0;
+    if (maxNumDetections < 0) {
+        maxNumDetections = selectLength;
+    }
+    while (selectStart < selectEnd && numDetections < maxNumDetections) {
         // find max score and swap to the front
         auto& maxScore = *std::max_element(selectStart, selectEnd,
                                            [&scoresData](const uint32_t& lhs, const uint32_t& rhs) {
@@ -314,53 +316,129 @@ uint32_t* hardNmsSingleClass(const float* scoresData, const float* roiData, floa
 
         // Calculate IoU of the rest, swap to the end (disgard) if needed.
         for (uint32_t* i = selectStart + 1; i < selectEnd; i++) {
-            float iou = getIoUAxisAligned(roiData, *i, *selectStart);
+            float iou = getIoUAxisAligned(getRoiBase(*i), getRoiBase(*selectStart));
             if (iou >= iouThreshold) {
                 std::swap(*i--, *(--selectEnd));
             }
         }
         selectStart++;
+        numDetections++;
     }
     return selectStart;
 }
 
-void hardNmsMultiClass(const float* scoresData, const float* roiData, std::vector<uint32_t>& select,
-                       uint32_t numClasses, uint32_t numRois, float scoreThreshold,
-                       float iouThreshold, int32_t maxNumDetections) {
+void hardNmsMultiClass(const float* scoresData, uint32_t numClasses, uint32_t numRois,
+                       float scoreThreshold, float iouThreshold, int32_t maxNumDetections,
+                       int32_t maxNumDetectionsPerClass,
+                       std::function<const float*(uint32_t)> getRoiBase,
+                       std::vector<uint32_t>* select) {
     // Exclude class 0 (background)
     for (uint32_t c = 1; c < numClasses; c++) {
-        uint32_t size = select.size();
+        uint32_t size = select->size();
         for (uint32_t b = 0; b < numRois; b++) {
             const uint32_t index = b * numClasses + c;
             const float score = scoresData[index];
             if (score > scoreThreshold) {
-                select.push_back(index);
+                select->push_back(index);
             }
         }
-        uint32_t* selectStart = select.data() + size;
-        uint32_t selectLength = select.size() - size;
-        uint32_t* selectEnd =
-                hardNmsSingleClass(scoresData, roiData, iouThreshold, selectStart, selectLength);
-        select.resize(selectEnd - select.data());
+        uint32_t* selectStart = select->data() + size;
+        uint32_t selectLength = select->size() - size;
+        uint32_t* selectEnd = hardNmsSingleClass(scoresData, iouThreshold, maxNumDetectionsPerClass,
+                                                 getRoiBase, selectStart, selectLength);
+        select->resize(selectEnd - select->data());
     }
 
     // Take top maxNumDetections.
-    if (maxNumDetections < 0 || select.size() <= maxNumDetections) {
-        return;
-    }
-    std::sort(select.begin(), select.end(),
+    std::sort(select->begin(), select->end(),
               [&scoresData](const uint32_t& lhs, const uint32_t& rhs) {
                   return scoresData[lhs] > scoresData[rhs];
               });
-    select.resize(maxNumDetections);
+    if (maxNumDetections < 0 || select->size() <= maxNumDetections) {
+        return;
+    }
+    select->resize(maxNumDetections);
+}
 
-    // Sort again by class.
-    std::sort(select.begin(), select.end(),
-              [&scoresData, numClasses](const uint32_t& lhs, const uint32_t& rhs) {
-                  uint32_t lhsClass = lhs % numClasses, rhsClass = rhs % numClasses;
-                  return lhsClass == rhsClass ? scoresData[lhs] > scoresData[rhs]
-                                              : lhsClass < rhsClass;
-              });
+bool boxWithNmsLimitFloat32Compute(const float* scoresData, const Shape& scoresShape,
+                                   const float* roiData, const Shape& roiShape,
+                                   const int32_t* batchSplitData, const Shape& batchSplitShape,
+                                   float scoreThreshold, float iouThreshold,
+                                   int32_t maxNumDetections, int32_t* batchSplitOutData,
+                                   const Shape& batchSplitOutShape,
+                                   std::vector<uint32_t>* selected) {
+    const uint32_t kRoiDim = 4;
+    uint32_t numClasses = getSizeOfDimension(scoresShape, 1);
+    uint32_t numBatches = getSizeOfDimension(batchSplitShape, 0);
+
+    const float* scoresBase = scoresData;
+    const float* roiBase = roiData;
+    int32_t* batchSplitOutPtr = batchSplitOutData;
+    selected->clear();
+    for (uint32_t b = 0; b < numBatches; b++) {
+        std::vector<uint32_t> result;
+        hardNmsMultiClass(scoresBase, numClasses, batchSplitData[b], scoreThreshold, iouThreshold,
+                          maxNumDetections, maxNumDetections,
+                          [&roiBase](uint32_t ind) { return roiBase + ind * kRoiDim; }, &result);
+        // Sort again by class.
+        std::sort(result.begin(), result.end(),
+                  [&scoresBase, numClasses](const uint32_t& lhs, const uint32_t& rhs) {
+                      uint32_t lhsClass = lhs % numClasses, rhsClass = rhs % numClasses;
+                      return lhsClass == rhsClass ? scoresBase[lhs] > scoresBase[rhs]
+                                                  : lhsClass < rhsClass;
+                  });
+        selected->insert(selected->end(), result.begin(), result.end());
+        *batchSplitOutPtr++ = result.size();
+        scoresBase += batchSplitData[b] * numClasses;
+        roiBase += batchSplitData[b] * numClasses * kRoiDim;
+    }
+    return true;
+}
+
+template <typename T_Score, typename T_Roi>
+bool boxWithNmsLimitWriteOutput(const std::vector<uint32_t>& selected,
+                                IOperationExecutionContext* context) {
+    const uint32_t kRoiDim = 4;
+    Shape scoresShape = context->getInputShape(kScoreTensor);
+    Shape batchSplitShape = context->getInputShape(kBatchSplitTensor);
+    uint32_t numClasses = getSizeOfDimension(scoresShape, 1);
+    uint32_t numBatches = getSizeOfDimension(batchSplitShape, 0);
+
+    // Set output dimensions.
+    uint32_t numOutRois = selected.size();
+    Shape scoresOutShape = context->getOutputShape(kOutputScoreTensor);
+    scoresOutShape.dimensions = {numOutRois};
+    NN_RET_CHECK(context->setOutputShape(kOutputScoreTensor, scoresOutShape));
+
+    Shape roiOutShape = context->getOutputShape(kOutputRoiTensor);
+    roiOutShape.dimensions = {numOutRois, 4};
+    NN_RET_CHECK(context->setOutputShape(kOutputRoiTensor, roiOutShape));
+
+    Shape classesOutShape = context->getOutputShape(kOutputClassTensor);
+    classesOutShape.dimensions = {numOutRois};
+    NN_RET_CHECK(context->setOutputShape(kOutputClassTensor, classesOutShape));
+
+    // Write outputs.
+    const T_Score* scoresBase = context->getInputBuffer<T_Score>(kScoreTensor);
+    const T_Roi* roiBase = context->getInputBuffer<T_Roi>(kRoiTensor);
+    const int32_t* batchSplitData = context->getInputBuffer<int32_t>(kBatchSplitTensor);
+    const int32_t* batchSplitOutData = context->getOutputBuffer<int32_t>(kOutputBatchSplitTensor);
+    T_Score* scoresOutPtr = context->getOutputBuffer<T_Score>(kOutputScoreTensor);
+    T_Roi* roiOutPtr = context->getOutputBuffer<T_Roi>(kOutputRoiTensor);
+    int32_t* classesOutPtr = context->getOutputBuffer<int32_t>(kOutputClassTensor);
+    uint32_t i = 0;
+    for (uint32_t b = 0; b < numBatches; b++) {
+        for (uint32_t j = 0; j < batchSplitOutData[b]; j++) {
+            uint32_t index = selected[i++];
+            *scoresOutPtr++ = scoresBase[index];
+            memcpy(roiOutPtr, roiBase + index * kRoiDim, kRoiDim * sizeof(T_Roi));
+            roiOutPtr += kRoiDim;
+            *classesOutPtr++ = index % numClasses;
+        }
+        scoresBase += batchSplitData[b] * numClasses;
+        roiBase += batchSplitData[b] * numClasses * kRoiDim;
+    }
+    return true;
 }
 
 bool boxWithNmsLimitFloat32(const float* scoresData, const Shape& scoresShape, const float* roiData,
@@ -371,52 +449,12 @@ bool boxWithNmsLimitFloat32(const float* scoresData, const Shape& scoresShape, c
                             Shape classesOutShape, int32_t* batchSplitOutData,
                             const Shape& batchSplitOutShape, IOperationExecutionContext* context) {
     NNTRACE_TRANS("boxWithNmsLimit");
-    const uint32_t kRoiDim = 4;
-    uint32_t numClasses = getSizeOfDimension(scoresShape, 1);
-    uint32_t numBatches = getSizeOfDimension(batchSplitShape, 0);
-
-    const float* scoresBase = scoresData;
-    const float* roiBase = roiData;
-    int32_t* batchSplitOutPtr = batchSplitOutData;
     std::vector<uint32_t> selected;
-    for (uint32_t b = 0; b < numBatches; b++) {
-        std::vector<uint32_t> result;
-        hardNmsMultiClass(scoresBase, roiBase, result, numClasses, batchSplitData[b],
-                          scoreThreshold, iouThreshold, maxNumDetections);
-        selected.insert(selected.end(), result.begin(), result.end());
-        *batchSplitOutPtr++ = result.size();
-        scoresBase += batchSplitData[b] * numClasses;
-        roiBase += batchSplitData[b] * numClasses * kRoiDim;
-    }
-
-    // Set output dimensions.
-    uint32_t numOutRois = selected.size();
-    scoresOutShape.dimensions = {numOutRois};
-    NN_RET_CHECK(context->setOutputShape(kOutputScoreTensor, scoresOutShape));
-    roiOutShape.dimensions = {numOutRois, 4};
-    NN_RET_CHECK(context->setOutputShape(kOutputRoiTensor, roiOutShape));
-    classesOutShape.dimensions = {numOutRois};
-    NN_RET_CHECK(context->setOutputShape(kOutputClassTensor, classesOutShape));
-
-    // Write outputs.
-    float* scoresOutPtr = scoresOutData;
-    float* roiOutPtr = roiOutData;
-    int32_t* classesOutPtr = classesOutData;
-    scoresBase = scoresData;
-    roiBase = roiData;
-    uint32_t i = 0;
-    for (uint32_t b = 0; b < numBatches; b++) {
-        for (uint32_t j = 0; j < batchSplitOutData[b]; j++) {
-            uint32_t index = selected[i++];
-            *scoresOutPtr++ = scoresBase[index];
-            memcpy(roiOutPtr, roiBase + index * kRoiDim, kRoiDim * sizeof(float));
-            roiOutPtr += kRoiDim;
-            *classesOutPtr++ = index % numClasses;
-        }
-        scoresBase += batchSplitData[b] * numClasses;
-        roiBase += batchSplitData[b] * numClasses * kRoiDim;
-    }
-    return true;
+    NN_RET_CHECK(boxWithNmsLimitFloat32Compute(scoresData, scoresShape, roiData, roiShape,
+                                               batchSplitData, batchSplitShape, scoreThreshold,
+                                               iouThreshold, maxNumDetections, batchSplitOutData,
+                                               batchSplitOutShape, &selected));
+    return boxWithNmsLimitWriteOutput<float, float>(selected, context);
 }
 
 bool boxWithNmsLimitFloat16(const _Float16* scoresData, const Shape& scoresShape,
@@ -432,16 +470,12 @@ bool boxWithNmsLimitFloat16(const _Float16* scoresData, const Shape& scoresShape
     convertFloat16ToFloat32(scoresData, &scores_float32);
     std::vector<float> roi_float32(getNumberOfElements(roiShape));
     convertFloat16ToFloat32(roiData, &roi_float32);
-    std::vector<float> outputScores_float32(getNumberOfElements(scoresOutShape));
-    std::vector<float> outputRoi_float32(getNumberOfElements(roiOutShape));
-    NN_RET_CHECK(boxWithNmsLimitFloat32(
+    std::vector<uint32_t> selected;
+    NN_RET_CHECK(boxWithNmsLimitFloat32Compute(
             scores_float32.data(), scoresShape, roi_float32.data(), roiShape, batchSplitData,
-            batchSplitShape, scoreThreshold, iouThreshold, maxNumDetections,
-            outputScores_float32.data(), scoresOutShape, outputRoi_float32.data(), roiOutShape,
-            classesOutData, classesOutShape, batchSplitOutData, batchSplitOutShape, context));
-    convertFloat32ToFloat16(outputScores_float32, scoresOutData);
-    convertFloat32ToFloat16(outputRoi_float32, roiOutData);
-    return true;
+            batchSplitShape, scoreThreshold, iouThreshold, maxNumDetections, batchSplitOutData,
+            batchSplitOutShape, &selected));
+    return boxWithNmsLimitWriteOutput<_Float16, _Float16>(selected, context);
 }
 
 bool boxWithNmsLimitQuant(const uint8_t* scoresData, const Shape& scoresShape,
@@ -456,17 +490,12 @@ bool boxWithNmsLimitQuant(const uint8_t* scoresData, const Shape& scoresShape,
     convertQuantToFloat32(scoresData, scoresShape.scale, scoresShape.offset, &scores_float32);
     std::vector<float> roi_float32(getNumberOfElements(roiShape));
     convertQuantToFloat32(roiData, roiShape.scale, roiShape.offset, &roi_float32);
-    std::vector<float> outputScores_float32(getNumberOfElements(scoresOutShape));
-    std::vector<float> outputRoi_float32(getNumberOfElements(roiOutShape));
-    NN_RET_CHECK(boxWithNmsLimitFloat32(
+    std::vector<uint32_t> selected;
+    NN_RET_CHECK(boxWithNmsLimitFloat32Compute(
             scores_float32.data(), scoresShape, roi_float32.data(), roiShape, batchSplitData,
-            batchSplitShape, scoreThreshold, iouThreshold, maxNumDetections,
-            outputScores_float32.data(), scoresOutShape, outputRoi_float32.data(), roiOutShape,
-            classesOutData, classesOutShape, batchSplitOutData, batchSplitOutShape, context));
-    convertFloat32ToQuant(outputScores_float32, scoresOutShape.scale, scoresOutShape.offset,
-                          scoresOutData);
-    convertFloat32ToQuant(outputRoi_float32, roiOutShape.scale, roiOutShape.offset, roiOutData);
-    return true;
+            batchSplitShape, scoreThreshold, iouThreshold, maxNumDetections, batchSplitOutData,
+            batchSplitOutShape, &selected));
+    return boxWithNmsLimitWriteOutput<uint8_t, uint16_t>(selected, context);
 }
 
 }  // namespace
@@ -622,17 +651,822 @@ bool execute(IOperationExecutionContext* context) {
 
 }  // namespace box_with_nms_limit
 
+namespace generate_proposals {
+
+constexpr char kOperationName[] = "GENERATE_PROPOSALS";
+
+constexpr uint32_t kNumInputs = 11;
+constexpr uint32_t kScoreTensor = 0;
+constexpr uint32_t kDeltaTensor = 1;
+constexpr uint32_t kAnchorTensor = 2;
+constexpr uint32_t kImageInfoTensor = 3;
+constexpr uint32_t kHeightStrideSalar = 4;
+constexpr uint32_t kWidthStrideScalar = 5;
+constexpr uint32_t kPreNmsMaxScalar = 6;
+constexpr uint32_t kPostNmsMaxScalar = 7;
+constexpr uint32_t kIoUThresholdScalar = 8;
+constexpr uint32_t kMinSizeScalar = 9;
+constexpr uint32_t kLayoutScalar = 10;
+
+constexpr uint32_t kNumOutputs = 3;
+constexpr uint32_t kOutputScoreTensor = 0;
+constexpr uint32_t kOutputRoiTensor = 1;
+constexpr uint32_t kOutputBatchSplitTensor = 2;
+
+namespace {
+
+void filterBoxes(const float* roiBase, const float* imageInfoBase, float minSize,
+                 std::vector<uint32_t>* select) {
+    const uint32_t kRoiDim = 4;
+    uint32_t i = 0;
+    for (uint32_t j = 0; j < select->size(); j++) {
+        const float* roiInfo = roiBase + (*select)[j] * kRoiDim;
+        float roiWidth, roiHeight, xRoiCenter, yRoiCenter;
+        roiWidth = roiInfo[2] - roiInfo[0];
+        roiHeight = roiInfo[3] - roiInfo[1];
+        xRoiCenter = roiInfo[0] + roiWidth / 2.0f;
+        yRoiCenter = roiInfo[1] + roiHeight / 2.0f;
+        if (roiWidth > minSize && roiHeight > minSize && xRoiCenter < imageInfoBase[1] &&
+            yRoiCenter < imageInfoBase[0]) {
+            (*select)[i++] = (*select)[j];
+        }
+    }
+    select->resize(i);
+}
+
+bool generateProposalsNhwcFloat32Compute(const float* scoresData, const Shape& scoresShape,
+                                         const float* bboxDeltasData, const Shape& bboxDeltasShape,
+                                         const float* anchorsData, const Shape& anchorsShape,
+                                         const float* imageInfoData, const Shape& imageInfoShape,
+                                         float heightStride, float widthStride, int32_t preNmsTopN,
+                                         int32_t postNmsTopN, float iouThreshold, float minSize,
+                                         std::vector<float>* scoresOutData,
+                                         std::vector<float>* roiOutData, int32_t* batchSplitData,
+                                         const Shape& batchSplitShape) {
+    const uint32_t kRoiDim = 4;
+    uint32_t numBatches = getSizeOfDimension(scoresShape, 0);
+    uint32_t height = getSizeOfDimension(scoresShape, 1);
+    uint32_t width = getSizeOfDimension(scoresShape, 2);
+    uint32_t numAnchors = getSizeOfDimension(scoresShape, 3);
+    uint32_t imageInfoLength = getSizeOfDimension(imageInfoShape, 1);
+
+    uint32_t batchSize = height * width * numAnchors;
+    uint32_t roiBufferSize = batchSize * kRoiDim;
+    std::vector<float> roiBuffer(roiBufferSize);
+    std::vector<float> roiTransformedBuffer(roiBufferSize);
+    scoresOutData->clear();
+    roiOutData->clear();
+
+    // Compute the roi region for each anchor.
+    float* roiBase = roiBuffer.data();
+    for (uint32_t h = 0; h < height; h++) {
+        float hShift = h * heightStride;
+        for (uint32_t w = 0; w < width; w++) {
+            const float* anchorsBase = anchorsData;
+            float wShift = w * widthStride;
+            for (uint32_t a = 0; a < numAnchors; a++, roiBase += kRoiDim, anchorsBase += kRoiDim) {
+                roiBase[0] = anchorsBase[0] + wShift;
+                roiBase[1] = anchorsBase[1] + hShift;
+                roiBase[2] = anchorsBase[2] + wShift;
+                roiBase[3] = anchorsBase[3] + hShift;
+            }
+        }
+    }
+
+    const float* scoresBase = scoresData;
+    const float* bboxDeltasBase = bboxDeltasData;
+    const float* imageInfoBase = imageInfoData;
+    // Need to fake some data to satisfy bboxTransform.
+    Shape tempRoiShape = anchorsShape;
+    tempRoiShape.dimensions = {batchSize, kRoiDim};
+    Shape tempBBoxDeltasShape = bboxDeltasShape;
+    tempBBoxDeltasShape.dimensions = {batchSize, kRoiDim};
+    int32_t tempBatchSplitData = batchSize;
+    Shape tempbatchSplitShape = {.dimensions = {1}};
+    Shape tempImageInfoShape = imageInfoShape;
+    tempImageInfoShape.dimensions = {1, imageInfoLength};
+
+    for (uint32_t b = 0; b < numBatches; b++) {
+        // Apply bboxDeltas to anchor locations.
+        float tempImageInfo[] = {imageInfoBase[0], imageInfoBase[1]};
+        if (!bboxTransformFloat32(roiBuffer.data(), tempRoiShape, bboxDeltasBase,
+                                  tempBBoxDeltasShape, &tempBatchSplitData, tempbatchSplitShape,
+                                  tempImageInfo, tempImageInfoShape, roiTransformedBuffer.data(),
+                                  tempRoiShape)) {
+            LOG(ERROR) << "BBoxTransform step failed in GENERATE_PROPOSALS op.";
+            return false;
+        }
+
+        // Find the top preNmsTopN scores.
+        std::vector<uint32_t> select(batchSize);
+        std::iota(select.begin(), select.end(), 0);
+        if (preNmsTopN > 0 && preNmsTopN < select.size()) {
+            std::sort(select.begin(), select.end(),
+                      [&scoresBase](const uint32_t lhs, const uint32_t rhs) {
+                          return scoresBase[lhs] > scoresBase[rhs];
+                      });
+            select.resize(preNmsTopN);
+        }
+
+        // Filter boxes, disgard regions with height or width < minSize.
+        filterBoxes(roiTransformedBuffer.data(), imageInfoBase, minSize, &select);
+
+        // Apply hard NMS.
+        uint32_t* selectEnd = box_with_nms_limit::hardNmsSingleClass(
+                scoresBase, iouThreshold, postNmsTopN,
+                [&roiTransformedBuffer](uint32_t ind) {
+                    return roiTransformedBuffer.data() + ind * kRoiDim;
+                },
+                select.data(), select.size());
+        uint32_t selectSize = selectEnd - select.data();
+        select.resize(selectSize);
+
+        // Write output.
+        *batchSplitData++ = selectSize;
+        for (auto i : select) {
+            roiOutData->insert(roiOutData->end(), roiTransformedBuffer.begin() + i * kRoiDim,
+                               roiTransformedBuffer.begin() + (i + 1) * kRoiDim);
+            scoresOutData->push_back(scoresBase[i]);
+        }
+        scoresBase += batchSize;
+        bboxDeltasBase += roiBufferSize;
+        imageInfoBase += imageInfoLength;
+    }
+    return true;
+}
+
+bool generateProposalsFloat32Compute(const float* scoresData, const Shape& scoresShape,
+                                     const float* bboxDeltasData, const Shape& bboxDeltasShape,
+                                     const float* anchorsData, const Shape& anchorsShape,
+                                     const float* imageInfoData, const Shape& imageInfoShape,
+                                     float heightStride, float widthStride, int32_t preNmsTopN,
+                                     int32_t postNmsTopN, float iouThreshold, float minSize,
+                                     bool useNchw, std::vector<float>* scoresOutData,
+                                     std::vector<float>* roiOutData, int32_t* batchSplitData,
+                                     const Shape& batchSplitShape) {
+    InputWithLayout<float> score_nhwc(useNchw), delta_nhwc(useNchw);
+    NN_RET_CHECK(score_nhwc.initialize(scoresData, scoresShape));
+    NN_RET_CHECK(delta_nhwc.initialize(bboxDeltasData, bboxDeltasShape));
+    return generateProposalsNhwcFloat32Compute(
+            score_nhwc.getNhwcBuffer(), score_nhwc.getNhwcShape(), delta_nhwc.getNhwcBuffer(),
+            delta_nhwc.getNhwcShape(), anchorsData, anchorsShape, imageInfoData, imageInfoShape,
+            heightStride, widthStride, preNmsTopN, postNmsTopN, iouThreshold, minSize,
+            scoresOutData, roiOutData, batchSplitData, batchSplitShape);
+}
+
+bool generateProposalsFloat32(const float* scoresData, const Shape& scoresShape,
+                              const float* bboxDeltasData, const Shape& bboxDeltasShape,
+                              const float* anchorsData, const Shape& anchorsShape,
+                              const float* imageInfoData, const Shape& imageInfoShape,
+                              float heightStride, float widthStride, int32_t preNmsTopN,
+                              int32_t postNmsTopN, float iouThreshold, float minSize, bool useNchw,
+                              int32_t* batchSplitData, const Shape& batchSplitShape,
+                              IOperationExecutionContext* context) {
+    std::vector<float> scoresOut_float32, roiOut_float32;
+    NN_RET_CHECK(generateProposalsFloat32Compute(
+            scoresData, scoresShape, bboxDeltasData, bboxDeltasShape, anchorsData, anchorsShape,
+            imageInfoData, imageInfoShape, heightStride, widthStride, preNmsTopN, postNmsTopN,
+            iouThreshold, minSize, useNchw, &scoresOut_float32, &roiOut_float32, batchSplitData,
+            batchSplitShape));
+
+    // Set output dimensions.
+    uint32_t numOutRois = scoresOut_float32.size();
+    Shape scoresOutShape = context->getOutputShape(kOutputScoreTensor);
+    scoresOutShape.dimensions = {numOutRois};
+    NN_RET_CHECK(context->setOutputShape(kOutputScoreTensor, scoresOutShape));
+    Shape roiOutShape = context->getOutputShape(kOutputRoiTensor);
+    roiOutShape.dimensions = {numOutRois, 4};
+    NN_RET_CHECK(context->setOutputShape(kOutputRoiTensor, roiOutShape));
+
+    // Write outputs.
+    float* scoresOutData = context->getOutputBuffer<float>(kOutputScoreTensor);
+    for (uint32_t i = 0; i < scoresOut_float32.size(); i++) {
+        scoresOutData[i] = scoresOut_float32[i];
+    }
+    float* roiOutData = context->getOutputBuffer<float>(kOutputRoiTensor);
+    for (uint32_t i = 0; i < roiOut_float32.size(); i++) {
+        roiOutData[i] = roiOut_float32[i];
+    }
+    return true;
+}
+
+bool generateProposalsFloat16(const _Float16* scoresData, const Shape& scoresShape,
+                              const _Float16* bboxDeltasData, const Shape& bboxDeltasShape,
+                              const _Float16* anchorsData, const Shape& anchorsShape,
+                              const _Float16* imageInfoData, const Shape& imageInfoShape,
+                              float heightStride, float widthStride, int32_t preNmsTopN,
+                              int32_t postNmsTopN, float iouThreshold, float minSize, bool useNchw,
+                              int32_t* batchSplitData, const Shape& batchSplitShape,
+                              IOperationExecutionContext* context) {
+    std::vector<float> score_float32(getNumberOfElements(scoresShape));
+    convertFloat16ToFloat32(scoresData, &score_float32);
+    std::vector<float> delta_float32(getNumberOfElements(bboxDeltasShape));
+    convertFloat16ToFloat32(bboxDeltasData, &delta_float32);
+    std::vector<float> anchors_float32(getNumberOfElements(anchorsShape));
+    convertFloat16ToFloat32(anchorsData, &anchors_float32);
+    std::vector<float> imageInfo_float32(getNumberOfElements(imageInfoShape));
+    convertFloat16ToFloat32(imageInfoData, &imageInfo_float32);
+    std::vector<float> scoresOut_float32, roiOut_float32;
+    NN_RET_CHECK(generateProposalsFloat32Compute(
+            score_float32.data(), scoresShape, delta_float32.data(), bboxDeltasShape,
+            anchors_float32.data(), anchorsShape, imageInfo_float32.data(), imageInfoShape,
+            heightStride, widthStride, preNmsTopN, postNmsTopN, iouThreshold, minSize, useNchw,
+            &scoresOut_float32, &roiOut_float32, batchSplitData, batchSplitShape));
+
+    // Set output dimensions.
+    uint32_t numOutRois = scoresOut_float32.size();
+    Shape scoresOutShape = context->getOutputShape(kOutputScoreTensor);
+    scoresOutShape.dimensions = {numOutRois};
+    NN_RET_CHECK(context->setOutputShape(kOutputScoreTensor, scoresOutShape));
+    Shape roiOutShape = context->getOutputShape(kOutputRoiTensor);
+    roiOutShape.dimensions = {numOutRois, 4};
+    NN_RET_CHECK(context->setOutputShape(kOutputRoiTensor, roiOutShape));
+
+    // Write outputs.
+    _Float16* scoresOutData = context->getOutputBuffer<_Float16>(kOutputScoreTensor);
+    convertFloat32ToFloat16(scoresOut_float32, scoresOutData);
+    _Float16* roiOutData = context->getOutputBuffer<_Float16>(kOutputRoiTensor);
+    convertFloat32ToFloat16(roiOut_float32, roiOutData);
+    return true;
+}
+
+bool generateProposalsQuant(const uint8_t* scoresData, const Shape& scoresShape,
+                            const uint8_t* bboxDeltasData, const Shape& bboxDeltasShape,
+                            const int16_t* anchorsData, const Shape& anchorsShape,
+                            const uint16_t* imageInfoData, const Shape& imageInfoShape,
+                            float heightStride, float widthStride, int32_t preNmsTopN,
+                            int32_t postNmsTopN, float iouThreshold, float minSize, bool useNchw,
+                            int32_t* batchSplitData, const Shape& batchSplitShape,
+                            IOperationExecutionContext* context) {
+    std::vector<float> score_float32(getNumberOfElements(scoresShape));
+    convertQuantToFloat32(scoresData, scoresShape.scale, scoresShape.offset, &score_float32);
+    std::vector<float> delta_float32(getNumberOfElements(bboxDeltasShape));
+    convertQuantToFloat32(bboxDeltasData, bboxDeltasShape.scale, bboxDeltasShape.offset,
+                          &delta_float32);
+    std::vector<float> anchors_float32(getNumberOfElements(anchorsShape));
+    convertQuantToFloat32(anchorsData, anchorsShape.scale, anchorsShape.offset, &anchors_float32);
+    std::vector<float> imageInfo_float32(getNumberOfElements(imageInfoShape));
+    convertQuantToFloat32(imageInfoData, imageInfoShape.scale, imageInfoShape.offset,
+                          &imageInfo_float32);
+    std::vector<float> scoresOut_float32, roiOut_float32;
+    NN_RET_CHECK(generateProposalsFloat32Compute(
+            score_float32.data(), scoresShape, delta_float32.data(), bboxDeltasShape,
+            anchors_float32.data(), anchorsShape, imageInfo_float32.data(), imageInfoShape,
+            heightStride, widthStride, preNmsTopN, postNmsTopN, iouThreshold, minSize, useNchw,
+            &scoresOut_float32, &roiOut_float32, batchSplitData, batchSplitShape));
+
+    // Set output dimensions.
+    uint32_t numOutRois = scoresOut_float32.size();
+    Shape scoresOutShape = context->getOutputShape(kOutputScoreTensor);
+    scoresOutShape.dimensions = {numOutRois};
+    NN_RET_CHECK(context->setOutputShape(kOutputScoreTensor, scoresOutShape));
+    Shape roiOutShape = context->getOutputShape(kOutputRoiTensor);
+    roiOutShape.dimensions = {numOutRois, 4};
+    NN_RET_CHECK(context->setOutputShape(kOutputRoiTensor, roiOutShape));
+
+    // Write outputs.
+    uint8_t* scoresOutData = context->getOutputBuffer<uint8_t>(kOutputScoreTensor);
+    convertFloat32ToQuant(scoresOut_float32, scoresOutShape.scale, scoresOutShape.offset,
+                          scoresOutData);
+    uint16_t* roiOutData = context->getOutputBuffer<uint16_t>(kOutputRoiTensor);
+    convertFloat32ToQuant(roiOut_float32, roiOutShape.scale, roiOutShape.offset, roiOutData);
+    return true;
+}
+
+}  // namespace
+
+bool validate(const IOperationValidationContext* context) {
+    NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
+    NN_RET_CHECK_EQ(context->getNumOutputs(), kNumOutputs);
+    std::vector<OperandType> inExpectedTypes;
+    std::vector<OperandType> outExpectedTypes;
+    auto inputType = context->getInputType(kScoreTensor);
+    if (inputType == OperandType::TENSOR_FLOAT16) {
+        inExpectedTypes = {OperandType::TENSOR_FLOAT16,
+                           OperandType::TENSOR_FLOAT16,
+                           OperandType::TENSOR_FLOAT16,
+                           OperandType::TENSOR_FLOAT16,
+                           OperandType::FLOAT16,
+                           OperandType::FLOAT16,
+                           OperandType::INT32,
+                           OperandType::INT32,
+                           OperandType::FLOAT16,
+                           OperandType::FLOAT16,
+                           OperandType::BOOL};
+        outExpectedTypes = {OperandType::TENSOR_FLOAT16, OperandType::TENSOR_FLOAT16,
+                            OperandType::TENSOR_INT32};
+    } else if (inputType == OperandType::TENSOR_FLOAT32) {
+        inExpectedTypes = {OperandType::TENSOR_FLOAT32,
+                           OperandType::TENSOR_FLOAT32,
+                           OperandType::TENSOR_FLOAT32,
+                           OperandType::TENSOR_FLOAT32,
+                           OperandType::FLOAT32,
+                           OperandType::FLOAT32,
+                           OperandType::INT32,
+                           OperandType::INT32,
+                           OperandType::FLOAT32,
+                           OperandType::FLOAT32,
+                           OperandType::BOOL};
+        outExpectedTypes = {OperandType::TENSOR_FLOAT32, OperandType::TENSOR_FLOAT32,
+                            OperandType::TENSOR_INT32};
+    } else if (inputType == OperandType::TENSOR_QUANT8_ASYMM) {
+        inExpectedTypes = {OperandType::TENSOR_QUANT8_ASYMM,
+                           OperandType::TENSOR_QUANT8_ASYMM,
+                           OperandType::TENSOR_QUANT16_SYMM,
+                           OperandType::TENSOR_QUANT16_ASYMM,
+                           OperandType::FLOAT32,
+                           OperandType::FLOAT32,
+                           OperandType::INT32,
+                           OperandType::INT32,
+                           OperandType::FLOAT32,
+                           OperandType::FLOAT32,
+                           OperandType::BOOL};
+        outExpectedTypes = {OperandType::TENSOR_QUANT8_ASYMM, OperandType::TENSOR_QUANT16_ASYMM,
+                            OperandType::TENSOR_INT32};
+    } else {
+        NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
+    }
+    NN_RET_CHECK(validateInputTypes(context, inExpectedTypes));
+    NN_RET_CHECK(validateOutputTypes(context, outExpectedTypes));
+    return validateHalVersion(context, HalVersion::V1_2);
+}
+
+bool prepare(IOperationExecutionContext* context) {
+    bool useNchw = context->getInputValue<bool>(kLayoutScalar);
+    Shape scoreShape = context->getInputShape(kScoreTensor);
+    Shape bboxDeltasShape = context->getInputShape(kDeltaTensor);
+    Shape anchorsShape = context->getInputShape(kAnchorTensor);
+    Shape imageInfoDataShape = context->getInputShape(kImageInfoTensor);
+    Shape outputScoreShape = context->getOutputShape(kOutputScoreTensor);
+    Shape outputRoiShape = context->getOutputShape(kOutputRoiTensor);
+    Shape outputBatchSplitShape = context->getOutputShape(kOutputBatchSplitTensor);
+
+    NN_RET_CHECK_EQ(getNumberOfDimensions(scoreShape), 4);
+    NN_RET_CHECK_EQ(getNumberOfDimensions(bboxDeltasShape), 4);
+    NN_RET_CHECK_EQ(getNumberOfDimensions(anchorsShape), 2);
+    NN_RET_CHECK_EQ(getNumberOfDimensions(imageInfoDataShape), 2);
+
+    const uint32_t kRoiDim = 4;
+    uint32_t numBatches = getSizeOfDimension(scoreShape, 0);
+    uint32_t height = getSizeOfDimension(scoreShape, useNchw ? 2 : 1);
+    uint32_t width = getSizeOfDimension(scoreShape, useNchw ? 3 : 2);
+    uint32_t numAnchors = getSizeOfDimension(scoreShape, useNchw ? 1 : 3);
+
+    NN_RET_CHECK_EQ(getSizeOfDimension(bboxDeltasShape, 0), numBatches);
+    NN_RET_CHECK_EQ(getSizeOfDimension(bboxDeltasShape, useNchw ? 2 : 1), height);
+    NN_RET_CHECK_EQ(getSizeOfDimension(bboxDeltasShape, useNchw ? 3 : 2), width);
+    NN_RET_CHECK_EQ(getSizeOfDimension(bboxDeltasShape, useNchw ? 1 : 3), numAnchors * kRoiDim);
+    NN_RET_CHECK_EQ(getSizeOfDimension(imageInfoDataShape, 0), numBatches);
+    NN_RET_CHECK_EQ(getSizeOfDimension(imageInfoDataShape, 1), 2);
+    NN_RET_CHECK_EQ(getSizeOfDimension(anchorsShape, 0), numAnchors);
+    NN_RET_CHECK_EQ(getSizeOfDimension(anchorsShape, 1), kRoiDim);
+
+    if (scoreShape.type == OperandType::TENSOR_QUANT8_ASYMM) {
+        NN_RET_CHECK_EQ(anchorsShape.scale, 0.125f);
+        NN_RET_CHECK_EQ(imageInfoDataShape.scale, 0.125f);
+        NN_RET_CHECK_EQ(imageInfoDataShape.offset, 0);
+    }
+
+    outputScoreShape.type = scoreShape.type;
+    outputScoreShape.dimensions = {0};
+    outputScoreShape.scale = scoreShape.scale;
+    outputScoreShape.offset = scoreShape.offset;
+    NN_RET_CHECK(context->setOutputShape(kOutputScoreTensor, outputScoreShape));
+
+    outputRoiShape.dimensions = {0, 4};
+    if (scoreShape.type == OperandType::TENSOR_QUANT8_ASYMM) {
+        outputRoiShape.scale = 0.125f;
+        outputRoiShape.offset = 0;
+    }
+    NN_RET_CHECK(context->setOutputShape(kOutputRoiTensor, outputRoiShape));
+
+    outputBatchSplitShape.dimensions = {numBatches};
+    NN_RET_CHECK(context->setOutputShape(kOutputBatchSplitTensor, outputBatchSplitShape));
+    return true;
+}
+
+bool execute(IOperationExecutionContext* context) {
+    NNTRACE_TRANS("generateProposals");
+    switch (context->getInputType(kScoreTensor)) {
+        case OperandType::TENSOR_FLOAT16: {
+            return generateProposalsFloat16(
+                    context->getInputBuffer<_Float16>(kScoreTensor),
+                    context->getInputShape(kScoreTensor),
+                    context->getInputBuffer<_Float16>(kDeltaTensor),
+                    context->getInputShape(kDeltaTensor),
+                    context->getInputBuffer<_Float16>(kAnchorTensor),
+                    context->getInputShape(kAnchorTensor),
+                    context->getInputBuffer<_Float16>(kImageInfoTensor),
+                    context->getInputShape(kImageInfoTensor),
+                    context->getInputValue<_Float16>(kHeightStrideSalar),
+                    context->getInputValue<_Float16>(kWidthStrideScalar),
+                    context->getInputValue<int32_t>(kPreNmsMaxScalar),
+                    context->getInputValue<int32_t>(kPostNmsMaxScalar),
+                    context->getInputValue<_Float16>(kIoUThresholdScalar),
+                    context->getInputValue<_Float16>(kMinSizeScalar),
+                    context->getInputValue<bool>(kLayoutScalar),
+                    context->getOutputBuffer<int32_t>(kOutputBatchSplitTensor),
+                    context->getOutputShape(kOutputBatchSplitTensor), context);
+        }
+        case OperandType::TENSOR_FLOAT32: {
+            return generateProposalsFloat32(
+                    context->getInputBuffer<float>(kScoreTensor),
+                    context->getInputShape(kScoreTensor),
+                    context->getInputBuffer<float>(kDeltaTensor),
+                    context->getInputShape(kDeltaTensor),
+                    context->getInputBuffer<float>(kAnchorTensor),
+                    context->getInputShape(kAnchorTensor),
+                    context->getInputBuffer<float>(kImageInfoTensor),
+                    context->getInputShape(kImageInfoTensor),
+                    context->getInputValue<float>(kHeightStrideSalar),
+                    context->getInputValue<float>(kWidthStrideScalar),
+                    context->getInputValue<int32_t>(kPreNmsMaxScalar),
+                    context->getInputValue<int32_t>(kPostNmsMaxScalar),
+                    context->getInputValue<float>(kIoUThresholdScalar),
+                    context->getInputValue<float>(kMinSizeScalar),
+                    context->getInputValue<bool>(kLayoutScalar),
+                    context->getOutputBuffer<int32_t>(kOutputBatchSplitTensor),
+                    context->getOutputShape(kOutputBatchSplitTensor), context);
+        }
+        case OperandType::TENSOR_QUANT8_ASYMM: {
+            return generateProposalsQuant(
+                    context->getInputBuffer<uint8_t>(kScoreTensor),
+                    context->getInputShape(kScoreTensor),
+                    context->getInputBuffer<uint8_t>(kDeltaTensor),
+                    context->getInputShape(kDeltaTensor),
+                    context->getInputBuffer<int16_t>(kAnchorTensor),
+                    context->getInputShape(kAnchorTensor),
+                    context->getInputBuffer<uint16_t>(kImageInfoTensor),
+                    context->getInputShape(kImageInfoTensor),
+                    context->getInputValue<float>(kHeightStrideSalar),
+                    context->getInputValue<float>(kWidthStrideScalar),
+                    context->getInputValue<int32_t>(kPreNmsMaxScalar),
+                    context->getInputValue<int32_t>(kPostNmsMaxScalar),
+                    context->getInputValue<float>(kIoUThresholdScalar),
+                    context->getInputValue<float>(kMinSizeScalar),
+                    context->getInputValue<bool>(kLayoutScalar),
+                    context->getOutputBuffer<int32_t>(kOutputBatchSplitTensor),
+                    context->getOutputShape(kOutputBatchSplitTensor), context);
+        }
+        default:
+            NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
+    }
+}
+
 }  // namespace generate_proposals
 
-NN_REGISTER_OPERATION(AXIS_ALIGNED_BBOX_TRANSFORM,
-                      generate_proposals::axis_aligned_bbox_transform::kOperationName,
-                      generate_proposals::axis_aligned_bbox_transform::validate,
-                      generate_proposals::axis_aligned_bbox_transform::prepare,
-                      generate_proposals::axis_aligned_bbox_transform::execute);
+namespace detection_postprocess {
 
-NN_REGISTER_OPERATION(BOX_WITH_NMS_LIMIT, generate_proposals::box_with_nms_limit::kOperationName,
-                      generate_proposals::box_with_nms_limit::validate,
-                      generate_proposals::box_with_nms_limit::prepare,
-                      generate_proposals::box_with_nms_limit::execute);
+constexpr char kOperationName[] = "DETECTION_POSTPROCESS";
+
+constexpr uint32_t kNumInputs = 14;
+constexpr uint32_t kScoreTensor = 0;
+constexpr uint32_t kDeltaTensor = 1;
+constexpr uint32_t kAnchorTensor = 2;
+constexpr uint32_t kScaleYScalar = 3;
+constexpr uint32_t kScaleXScalar = 4;
+constexpr uint32_t kScaleHScalar = 5;
+constexpr uint32_t kScaleWScalar = 6;
+constexpr uint32_t kUseRegularNmsScalar = 7;
+constexpr uint32_t kMaxNumDetectionScalar = 8;
+constexpr uint32_t kMaxClassesPerDetectionScalar = 9;
+constexpr uint32_t kMaxNumDetectionPerClassScalar = 10;
+constexpr uint32_t kScoreThresholdScalar = 11;
+constexpr uint32_t kIoUThresholdScalar = 12;
+constexpr uint32_t kIsBGInLabelScalar = 13;
+
+constexpr uint32_t kNumOutputs = 4;
+constexpr uint32_t kOutputScoreTensor = 0;
+constexpr uint32_t kOutputRoiTensor = 1;
+constexpr uint32_t kOutputClassTensor = 2;
+constexpr uint32_t kOutputDetectionTensor = 3;
+
+namespace {
+
+bool detectionPostprocessFloat32(
+        const float* scoreData, const Shape& scoreShape, const float* deltaData,
+        const Shape& deltaShape, const float* anchorData, const Shape& anchorShape, float scaleY,
+        float scaleX, float scaleH, float scaleW, bool useRegularNms, int32_t maxNumDetections,
+        int32_t maxClassesPerDetection, int32_t maxNumDetectionsPerClass, float iouThreshold,
+        float scoreThreshold, bool isBGInLabel, float* scoreOutData, const Shape& scoreOutShape,
+        float* roiOutData, const Shape& roiOutShape, int32_t* classOutData,
+        const Shape& classOutShape, int32_t* detectionOutData, const Shape& detectionOutShape) {
+    const uint32_t kRoiDim = 4;
+    uint32_t numBatches = getSizeOfDimension(scoreShape, 0);
+    uint32_t numAnchors = getSizeOfDimension(scoreShape, 1);
+    uint32_t numClasses = getSizeOfDimension(scoreShape, 2);
+    uint32_t lengthBoxEncoding = getSizeOfDimension(deltaShape, 2);
+    uint32_t numOutDetection = getSizeOfDimension(scoreOutShape, 1);
+
+    memset(scoreOutData, 0, getNumberOfElements(scoreOutShape) * sizeof(float));
+    memset(roiOutData, 0, getNumberOfElements(roiOutShape) * sizeof(float));
+    memset(classOutData, 0, getNumberOfElements(classOutShape) * sizeof(int32_t));
+    memset(detectionOutData, 0, getNumberOfElements(detectionOutShape) * sizeof(int32_t));
+
+    const float* scoreBase = scoreData;
+    const float* deltaBase = deltaData;
+    float* scoreOutBase = scoreOutData;
+    float* roiOutBase = roiOutData;
+    int32_t* classOutBase = classOutData;
+    std::vector<float> roiBuffer(numAnchors * kRoiDim);
+    std::vector<float> scoreBuffer(numAnchors);
+    for (uint32_t b = 0; b < numBatches; b++) {
+        const float* anchorBase = anchorData;
+        for (uint32_t a = 0; a < numAnchors; a++) {
+            float yCtr = anchorBase[0] + anchorBase[2] * deltaBase[0] / scaleY;
+            float xCtr = anchorBase[1] + anchorBase[3] * deltaBase[1] / scaleX;
+            float hHalf = anchorBase[2] * std::exp(deltaBase[2] / scaleH) * 0.5f;
+            float wHalf = anchorBase[3] * std::exp(deltaBase[3] / scaleW) * 0.5f;
+            roiBuffer[a * kRoiDim] = yCtr - hHalf;
+            roiBuffer[a * kRoiDim + 1] = xCtr - wHalf;
+            roiBuffer[a * kRoiDim + 2] = yCtr + hHalf;
+            roiBuffer[a * kRoiDim + 3] = xCtr + wHalf;
+            anchorBase += kRoiDim;
+            deltaBase += lengthBoxEncoding;
+        }
+
+        if (useRegularNms) {
+            std::vector<uint32_t> select;
+            box_with_nms_limit::hardNmsMultiClass(
+                    scoreBase, numClasses, numAnchors, scoreThreshold, iouThreshold,
+                    maxNumDetections, maxNumDetectionsPerClass,
+                    [&roiBuffer, numClasses](uint32_t ind) {
+                        return roiBuffer.data() + (ind / numClasses) * kRoiDim;
+                    },
+                    &select);
+            for (uint32_t i = 0; i < select.size(); i++) {
+                uint32_t ind = select[i];
+                scoreOutBase[i] = scoreBase[ind];
+                memcpy(roiOutBase + i * kRoiDim, &roiBuffer[(ind / numClasses) * kRoiDim],
+                       kRoiDim * sizeof(float));
+                classOutBase[i] = (ind % numClasses) - (isBGInLabel ? 0 : 1);
+            }
+            *detectionOutData++ = select.size();
+        } else {
+            uint32_t numOutClasses = std::min<uint32_t>(numClasses - 1, maxClassesPerDetection);
+            std::vector<float> maxScores(numAnchors);
+            for (uint32_t a = 0; a < numAnchors; a++) {
+                maxScores[a] = *std::max_element(scoreBase + a * numClasses + 1,
+                                                 scoreBase + (a + 1) * numClasses);
+            }
+            std::vector<uint32_t> select;
+            for (uint32_t a = 0; a < numAnchors; a++) {
+                if (maxScores[a] > scoreThreshold) {
+                    select.push_back(a);
+                }
+            }
+            uint32_t* selectEnd = box_with_nms_limit::hardNmsSingleClass(
+                    maxScores.data(), iouThreshold, maxNumDetections,
+                    [&roiBuffer](uint32_t ind) { return roiBuffer.data() + ind * kRoiDim; },
+                    select.data(), select.size());
+            select.resize(selectEnd - select.data());
+            float* scoreOutPtr = scoreOutBase;
+            float* roiOutPtr = roiOutBase;
+            int32_t* classOutPtr = classOutBase;
+            for (auto i : select) {
+                const float* score = scoreBase + i * numClasses;
+                std::vector<uint32_t> scoreInds(numClasses - 1);
+                std::iota(scoreInds.begin(), scoreInds.end(), 1);
+                std::sort(scoreInds.begin(), scoreInds.end(),
+                          [&score](const uint32_t lhs, const uint32_t rhs) {
+                              return score[lhs] > score[rhs];
+                          });
+                for (uint32_t c = 0; c < numOutClasses; c++) {
+                    *scoreOutPtr++ = score[scoreInds[c]];
+                    memcpy(roiOutPtr, &roiBuffer[i * kRoiDim], kRoiDim * sizeof(float));
+                    roiOutPtr += kRoiDim;
+                    *classOutPtr++ = scoreInds[c] - (isBGInLabel ? 0 : 1);
+                }
+            }
+            *detectionOutData++ = select.size() * numOutClasses;
+        }
+        scoreBase += numAnchors * numClasses;
+        scoreOutBase += numOutDetection;
+        roiOutBase += numOutDetection * kRoiDim;
+        classOutBase += numOutDetection;
+    }
+    return true;
+}
+
+bool detectionPostprocessFloat16(
+        const _Float16* scoreData, const Shape& scoreShape, const _Float16* deltaData,
+        const Shape& deltaShape, const _Float16* anchorData, const Shape& anchorShape, float scaleY,
+        float scaleX, float scaleH, float scaleW, bool useRegularNms, int32_t maxNumDetections,
+        int32_t maxClassesPerDetection, int32_t maxNumDetectionsPerClass, float iouThreshold,
+        float scoreThreshold, bool isBGInLabel, _Float16* scoreOutData, const Shape& scoreOutShape,
+        _Float16* roiOutData, const Shape& roiOutShape, int32_t* classOutData,
+        const Shape& classOutShape, int32_t* detectionOutData, const Shape& detectionOutShape) {
+    std::vector<float> scores_float32(getNumberOfElements(scoreShape));
+    convertFloat16ToFloat32(scoreData, &scores_float32);
+    std::vector<float> delta_float32(getNumberOfElements(deltaShape));
+    convertFloat16ToFloat32(deltaData, &delta_float32);
+    std::vector<float> anchor_float32(getNumberOfElements(anchorShape));
+    convertFloat16ToFloat32(anchorData, &anchor_float32);
+    std::vector<float> outputScore_float32(getNumberOfElements(scoreOutShape));
+    std::vector<float> outputRoi_float32(getNumberOfElements(roiOutShape));
+    NN_RET_CHECK(detectionPostprocessFloat32(
+            scores_float32.data(), scoreShape, delta_float32.data(), deltaShape,
+            anchor_float32.data(), anchorShape, scaleY, scaleX, scaleH, scaleW, useRegularNms,
+            maxNumDetections, maxClassesPerDetection, maxNumDetectionsPerClass, iouThreshold,
+            scoreThreshold, isBGInLabel, outputScore_float32.data(), scoreOutShape,
+            outputRoi_float32.data(), roiOutShape, classOutData, classOutShape, detectionOutData,
+            detectionOutShape));
+    convertFloat32ToFloat16(outputScore_float32, scoreOutData);
+    convertFloat32ToFloat16(outputRoi_float32, roiOutData);
+    return true;
+}
+
+}  // namespace
+
+bool validate(const IOperationValidationContext* context) {
+    NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
+    NN_RET_CHECK_EQ(context->getNumOutputs(), kNumOutputs);
+    std::vector<OperandType> inExpectedTypes;
+    std::vector<OperandType> outExpectedTypes;
+    auto inputType = context->getInputType(kScoreTensor);
+    if (inputType == OperandType::TENSOR_FLOAT16) {
+        inExpectedTypes = {OperandType::TENSOR_FLOAT16, OperandType::TENSOR_FLOAT16,
+                           OperandType::TENSOR_FLOAT16, OperandType::FLOAT16,
+                           OperandType::FLOAT16,        OperandType::FLOAT16,
+                           OperandType::FLOAT16,        OperandType::BOOL,
+                           OperandType::INT32,          OperandType::INT32,
+                           OperandType::INT32,          OperandType::FLOAT16,
+                           OperandType::FLOAT16,        OperandType::BOOL};
+    } else if (inputType == OperandType::TENSOR_FLOAT32) {
+        inExpectedTypes = {OperandType::TENSOR_FLOAT32, OperandType::TENSOR_FLOAT32,
+                           OperandType::TENSOR_FLOAT32, OperandType::FLOAT32,
+                           OperandType::FLOAT32,        OperandType::FLOAT32,
+                           OperandType::FLOAT32,        OperandType::BOOL,
+                           OperandType::INT32,          OperandType::INT32,
+                           OperandType::INT32,          OperandType::FLOAT32,
+                           OperandType::FLOAT32,        OperandType::BOOL};
+    } else {
+        NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
+    }
+    NN_RET_CHECK(validateInputTypes(context, inExpectedTypes));
+    NN_RET_CHECK(validateOutputTypes(
+            context, {inputType, inputType, OperandType::TENSOR_INT32, OperandType::TENSOR_INT32}));
+    return validateHalVersion(context, HalVersion::V1_2);
+}
+
+bool prepare(IOperationExecutionContext* context) {
+    Shape scoreShape = context->getInputShape(kScoreTensor);
+    Shape deltasShape = context->getInputShape(kDeltaTensor);
+    Shape anchorsShape = context->getInputShape(kAnchorTensor);
+    Shape outputScoreShape = context->getOutputShape(kOutputScoreTensor);
+    Shape outputRoiShape = context->getOutputShape(kOutputRoiTensor);
+    Shape outputClassShape = context->getOutputShape(kOutputClassTensor);
+    Shape outputDetectionShape = context->getOutputShape(kOutputDetectionTensor);
+
+    NN_RET_CHECK_EQ(getNumberOfDimensions(scoreShape), 3);
+    NN_RET_CHECK_EQ(getNumberOfDimensions(deltasShape), 3);
+    NN_RET_CHECK_EQ(getNumberOfDimensions(anchorsShape), 2);
+
+    const uint32_t kRoiDim = 4;
+    uint32_t numBatches = getSizeOfDimension(scoreShape, 0);
+    uint32_t numAnchors = getSizeOfDimension(scoreShape, 1);
+    uint32_t numClasses = getSizeOfDimension(scoreShape, 2);
+    uint32_t lengthBoxEncoding = getSizeOfDimension(deltasShape, 2);
+    uint32_t maxNumDetections = context->getInputValue<int32_t>(kMaxNumDetectionScalar);
+    uint32_t maxClassesPerDetection =
+            context->getInputValue<int32_t>(kMaxClassesPerDetectionScalar);
+    uint32_t numOutDetections = maxNumDetections;
+
+    NN_RET_CHECK_EQ(getSizeOfDimension(deltasShape, 0), numBatches);
+    NN_RET_CHECK_EQ(getSizeOfDimension(deltasShape, 1), numAnchors);
+    NN_RET_CHECK_EQ(getSizeOfDimension(anchorsShape, 0), numAnchors);
+    NN_RET_CHECK_EQ(getSizeOfDimension(anchorsShape, 1), kRoiDim);
+
+    if (scoreShape.type == OperandType::TENSOR_FLOAT32) {
+        NN_RET_CHECK_GT(context->getInputValue<float>(kScaleYScalar), 0);
+        NN_RET_CHECK_GT(context->getInputValue<float>(kScaleXScalar), 0);
+        NN_RET_CHECK_GT(context->getInputValue<float>(kScaleHScalar), 0);
+        NN_RET_CHECK_GT(context->getInputValue<float>(kScaleWScalar), 0);
+        NN_RET_CHECK_GE(context->getInputValue<float>(kScoreThresholdScalar), 0);
+        NN_RET_CHECK_GE(context->getInputValue<float>(kIoUThresholdScalar), 0);
+    } else if (scoreShape.type == OperandType::TENSOR_FLOAT16) {
+        NN_RET_CHECK(context->getInputValue<_Float16>(kScaleYScalar) > 0);
+        NN_RET_CHECK(context->getInputValue<_Float16>(kScaleXScalar) > 0);
+        NN_RET_CHECK(context->getInputValue<_Float16>(kScaleHScalar) > 0);
+        NN_RET_CHECK(context->getInputValue<_Float16>(kScaleWScalar) > 0);
+        NN_RET_CHECK(context->getInputValue<_Float16>(kScoreThresholdScalar) >= 0);
+        NN_RET_CHECK(context->getInputValue<_Float16>(kIoUThresholdScalar) >= 0);
+    } else {
+        NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
+    }
+    NN_RET_CHECK_GT(numClasses, 1);
+    NN_RET_CHECK_GE(lengthBoxEncoding, 4);
+    NN_RET_CHECK_GT(maxNumDetections, 0);
+    if (context->getInputValue<bool>(kUseRegularNmsScalar)) {
+        NN_RET_CHECK_GT(context->getInputValue<int32_t>(kMaxNumDetectionPerClassScalar), 0);
+    } else {
+        NN_RET_CHECK_GT(maxClassesPerDetection, 0);
+        numOutDetections *= maxClassesPerDetection;
+    }
+
+    outputScoreShape.type = scoreShape.type;
+    outputScoreShape.dimensions = {numBatches, numOutDetections};
+    NN_RET_CHECK(context->setOutputShape(kOutputScoreTensor, outputScoreShape));
+
+    outputRoiShape.type = anchorsShape.type;
+    outputRoiShape.dimensions = {numBatches, numOutDetections, 4};
+    NN_RET_CHECK(context->setOutputShape(kOutputRoiTensor, outputRoiShape));
+
+    outputClassShape.type = OperandType::TENSOR_INT32;
+    outputClassShape.dimensions = {numBatches, numOutDetections};
+    NN_RET_CHECK(context->setOutputShape(kOutputClassTensor, outputClassShape));
+
+    outputDetectionShape.type = OperandType::TENSOR_INT32;
+    outputDetectionShape.dimensions = {numBatches};
+    NN_RET_CHECK(context->setOutputShape(kOutputDetectionTensor, outputDetectionShape));
+    return true;
+}
+
+bool execute(IOperationExecutionContext* context) {
+    NNTRACE_TRANS("detectionPostProcess");
+    switch (context->getInputType(kScoreTensor)) {
+        case OperandType::TENSOR_FLOAT16: {
+            return detectionPostprocessFloat16(
+                    context->getInputBuffer<_Float16>(kScoreTensor),
+                    context->getInputShape(kScoreTensor),
+                    context->getInputBuffer<_Float16>(kDeltaTensor),
+                    context->getInputShape(kDeltaTensor),
+                    context->getInputBuffer<_Float16>(kAnchorTensor),
+                    context->getInputShape(kAnchorTensor),
+                    context->getInputValue<_Float16>(kScaleYScalar),
+                    context->getInputValue<_Float16>(kScaleXScalar),
+                    context->getInputValue<_Float16>(kScaleHScalar),
+                    context->getInputValue<_Float16>(kScaleWScalar),
+                    context->getInputValue<bool>(kUseRegularNmsScalar),
+                    context->getInputValue<int32_t>(kMaxNumDetectionScalar),
+                    context->getInputValue<int32_t>(kMaxClassesPerDetectionScalar),
+                    context->getInputValue<int32_t>(kMaxNumDetectionPerClassScalar),
+                    context->getInputValue<_Float16>(kIoUThresholdScalar),
+                    context->getInputValue<_Float16>(kScoreThresholdScalar),
+                    context->getInputValue<bool>(kIsBGInLabelScalar),
+                    context->getOutputBuffer<_Float16>(kOutputScoreTensor),
+                    context->getOutputShape(kOutputScoreTensor),
+                    context->getOutputBuffer<_Float16>(kOutputRoiTensor),
+                    context->getOutputShape(kOutputRoiTensor),
+                    context->getOutputBuffer<int32_t>(kOutputClassTensor),
+                    context->getOutputShape(kOutputClassTensor),
+                    context->getOutputBuffer<int32_t>(kOutputDetectionTensor),
+                    context->getOutputShape(kOutputDetectionTensor));
+        }
+        case OperandType::TENSOR_FLOAT32: {
+            return detectionPostprocessFloat32(
+                    context->getInputBuffer<float>(kScoreTensor),
+                    context->getInputShape(kScoreTensor),
+                    context->getInputBuffer<float>(kDeltaTensor),
+                    context->getInputShape(kDeltaTensor),
+                    context->getInputBuffer<float>(kAnchorTensor),
+                    context->getInputShape(kAnchorTensor),
+                    context->getInputValue<float>(kScaleYScalar),
+                    context->getInputValue<float>(kScaleXScalar),
+                    context->getInputValue<float>(kScaleHScalar),
+                    context->getInputValue<float>(kScaleWScalar),
+                    context->getInputValue<bool>(kUseRegularNmsScalar),
+                    context->getInputValue<int32_t>(kMaxNumDetectionScalar),
+                    context->getInputValue<int32_t>(kMaxClassesPerDetectionScalar),
+                    context->getInputValue<int32_t>(kMaxNumDetectionPerClassScalar),
+                    context->getInputValue<float>(kIoUThresholdScalar),
+                    context->getInputValue<float>(kScoreThresholdScalar),
+                    context->getInputValue<bool>(kIsBGInLabelScalar),
+                    context->getOutputBuffer<float>(kOutputScoreTensor),
+                    context->getOutputShape(kOutputScoreTensor),
+                    context->getOutputBuffer<float>(kOutputRoiTensor),
+                    context->getOutputShape(kOutputRoiTensor),
+                    context->getOutputBuffer<int32_t>(kOutputClassTensor),
+                    context->getOutputShape(kOutputClassTensor),
+                    context->getOutputBuffer<int32_t>(kOutputDetectionTensor),
+                    context->getOutputShape(kOutputDetectionTensor));
+        }
+        default:
+            NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
+    }
+}
+
+}  // namespace detection_postprocess
+
+}  // namespace bbox_ops
+
+NN_REGISTER_OPERATION(AXIS_ALIGNED_BBOX_TRANSFORM,
+                      bbox_ops::axis_aligned_bbox_transform::kOperationName,
+                      bbox_ops::axis_aligned_bbox_transform::validate,
+                      bbox_ops::axis_aligned_bbox_transform::prepare,
+                      bbox_ops::axis_aligned_bbox_transform::execute);
+
+NN_REGISTER_OPERATION(BOX_WITH_NMS_LIMIT, bbox_ops::box_with_nms_limit::kOperationName,
+                      bbox_ops::box_with_nms_limit::validate, bbox_ops::box_with_nms_limit::prepare,
+                      bbox_ops::box_with_nms_limit::execute);
+
+NN_REGISTER_OPERATION(GENERATE_PROPOSALS, bbox_ops::generate_proposals::kOperationName,
+                      bbox_ops::generate_proposals::validate, bbox_ops::generate_proposals::prepare,
+                      bbox_ops::generate_proposals::execute);
+
+NN_REGISTER_OPERATION(DETECTION_POSTPROCESSING, bbox_ops::detection_postprocess::kOperationName,
+                      bbox_ops::detection_postprocess::validate,
+                      bbox_ops::detection_postprocess::prepare,
+                      bbox_ops::detection_postprocess::execute);
 }  // namespace nn
 }  // namespace android

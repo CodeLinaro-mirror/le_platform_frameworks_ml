@@ -18,7 +18,9 @@
 
 #include "CompilationBuilder.h"
 
+#include "BurstBuilder.h"
 #include "ExecutionBuilder.h"
+#include "ExecutionBurstController.h"
 #include "ExecutionPlan.h"
 #include "Manager.h"
 #include "ModelBuilder.h"
@@ -41,7 +43,9 @@ int CompilationBuilder::finish() {
     // TODO validate the rest
 
     mFinished = true;
-
+    if (mIsCacheInfoProvided) {
+        mPlan.setCaching(&mCacheDir, mToken);
+    }
     if (mPartitioning) {
         int n = mModel->partitionTheWork(mDevices, mPreference, &mPlan);
         switch (n) {
@@ -61,7 +65,11 @@ int CompilationBuilder::finish() {
                     return n;
                 }
                 if (mModel->hasOEMOperation()) {
-                    LOG(ERROR) << "Because of OEM op cannot fall back to CPU";
+                    LOG(ERROR) << "Cannot fall back to CPU because of an OEM operation";
+                    return n;
+                }
+                if (mModel->hasExtensionOperation()) {
+                    LOG(ERROR) << "Cannot fall back to CPU because of an extension operation";
                     return n;
                 }
                 break;
@@ -90,6 +98,22 @@ int CompilationBuilder::setPreference(int32_t preference) {
     return ANEURALNETWORKS_NO_ERROR;
 }
 
+int CompilationBuilder::setCaching(const std::string& cacheDir, const uint8_t* token) {
+    if (mFinished) {
+        LOG(ERROR)
+                << "ANeuralNetworksCompilation_setCaching can't modify after compilation finished";
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    mCacheDir = cacheDir;
+    // Make sure the cache dir can concat with the filename.
+    if (!mCacheDir.empty() && mCacheDir.back() != '/') {
+        mCacheDir.push_back('/');
+    }
+    std::copy(token, token + ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, mToken);
+    mIsCacheInfoProvided = true;
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
 int CompilationBuilder::setPartitioning(uint32_t partitioning) {
     if (mFinished) {
         LOG(ERROR) <<
@@ -114,6 +138,22 @@ int CompilationBuilder::createExecution(ExecutionBuilder **execution) {
     }
     *execution = new (std::nothrow) ExecutionBuilder(this);
     return (*execution ? ANEURALNETWORKS_NO_ERROR : ANEURALNETWORKS_OUT_OF_MEMORY);
+}
+
+int CompilationBuilder::createBurst(BurstBuilder** burst) {
+    if (!mFinished) {
+        LOG(ERROR) << "ANeuralNetworksBurst_create passed an unfinished compilation";
+        *burst = nullptr;
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    if (!mPlan.isValid()) {
+        LOG(ERROR) << "ANeuralNetworksBurst_create passed an invalid compilation";
+        *burst = nullptr;
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    std::vector<std::unique_ptr<ExecutionBurstController>> burstControllers = mPlan.makeBursts();
+    *burst = new (std::nothrow) BurstBuilder(this, std::move(burstControllers));
+    return (*burst ? ANEURALNETWORKS_NO_ERROR : ANEURALNETWORKS_OUT_OF_MEMORY);
 }
 
 }  // namespace nn
