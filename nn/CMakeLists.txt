@@ -12,6 +12,12 @@ include_directories(${SYSROOT_INCDIR})
 include_directories(${SYSROOT_INCDIR}/eigen3)
 link_directories(${SYSROOT_LIBDIR})
 
+#EXPORT_HEADERS
+install(
+    DIRECTORY cast/include/
+    DESTINATION include/cast
+)
+
 include_directories(.)
 include_directories(cast/include)
 include_directories(cast/hidl_base_shlib/include)

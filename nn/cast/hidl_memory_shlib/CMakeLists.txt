@@ -14,6 +14,12 @@ target_link_libraries(${HIDL_MEMORY_TARGET_NAME}
     cast_nn_hidl_base
 )
 
+#EXPORT_HEADERS
+install(
+    DIRECTORY include/
+    DESTINATION include/cast
+)
+
 install(
     TARGETS ${HIDL_MEMORY_TARGET_NAME}
     LIBRARY DESTINATION lib

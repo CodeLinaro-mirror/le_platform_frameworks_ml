@@ -12,6 +12,12 @@ add_library(${TARGET_NAME} SHARED ${SOURCE_FILES})
 
 target_include_directories(${TARGET_NAME} PRIVATE include)
 
+#EXPORT_HEADERS
+install(
+    DIRECTORY include/
+    DESTINATION include/cast
+)
+
 install(
     TARGETS ${TARGET_NAME}
     LIBRARY DESTINATION lib

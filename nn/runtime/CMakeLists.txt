@@ -31,6 +31,12 @@ target_link_libraries(${TARGET_NAME}
     dl
 )
 
+#EXPORT_HEADERS
+install(
+    DIRECTORY include/
+    DESTINATION include/cast
+)
+
 install(
     TARGETS ${TARGET_NAME}
     LIBRARY DESTINATION lib
