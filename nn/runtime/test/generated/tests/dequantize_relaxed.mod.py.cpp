@@ -12,6 +12,12 @@ namespace dequantize_relaxed {
 TEST_F(GeneratedTests, dequantize_relaxed) {
     execute(dequantize_relaxed::CreateModel,
             dequantize_relaxed::is_ignored,
-            dequantize_relaxed::examples);
+            dequantize_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, dequantize_relaxed_dynamic_output_shape) {
+    execute(dequantize_relaxed::CreateModel_dynamic_output_shape,
+            dequantize_relaxed::is_ignored_dynamic_output_shape,
+            dequantize_relaxed::get_examples_dynamic_output_shape());
 }
 

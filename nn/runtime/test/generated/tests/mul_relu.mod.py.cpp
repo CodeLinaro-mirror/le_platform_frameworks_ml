@@ -12,6 +12,12 @@ namespace mul_relu {
 TEST_F(GeneratedTests, mul_relu) {
     execute(mul_relu::CreateModel,
             mul_relu::is_ignored,
-            mul_relu::examples);
+            mul_relu::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, mul_relu_dynamic_output_shape) {
+    execute(mul_relu::CreateModel_dynamic_output_shape,
+            mul_relu::is_ignored_dynamic_output_shape,
+            mul_relu::get_examples_dynamic_output_shape());
 }
 

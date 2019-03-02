@@ -12,6 +12,12 @@ namespace rnn {
 TEST_F(GeneratedTests, rnn) {
     execute(rnn::CreateModel,
             rnn::is_ignored,
-            rnn::examples);
+            rnn::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, rnn_dynamic_output_shape) {
+    execute(rnn::CreateModel_dynamic_output_shape,
+            rnn::is_ignored_dynamic_output_shape,
+            rnn::get_examples_dynamic_output_shape());
 }
 

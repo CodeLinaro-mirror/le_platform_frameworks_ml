@@ -39,12 +39,12 @@
 #endif
 
 namespace generated_tests {
-using namespace android::nn::wrapper;
+using namespace android::nn::test_wrapper;
 using namespace test_helper;
 
 namespace {
 template <typename T>
-void print(std::ostream& os, const MixedTyped& test) {
+void print(std::ostream& os, const std::map<int, std::vector<T>>& test) {
     // dump T-typed inputs
     for_each<T>(test, [&os](int idx, const std::vector<T>& f) {
         os << "    aliased_output" << idx << ": [";
@@ -57,7 +57,7 @@ void print(std::ostream& os, const MixedTyped& test) {
 
 // Specialized for _Float16 because it requires explicit conversion.
 template <>
-void print<_Float16>(std::ostream& os, const MixedTyped& test) {
+void print<_Float16>(std::ostream& os, const std::map<int, std::vector<_Float16>>& test) {
     for_each<_Float16>(test, [&os](int idx, const std::vector<_Float16>& f) {
         os << "    aliased_output" << idx << ": [";
         for (size_t i = 0; i < f.size(); ++i) {
@@ -69,12 +69,15 @@ void print<_Float16>(std::ostream& os, const MixedTyped& test) {
 }  // namespace
 
 static void printAll(std::ostream& os, const MixedTyped& test) {
-    print<float>(os, test);
-    print<int32_t>(os, test);
-    print<uint8_t>(os, test);
-    print<int16_t>(os, test);
-    print<_Float16>(os, test);
-    static_assert(5 == std::tuple_size<MixedTyped>::value,
+    print(os, test.float32Operands);
+    print(os, test.int32Operands);
+    print(os, test.quant8AsymmOperands);
+    print(os, test.quant16SymmOperands);
+    print(os, test.float16Operands);
+    print(os, test.bool8Operands);
+    print(os, test.quant8ChannelOperands);
+    print(os, test.quant16AsymmOperands);
+    static_assert(8 == MixedTyped::kNumTypes,
                   "Number of types in MixedTyped changed, but printAll function wasn't updated");
 }
 
@@ -113,7 +116,7 @@ void executeWithCompilation(Model* model, Compilation* compilation,
         MixedTyped inputs = example.operands.first;
         const MixedTyped& golden = example.operands.second;
 
-        const bool hasFloat16Inputs = !std::get<MixedTypedIndex<_Float16>::index>(inputs).empty();
+        const bool hasFloat16Inputs = !inputs.float16Operands.empty();
         if (model->isRelaxed() || hasFloat16Inputs) {
             // TODO: Adjust the error limit based on testing.
             // If in relaxed mode, set the absolute tolerance to be 5ULP of FP16.
@@ -144,6 +147,13 @@ void executeWithCompilation(Model* model, Compilation* compilation,
         ASSERT_EQ(Result::NO_ERROR, r);
         {
             NNTRACE_APP(NNTRACE_PHASE_RESULTS, "executeWithCompilation example");
+
+            // Get output dimensions
+            for_each<uint32_t>(
+                    test.operandDimensions, [&execution](int idx, std::vector<uint32_t>& t) {
+                        ASSERT_EQ(Result::NO_ERROR, execution.getOutputOperandDimensions(idx, &t));
+                    });
+
             // Dump all outputs for the slicing tool
             if (dumpToFile) {
                 s << "output" << exampleNo << " = {\n";

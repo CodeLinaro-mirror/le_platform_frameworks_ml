@@ -12,6 +12,12 @@ namespace hashtable_lookup_float {
 TEST_F(GeneratedTests, hashtable_lookup_float) {
     execute(hashtable_lookup_float::CreateModel,
             hashtable_lookup_float::is_ignored,
-            hashtable_lookup_float::examples);
+            hashtable_lookup_float::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, hashtable_lookup_float_dynamic_output_shape) {
+    execute(hashtable_lookup_float::CreateModel_dynamic_output_shape,
+            hashtable_lookup_float::is_ignored_dynamic_output_shape,
+            hashtable_lookup_float::get_examples_dynamic_output_shape());
 }
 

@@ -185,7 +185,7 @@ TEST_F(IntrospectionControlTest, SimpleAddModel) {
     // This is needed before we have the CPU fallback path being treated as a Device.
     // TODO(miaowang): remove once b/72506261 is fixed.
     if (DeviceManager::get()->getUseCpuOnly()) {
-        return;
+        GTEST_SKIP();
     }
 
     createSimpleAddModel(&mModel);
@@ -213,11 +213,24 @@ TEST_F(IntrospectionControlTest, SimpleAddModel) {
               ANEURALNETWORKS_NO_ERROR);
     EXPECT_EQ(ANeuralNetworksExecution_setOutput(mExecution, 0, nullptr, output, sizeof(output)),
               ANEURALNETWORKS_NO_ERROR);
+    EXPECT_EQ(ANeuralNetworksExecution_setMeasureTiming(mExecution, true),
+              ANEURALNETWORKS_NO_ERROR);
 
     EXPECT_EQ(ANeuralNetworksExecution_startCompute(mExecution, &mEvent), ANEURALNETWORKS_NO_ERROR);
     EXPECT_EQ(ANeuralNetworksEvent_wait(mEvent), ANEURALNETWORKS_NO_ERROR);
     EXPECT_EQ(output[0], input1[0] + input2[0]);
     EXPECT_EQ(output[1], input1[1] + input2[1]);
+
+    uint64_t timeOnHardware, timeInDriver;
+    EXPECT_EQ(ANeuralNetworksExecution_getDuration(mExecution, ANEURALNETWORKS_DURATION_ON_HARDWARE,
+                                                   &timeOnHardware),
+              ANEURALNETWORKS_NO_ERROR);
+    EXPECT_EQ(ANeuralNetworksExecution_getDuration(mExecution, ANEURALNETWORKS_DURATION_IN_DRIVER,
+                                                   &timeInDriver),
+              ANEURALNETWORKS_NO_ERROR);
+    if (timeOnHardware != UINT64_MAX && timeInDriver != UINT64_MAX) {
+        EXPECT_LE(timeOnHardware, timeInDriver);
+    }
 }
 
 const float kSimpleMultiplier = 2.0f;
@@ -251,13 +264,15 @@ void createAddMulModel(WrapperModel* model, bool reverseOrder) {
     ASSERT_TRUE(model->isValid());
 }
 
+// TODO(miaowang): add a test to make sure ANNCompilation_create() has CPU
+// fallback.
 // This test verifies that a device that could only handle ADD would correctly report that an
 // ADD->MUL model could not be fully supported.
 TEST_F(IntrospectionControlTest, PartialModelNotSupported) {
     // This is needed before we have the CPU fallback path being treated as a Device.
     // TODO(miaowang): remove once b/72506261 is fixed.
     if (DeviceManager::get()->getUseCpuOnly()) {
-        return;
+        GTEST_SKIP();
     }
 
     createAddMulModel(&mModel, false);
@@ -274,6 +289,14 @@ TEST_F(IntrospectionControlTest, PartialModelNotSupported) {
 
     EXPECT_TRUE(selectDeviceByName(addOnlyDriver));
     EXPECT_TRUE(isSupportedOpListExpected({true, false}));
+
+    ANeuralNetworksModel* modelHandle = mModel.getHandle();
+    EXPECT_EQ(ANeuralNetworksCompilation_createForDevices(modelHandle, mDevices.data(),
+                                                          mDevices.size(), &mCompilation),
+              ANEURALNETWORKS_NO_ERROR);
+    // The compilation must fail as there is no fallback when using
+    // Introspection API.
+    EXPECT_NE(ANeuralNetworksCompilation_finish(mCompilation), ANEURALNETWORKS_NO_ERROR);
 }
 
 // This test verifies that a device that could only handle ADD would correctly report that an
@@ -283,7 +306,7 @@ TEST_F(IntrospectionControlTest, PartialModelNotSupportedOrder) {
     // This is needed before we have the CPU fallback path being treated as a Device.
     // TODO(miaowang): remove once b/72506261 is fixed.
     if (DeviceManager::get()->getUseCpuOnly()) {
-        return;
+        GTEST_SKIP();
     }
 
     createAddMulModel(&mModel, true);
@@ -309,7 +332,7 @@ TEST_F(IntrospectionControlTest, ModelNeedTwoDevices) {
     // This is needed before we have the CPU fallback path being treated as a Device.
     // TODO(miaowang): remove once b/72506261 is fixed.
     if (DeviceManager::get()->getUseCpuOnly()) {
-        return;
+        GTEST_SKIP();
     }
 
     createAddMulModel(&mModel, false);
@@ -351,5 +374,4 @@ TEST_F(IntrospectionControlTest, ModelNeedTwoDevices) {
     EXPECT_EQ(output[0], kSimpleMultiplier * (input1[0] + input2[0]));
     EXPECT_EQ(output[1], kSimpleMultiplier * (input1[1] + input2[1]));
 }
-
 }  // namespace

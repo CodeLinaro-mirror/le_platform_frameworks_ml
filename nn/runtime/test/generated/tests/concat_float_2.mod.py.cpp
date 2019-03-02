@@ -12,6 +12,12 @@ namespace concat_float_2 {
 TEST_F(GeneratedTests, concat_float_2) {
     execute(concat_float_2::CreateModel,
             concat_float_2::is_ignored,
-            concat_float_2::examples);
+            concat_float_2::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, concat_float_2_dynamic_output_shape) {
+    execute(concat_float_2::CreateModel_dynamic_output_shape,
+            concat_float_2::is_ignored_dynamic_output_shape,
+            concat_float_2::get_examples_dynamic_output_shape());
 }
 

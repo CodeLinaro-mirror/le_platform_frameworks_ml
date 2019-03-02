@@ -12,6 +12,12 @@ namespace pad_relaxed {
 TEST_F(GeneratedTests, pad_relaxed) {
     execute(pad_relaxed::CreateModel,
             pad_relaxed::is_ignored,
-            pad_relaxed::examples);
+            pad_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, pad_relaxed_dynamic_output_shape) {
+    execute(pad_relaxed::CreateModel_dynamic_output_shape,
+            pad_relaxed::is_ignored_dynamic_output_shape,
+            pad_relaxed::get_examples_dynamic_output_shape());
 }
 

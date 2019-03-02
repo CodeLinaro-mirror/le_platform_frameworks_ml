@@ -12,6 +12,12 @@ namespace pad {
 TEST_F(GeneratedTests, pad) {
     execute(pad::CreateModel,
             pad::is_ignored,
-            pad::examples);
+            pad::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, pad_dynamic_output_shape) {
+    execute(pad::CreateModel_dynamic_output_shape,
+            pad::is_ignored_dynamic_output_shape,
+            pad::get_examples_dynamic_output_shape());
 }
 

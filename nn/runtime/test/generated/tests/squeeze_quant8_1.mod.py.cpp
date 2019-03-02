@@ -12,6 +12,12 @@ namespace squeeze_quant8_1 {
 TEST_F(GeneratedTests, squeeze_quant8_1) {
     execute(squeeze_quant8_1::CreateModel,
             squeeze_quant8_1::is_ignored,
-            squeeze_quant8_1::examples);
+            squeeze_quant8_1::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, squeeze_quant8_1_dynamic_output_shape) {
+    execute(squeeze_quant8_1::CreateModel_dynamic_output_shape,
+            squeeze_quant8_1::is_ignored_dynamic_output_shape,
+            squeeze_quant8_1::get_examples_dynamic_output_shape());
 }
 

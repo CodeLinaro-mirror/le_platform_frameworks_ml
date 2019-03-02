@@ -12,6 +12,12 @@ namespace lstm3 {
 TEST_F(GeneratedTests, lstm3) {
     execute(lstm3::CreateModel,
             lstm3::is_ignored,
-            lstm3::examples);
+            lstm3::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, lstm3_dynamic_output_shape) {
+    execute(lstm3::CreateModel_dynamic_output_shape,
+            lstm3::is_ignored_dynamic_output_shape,
+            lstm3::get_examples_dynamic_output_shape());
 }
 

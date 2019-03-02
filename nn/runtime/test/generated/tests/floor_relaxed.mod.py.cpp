@@ -12,6 +12,12 @@ namespace floor_relaxed {
 TEST_F(GeneratedTests, floor_relaxed) {
     execute(floor_relaxed::CreateModel,
             floor_relaxed::is_ignored,
-            floor_relaxed::examples);
+            floor_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, floor_relaxed_dynamic_output_shape) {
+    execute(floor_relaxed::CreateModel_dynamic_output_shape,
+            floor_relaxed::is_ignored_dynamic_output_shape,
+            floor_relaxed::get_examples_dynamic_output_shape());
 }
 

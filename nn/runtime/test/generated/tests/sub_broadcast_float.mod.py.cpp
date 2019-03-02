@@ -12,6 +12,12 @@ namespace sub_broadcast_float {
 TEST_F(GeneratedTests, sub_broadcast_float) {
     execute(sub_broadcast_float::CreateModel,
             sub_broadcast_float::is_ignored,
-            sub_broadcast_float::examples);
+            sub_broadcast_float::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, sub_broadcast_float_dynamic_output_shape) {
+    execute(sub_broadcast_float::CreateModel_dynamic_output_shape,
+            sub_broadcast_float::is_ignored_dynamic_output_shape,
+            sub_broadcast_float::get_examples_dynamic_output_shape());
 }
 

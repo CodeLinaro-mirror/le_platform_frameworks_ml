@@ -55,8 +55,18 @@ struct RunTimeOperandInfo {
     // always 0.
     uint32_t numberOfUsesLeft;
 
+    Operand::ExtraParams extraParams;
+
     Shape shape() const {
         return Shape{.type = type, .dimensions = dimensions, .scale = scale, .offset = zeroPoint};
+    }
+
+    bool isSufficient() const {
+        if (isExtensionOperandType(type)) {
+            // We don't know sizes of extension types.
+            return true;
+        }
+        return length >= sizeOfData(type, dimensions);
     }
 };
 
@@ -111,6 +121,11 @@ public:
             const std::vector<RunTimePoolInfo>& modelPoolInfos,
             const std::vector<RunTimePoolInfo>& requestPoolInfos);
 
+    const std::vector<OutputShape>& getOutputShapes() const {
+        CHECK(mFinished) << "getOutputShapes() called by an unfinished CpuExecutor.";
+        return mOutputShapes;
+    }
+
 private:
     bool initializeRunTimeInfo(const std::vector<RunTimePoolInfo>& modelPoolInfos,
                                const std::vector<RunTimePoolInfo>& requestPoolInfos);
@@ -119,6 +134,10 @@ private:
     // Decrement the usage count for the operands listed.  Frees the memory
     // allocated for any temporary variable with a count of zero.
     void freeNoLongerUsedOperands(const std::vector<uint32_t>& inputs);
+
+    // Frees the memory allocated for any temporary variable, and sets the
+    // output operand shapes returning to the runtime.
+    void finish(int result);
 
     // The model and the request that we'll execute. Only valid while run()
     // is being executed.
@@ -132,6 +151,12 @@ private:
     //    std::vector<uint32_t> mDimensions;
     // Runtime information about all the operands.
     std::vector<RunTimeOperandInfo> mOperands;
+
+    // The output operand shapes returning to the runtime.
+    std::vector<OutputShape> mOutputShapes;
+
+    // Whether execution is finished and mOutputShapes is ready
+    bool mFinished = false;
 };
 
 // Class for setting reasonable OpenMP threading settings. (OpenMP is used by
@@ -178,9 +203,9 @@ namespace {
 
 template <typename T>
 T getScalarData(const RunTimeOperandInfo& info) {
-  // TODO: Check buffer is at least as long as size of data.
-  T* data = reinterpret_cast<T*>(info.buffer);
-  return data[0];
+    // TODO: Check buffer is at least as long as size of data.
+    T* data = reinterpret_cast<T*>(info.buffer);
+    return data[0];
 }
 
 inline bool IsNullInput(const RunTimeOperandInfo *input) {

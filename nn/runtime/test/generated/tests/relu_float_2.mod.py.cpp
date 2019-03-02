@@ -12,6 +12,12 @@ namespace relu_float_2 {
 TEST_F(GeneratedTests, relu_float_2) {
     execute(relu_float_2::CreateModel,
             relu_float_2::is_ignored,
-            relu_float_2::examples);
+            relu_float_2::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, relu_float_2_dynamic_output_shape) {
+    execute(relu_float_2::CreateModel_dynamic_output_shape,
+            relu_float_2::is_ignored_dynamic_output_shape,
+            relu_float_2::get_examples_dynamic_output_shape());
 }
 

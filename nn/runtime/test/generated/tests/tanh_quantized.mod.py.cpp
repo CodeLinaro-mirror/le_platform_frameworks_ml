@@ -12,6 +12,12 @@ namespace tanh_quantized {
 TEST_F(GeneratedTests, tanh_quantized) {
     execute(tanh_quantized::CreateModel,
             tanh_quantized::is_ignored,
-            tanh_quantized::examples);
+            tanh_quantized::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, tanh_quantized_dynamic_output_shape) {
+    execute(tanh_quantized::CreateModel_dynamic_output_shape,
+            tanh_quantized::is_ignored_dynamic_output_shape,
+            tanh_quantized::get_examples_dynamic_output_shape());
 }
 

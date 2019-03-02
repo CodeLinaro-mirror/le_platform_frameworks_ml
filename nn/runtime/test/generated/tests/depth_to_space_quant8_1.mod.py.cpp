@@ -12,6 +12,12 @@ namespace depth_to_space_quant8_1 {
 TEST_F(GeneratedTests, depth_to_space_quant8_1) {
     execute(depth_to_space_quant8_1::CreateModel,
             depth_to_space_quant8_1::is_ignored,
-            depth_to_space_quant8_1::examples);
+            depth_to_space_quant8_1::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, depth_to_space_quant8_1_dynamic_output_shape) {
+    execute(depth_to_space_quant8_1::CreateModel_dynamic_output_shape,
+            depth_to_space_quant8_1::is_ignored_dynamic_output_shape,
+            depth_to_space_quant8_1::get_examples_dynamic_output_shape());
 }
 

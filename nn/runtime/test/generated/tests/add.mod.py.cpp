@@ -12,6 +12,12 @@ namespace add {
 TEST_F(GeneratedTests, add) {
     execute(add::CreateModel,
             add::is_ignored,
-            add::examples);
+            add::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, add_dynamic_output_shape) {
+    execute(add::CreateModel_dynamic_output_shape,
+            add::is_ignored_dynamic_output_shape,
+            add::get_examples_dynamic_output_shape());
 }
 

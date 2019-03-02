@@ -12,6 +12,12 @@ namespace depthwise_conv2d_float {
 TEST_F(GeneratedTests, depthwise_conv2d_float) {
     execute(depthwise_conv2d_float::CreateModel,
             depthwise_conv2d_float::is_ignored,
-            depthwise_conv2d_float::examples);
+            depthwise_conv2d_float::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, depthwise_conv2d_float_dynamic_output_shape) {
+    execute(depthwise_conv2d_float::CreateModel_dynamic_output_shape,
+            depthwise_conv2d_float::is_ignored_dynamic_output_shape,
+            depthwise_conv2d_float::get_examples_dynamic_output_shape());
 }
 

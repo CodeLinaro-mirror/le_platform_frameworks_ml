@@ -12,6 +12,12 @@ namespace resize_bilinear_2 {
 TEST_F(GeneratedTests, resize_bilinear_2) {
     execute(resize_bilinear_2::CreateModel,
             resize_bilinear_2::is_ignored,
-            resize_bilinear_2::examples);
+            resize_bilinear_2::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, resize_bilinear_2_dynamic_output_shape) {
+    execute(resize_bilinear_2::CreateModel_dynamic_output_shape,
+            resize_bilinear_2::is_ignored_dynamic_output_shape,
+            resize_bilinear_2::get_examples_dynamic_output_shape());
 }
 

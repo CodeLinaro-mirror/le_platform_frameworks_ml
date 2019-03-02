@@ -12,6 +12,12 @@ namespace mobilenet_224_gender_basic_fixed {
 TEST_F(GeneratedTests, mobilenet_224_gender_basic_fixed) {
     execute(mobilenet_224_gender_basic_fixed::CreateModel,
             mobilenet_224_gender_basic_fixed::is_ignored,
-            mobilenet_224_gender_basic_fixed::examples);
+            mobilenet_224_gender_basic_fixed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, mobilenet_224_gender_basic_fixed_dynamic_output_shape) {
+    execute(mobilenet_224_gender_basic_fixed::CreateModel_dynamic_output_shape,
+            mobilenet_224_gender_basic_fixed::is_ignored_dynamic_output_shape,
+            mobilenet_224_gender_basic_fixed::get_examples_dynamic_output_shape());
 }
 

@@ -12,6 +12,12 @@ namespace split_quant8_3 {
 TEST_F(GeneratedTests, split_quant8_3) {
     execute(split_quant8_3::CreateModel,
             split_quant8_3::is_ignored,
-            split_quant8_3::examples);
+            split_quant8_3::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, split_quant8_3_dynamic_output_shape) {
+    execute(split_quant8_3::CreateModel_dynamic_output_shape,
+            split_quant8_3::is_ignored_dynamic_output_shape,
+            split_quant8_3::get_examples_dynamic_output_shape());
 }
 

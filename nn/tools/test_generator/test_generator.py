@@ -54,18 +54,26 @@ def Dequantize(v, ty):
     v -= ty.zeroPoint
     if ty.scale != 0:
         v *= ty.scale
+    if isinstance(ty.extraParams, SymmPerChannelQuantParams):
+        v *= ty.extraParams.GetScalesBroadcastArray(ty.dimensions)
     return v
 
 # Transform float32 to target data type
 def Quantize(v, ty):
     if ty.scale != 0:
         v /= ty.scale
+    if isinstance(ty.extraParams, SymmPerChannelQuantParams):
+        v = v / ty.extraParams.GetScalesBroadcastArray(ty.dimensions)
     v += ty.zeroPoint
     if not ty.IsFloat():
         v = np.round(v)
         v = int(v) if np.isscalar(v) else v.astype(int)
     if ty.type == "TENSOR_QUANT8_ASYMM":
         v = np.minimum(np.maximum(v, 0), 255)
+    elif ty.type == "TENSOR_QUANT16_ASYMM":
+        v = np.minimum(np.maximum(v, 0), 65535)
+    elif ty.type == "TENSOR_QUANT8_SYMM_PER_CHANNEL":
+        v = np.minimum(np.maximum(v, -127), 127)
     elif ty.type == "UINT32":
         v = np.maximum(v, 0)
     return v
@@ -141,31 +149,37 @@ class Type(NamedVariable):
         "INT32": "int32_t",
         "UINT32": "uint32_t",
         "FLOAT32": "float",
+        "FLOAT16": "_Float16",
         "TENSOR_INT32": "int32_t",
         "TENSOR_FLOAT16": "_Float16",
         "TENSOR_FLOAT32": "float",
         "TENSOR_QUANT8_ASYMM": "uint8_t",
-        "BOOL": "bool",
+        "BOOL": "bool8",
+        "TENSOR_QUANT16_ASYMM": "uint16_t",
         "TENSOR_QUANT16_SYMM": "int16_t",
+        "TENSOR_BOOL8": "bool8",
+        "TENSOR_QUANT8_SYMM_PER_CHANNEL": "int8_t",
 #     "OEM_SCALAR": this is service-defined.
         "TENSOR_OEM_BYTE": "uint8_t",
     }
 
     # types are named as "type0", "type1", ...
-    def __init__(self, vt, dimensions, scale, zeroPoint, name="type", skipRenaming=False):
+    def __init__(self, vt, dimensions, scale, zeroPoint, name="type", skipRenaming=False,
+                 extraParams=None):
         NamedVariable.__init__(self, name, sep="", showZero=True, skipRenaming=skipRenaming)
         self.type = vt
         self.dimensions = dimensions
         self.scale = float(scale)
         self.zeroPoint = int(zeroPoint)
+        self.extraParams = extraParams
 
     # Factory for Type object, only create a new Type if requested type does
     # not have a match with all existing types
     @staticmethod
-    def GetType(vt, dimensions, scale=0, zeroPoint=0):
-        key = ",".join([vt, str(dimensions), str(scale), str(zeroPoint)])
+    def GetType(vt, dimensions, scale=0, zeroPoint=0, extraParams=None):
+        key = ",".join([vt, str(dimensions), str(scale), str(zeroPoint), str(extraParams)])
         if key not in Type.typesMap:
-            Type.typesMap[key] = Type(vt, dimensions, scale, zeroPoint)
+            Type.typesMap[key] = Type(vt, dimensions, scale, zeroPoint, extraParams=extraParams)
         return Type.typesMap[key]
 
     @staticmethod
@@ -175,11 +189,11 @@ class Type(NamedVariable):
 
     # For backward-compatibility
     @staticmethod
-    def GetTypeFromString(vt, shape):
+    def GetTypeFromString(vt, shape, extraParams=None):
         dimensions, scale, zeroPoint = Type.GetParsedShape(shape)
         scale = float(scale)
         zeroPoint = int(zeroPoint)
-        return Type.GetType(vt, dimensions, scale, zeroPoint)
+        return Type.GetType(vt, dimensions, scale, zeroPoint, extraParams)
 
     # For backward-compatibility
     @staticmethod
@@ -210,13 +224,13 @@ class Type(NamedVariable):
         return self.GetCppTypeString() in ["float", "_Float16"]
 
     def IsBool(self):
-        return self.GetCppTypeString() == "bool"
+        return self.GetCppTypeString() == "bool8"
 
     def GetElementByteSize(self):
         cppTypeString = self.GetCppTypeString()
-        if cppTypeString in ["uint8_t", "bool"]:
+        if cppTypeString in ["uint8_t", "int8_t", "bool8"]:
             return 1
-        elif cppTypeString in ["int16_t", "_Float16"]:
+        elif cppTypeString in ["int16_t", "uint16_t", "_Float16"]:
             return 2
         else:
             return 4
@@ -237,6 +251,9 @@ class Type(NamedVariable):
         else:
             return GetJointStr([self.GetDimensionsString(), self.scale, self.zeroPoint])
 
+    def ToUnspecifiedDim(self):
+        return Type.GetType(self.type, [0] * len(self.dimensions), self.scale, self.zeroPoint)
+
 # To track implicitly convertible parameter types
 class ImplicitParameter():
     @staticmethod
@@ -248,18 +265,44 @@ class ImplicitParameter():
                 return implicitType("param", value)
         assert False, "%s not supported for implicit parameter"%value
 
+
+# ExtraParams with per-channel quantization.
+class SymmPerChannelQuantParams():
+  def __init__(self, channelDim, scales, hide = False):
+    self.channelDim = channelDim
+    self.scales = scales
+    self.hide = hide
+
+  def GetScalesBroadcastArray(self, dimensions):
+    bshape = [1] * len(dimensions)
+    bshape[self.channelDim] = len(self.scales)
+    return np.array(self.scales).reshape(bshape)
+
+  def GetConstructor(self):
+    return "SymmPerChannelQuantParams({%s},%d)" % (
+        ", ".join(str(x) + "f" for x in self.scales), self.channelDim)
+
+  def GetVtsSetter(self):
+    return "channelQuant"
+
+  def GetVtsConstructor(self):
+    return "SymmPerChannelQuantParams{.scales={%s}, .channelDim=%d}" % (
+        ", ".join(str(x) + "f" for x in self.scales), self.channelDim)
+
+
 # An operand that can be fed into operations. Also, an operand is always
 # declared before operations.
 class Operand(NamedVariable):
 
-    def __init__(self, name, opType, value, backward=None, skipRenaming=False):
+    def __init__(self, name, opType, value, backward=None, skipRenaming=False, extraParams=None):
         NamedVariable.__init__(self, name, sep="", skipRenaming=skipRenaming)
         if type(opType) is str:
-            self.type = Type.GetTypeFromString(opType, value)
+            self.type = Type.GetTypeFromString(opType, value, extraParams)
             value = backward
         else:
-            self.type = Type.GetType(*opType)
+            self.type = Type.GetType(*opType, extraParams=extraParams)
         self.SetValue(value)
+        self.dimensions = self.type.dimensions
         self.lifetime = "TEMPORARY_VARIABLE"
         self.ins = []
         self.outs = []
@@ -286,11 +329,15 @@ class Operand(NamedVariable):
         else:
             return "{%s}"%(GetJointStr(self.value, method=lambda x: str(int(x))))
 
+    def ToUnspecifiedDim(self):
+        self.dimensions = self.type.dimensions
+        self.type = self.type.ToUnspecifiedDim()
+
 # Base class of user-defined input/output operand
 class InOut(Operand):
 
-    def __init__(self, name, opType, backward=None, skipRenaming=False):
-        Operand.__init__(self, name, opType, backward, None, skipRenaming=skipRenaming)
+    def __init__(self, name, opType, backward=None, skipRenaming=False, extraParams=None):
+        Operand.__init__(self, name, opType, backward, None, skipRenaming=skipRenaming, extraParams=extraParams)
         self.lifetime = "MODEL_INPUT"
         self.index = 0
 
@@ -303,8 +350,8 @@ class InOut(Operand):
 
 # A user-declared input operand
 class Input(InOut):
-    def __init__(self, name, opType, backward=None, skipRenaming=False):
-        InOut.__init__(self, name, opType, backward, skipRenaming=skipRenaming)
+    def __init__(self, name, opType, backward=None, skipRenaming=False, extraParams=None):
+        InOut.__init__(self, name, opType, backward, skipRenaming=skipRenaming, extraParams=extraParams)
         self.lifetime = "MODEL_INPUT"
 
 # A user-declared output operand
@@ -319,13 +366,15 @@ class IgnoredOutput(Output):
         Output.__init__(self, name, opType, backward, skipRenaming=skipRenaming)
         self.lifetime = "MODEL_OUTPUT"
     def Feed(self, value):
-        self.value = [0 for x in range(self.type.GetNumberOfElements())]
+        numElements = reduce(lambda x,y: x*y, self.dimensions, 1)
+        self.value = [0 for x in range(numElements)]
         return self
 
 # An explicitly declared parameter
 class Parameter(Operand):
-    def __init__(self, name, opType, value, backward=None, skipRenaming=False):
-        Operand.__init__(self, name, opType, value, backward, skipRenaming=skipRenaming)
+    def __init__(self, name, opType, value, backward=None, skipRenaming=False, extraParams=None):
+        Operand.__init__(self, name, opType, value, backward, skipRenaming=skipRenaming,
+                         extraParams=extraParams)
         self.initializer = NamedVariable(str(self) + "_init")
         self.lifetime = "CONSTANT_REFERENCE" if Configuration.useSHM() else "CONSTANT_COPY"
 
@@ -336,6 +385,14 @@ class Int32Scalar(Parameter, ImplicitParameter):
     @staticmethod
     def IsCompatible(value):
         return type(value) is int
+
+# A shortcut for parameters of FLOAT16
+class Float16Scalar(Parameter, ImplicitParameter):
+    def __init__(self, name, value):
+        Parameter.__init__(self, name, ("FLOAT16", []), float(value))
+    @staticmethod
+    def IsCompatible(value):
+        return False
 
 # A shortcut for parameters of FLOAT32
 class Float32Scalar(Parameter, ImplicitParameter):
@@ -419,19 +476,15 @@ class Model:
 
     def __init__(self, name=None):
         self.name = name
-        self.createFunctionName = GlobalVariable("CreateModel", self.name)
-        self.createTestFunctionName = GlobalVariable("createTestModel", self.name)
-        self.isIgnoredFunctionName = GlobalVariable("is_ignored", self.name)
         self.operations = []
         self.operands = []
         self.isRelaxed = False
         self.compiled = False
         self.dumped = False
+        self.hasDynamicOutputShape = False
         Model.models.append(self)
 
     def WithSuffix(self, *args):
-        if all(n is None or n == "" for n in args):
-            return self
         self.createFunctionName = GlobalVariable("CreateModel", self.name, *args)
         self.createTestFunctionName = GlobalVariable("createTestModel", self.name, *args)
         self.isIgnoredFunctionName = GlobalVariable("is_ignored", self.name, *args)
@@ -464,6 +517,10 @@ class Model:
 
     def RelaxedExecution(self, isRelaxed):
         self.isRelaxed = isRelaxed
+        return self
+
+    def TestDynamicOutputShape(self, hasDynamicOutputShape):
+        self.hasDynamicOutputShape = hasDynamicOutputShape
         return self
 
     def GetTypes(self):
@@ -538,12 +595,21 @@ class Model:
         for op in operations:
             self.TopologicalSortHelper(op, deps, visited)
 
+    def SetOutputUnspecified(self):
+        for op in self.operands:
+            op.dimensions = op.type.dimensions
+        if self.hasDynamicOutputShape:
+            for op in self.GetOutputs():
+                op.ToUnspecifiedDim()
+        return self
+
     def Compile(self):
         if self.compiled:
             return self
         self.SetInputAndOutputIndex()
         self.SetOperandInsAndOuts()
         self.TopologicalSort()
+        self.SetOutputUnspecified()
         self.compiled = True
         return self
 
@@ -649,10 +715,6 @@ class DefaultVariation(ModelVariation):
     def __init__(self, name=None):
         ModelVariation.__init__(self, name=name)
 
-    # For faster execution
-    def ApplyTo(self, model, feedDicts):
-        return model, feedDicts
-
 # Convert operand data type
 class DataTypeConverter(ModelVariation, ImplicitVariation):
 
@@ -672,7 +734,9 @@ class DataTypeConverter(ModelVariation, ImplicitVariation):
             return self
         # get all target types
         targetTypes = list(zip(*self.targetOperands.values()))[0]
-        if "TENSOR_QUANT8_ASYMM" in targetTypes:
+        if "TENSOR_QUANT8_SYMM_PER_CHANNEL" in targetTypes:
+            self.name = "channelQuant8"
+        elif "TENSOR_QUANT8_ASYMM" in targetTypes:
             self.name = "quant8"
         elif "TENSOR_INT32" in targetTypes:
             self.name = "int32"
@@ -684,9 +748,12 @@ class DataTypeConverter(ModelVariation, ImplicitVariation):
 
     def AutoIdentify(self, model):
         if self.targetType is not None:
-            # By default, select all the float32 tensors
-            self.Identify({op: ["TENSOR_" + self.targetType.upper()] \
-                    for op in model.operands if op.type.type == "TENSOR_FLOAT32"})
+            # By default, select all the float32 tensors/scalars
+            targets = {op: ["TENSOR_" + self.targetType.upper()] \
+                    for op in model.operands if op.type.type == "TENSOR_FLOAT32"}
+            targets.update({op: [self.targetType.upper()] \
+                    for op in model.operands if op.type.type == "FLOAT32"})
+            self.Identify(targets)
         return self
 
     def TransformOperand(self, op, arg=None):
@@ -837,7 +904,7 @@ class ParameterAsInputConverter(ModelVariation, ImplicitVariation):
 
     def TransformOperand(self, op, arg=None):
         assert isinstance(op, Parameter), "%s cannot be converted to Input."%type(op)
-        newop = Input(op.name, op.type.GetSignatureTuple(), skipRenaming=True)
+        newop = Input(op.name, op.type.GetSignatureTuple(), skipRenaming=True, extraParams=op.type.extraParams)
         newop.SetValue(op.value)
         return newop
 
@@ -880,6 +947,18 @@ class ActivationConverter(ModelVariation, ImplicitVariation):
                 v = np.minimum(v, high)
             return op.SetValueFromNumpy(v)
 
+class DynamicOutputShapeConverter(ModelVariation):
+    def __init__(self, name=None):
+        ModelVariation.__init__(self, name=name)
+
+    def SetToDefaultName(self):
+        self.name = "dynamic_output_shape"
+        return self
+
+    def TransformModel(self, model):
+        model.TestDynamicOutputShape(True)
+        return model
+
 # An example is always attached to a model, and could have multiple variations
 class Example:
     examples = []
@@ -899,7 +978,10 @@ class Example:
                 ))
             else:
                 assert False
-        self.variations = []
+        if Configuration.test_dynamic_output_shape:
+            self.variations = [[DefaultVariation(), DynamicOutputShapeConverter()]]
+        else:
+            self.variations = []
         Example.examples.append(self)
 
     # Main entrance of test generator
@@ -1035,6 +1117,7 @@ class Example:
         for variationList in itertools.product(*self.variations):
             # Apply variations
             modelOrigin, feedDictsOrigin = self.model, self.feedDicts
+            self.model, self.feedDicts = copy.deepcopy((self.model, self.feedDicts))
             for variation in variationList:
                 self.model, self.feedDicts = variation.ApplyTo(self.model, self.feedDicts)
             # Concat names for test and examples
@@ -1174,6 +1257,7 @@ class FileNames:
 class Configuration:
     use_shm_for_weights = False
     force_regenerate = False
+    test_dynamic_output_shape = True
 
     @staticmethod
     def useSHM():

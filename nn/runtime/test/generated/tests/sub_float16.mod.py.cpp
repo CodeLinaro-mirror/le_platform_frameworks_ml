@@ -12,6 +12,12 @@ namespace sub_float16 {
 TEST_F(GeneratedTests, sub_float16) {
     execute(sub_float16::CreateModel,
             sub_float16::is_ignored,
-            sub_float16::examples);
+            sub_float16::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, sub_float16_dynamic_output_shape) {
+    execute(sub_float16::CreateModel_dynamic_output_shape,
+            sub_float16::is_ignored_dynamic_output_shape,
+            sub_float16::get_examples_dynamic_output_shape());
 }
 

@@ -12,6 +12,12 @@ namespace reshape_weights_as_inputs_relaxed {
 TEST_F(GeneratedTests, reshape_weights_as_inputs_relaxed) {
     execute(reshape_weights_as_inputs_relaxed::CreateModel,
             reshape_weights_as_inputs_relaxed::is_ignored,
-            reshape_weights_as_inputs_relaxed::examples);
+            reshape_weights_as_inputs_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, reshape_weights_as_inputs_relaxed_dynamic_output_shape) {
+    execute(reshape_weights_as_inputs_relaxed::CreateModel_dynamic_output_shape,
+            reshape_weights_as_inputs_relaxed::is_ignored_dynamic_output_shape,
+            reshape_weights_as_inputs_relaxed::get_examples_dynamic_output_shape());
 }
 

@@ -19,7 +19,7 @@
 
 #include "HalInterfaces.h"
 #include "Utils.h"
-#include "VersionedIDevice.h"
+#include "VersionedInterfaces.h"
 
 #include <android-base/macros.h>
 #include <map>
@@ -29,50 +29,45 @@
 namespace android {
 namespace nn {
 
-class ModelBuilder;
-
+// A unified interface for actual driver devices as well as the CPU
 class Device {
-    DISALLOW_IMPLICIT_CONSTRUCTORS(Device);
-public:
-    Device(std::string name, const sp<V1_0::IDevice>& device);
-    VersionedIDevice* getInterface() { return &mInterface; }
-    const char* getName() const { return mName.c_str(); }
-    const char* getVersionString() const { return mVersionString.c_str(); }
+   public:
+    virtual ~Device() {}
 
-    // Returns true if succesfully initialized.
-    bool initialize();
+    // Get the handle of underlying VersionedIDevice, if any
+    virtual VersionedIDevice* getInterface() = 0;
 
-    void getSupportedOperations(const Model& hidlModel, hidl_vec<bool>* supportedOperations);
+    // Introspection methods returning device information
+    virtual const char* getName() const = 0;
+    virtual const char* getVersionString() const = 0;
+    virtual int64_t getFeatureLevel() = 0;
+    virtual int32_t getType() const = 0;
+    virtual hidl_vec<Extension> getSupportedExtensions() const = 0;
+    virtual void getSupportedOperations(const Model& hidlModel,
+                                        hidl_vec<bool>* supportedOperations) = 0;
+    virtual PerformanceInfo getFloat32Performance() const = 0;
+    virtual PerformanceInfo getQuantized8Performance() const = 0;
+    virtual PerformanceInfo getRelaxedFloat32toFloat16Performance() const = 0;
+    virtual bool isCachingSupported() const = 0;
 
-    PerformanceInfo getFloat32Performance() const { return mFloat32Performance; }
-    PerformanceInfo getQuantized8Performance() const { return mQuantized8Performance; }
-    PerformanceInfo getRelaxedFloat32toFloat16Performance() const {
-        return mRelaxedFloat32toFloat16Performance;
-    }
+    virtual int prepareModel(const Model& hidlModel, ExecutionPreference executionPreference,
+                             std::shared_ptr<VersionedIPreparedModel>* preparedModel) = 0;
+    virtual int prepareModelFromCache(
+            const hidl_handle& modelCache, const hidl_handle& dataCache,
+            const hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>& token,
+            std::shared_ptr<VersionedIPreparedModel>* preparedModel) = 0;
 
-private:
-    std::string mName;
-    std::string mVersionString;
-    VersionedIDevice mInterface;
-    PerformanceInfo mFloat32Performance;
-    PerformanceInfo mQuantized8Performance;
-    PerformanceInfo mRelaxedFloat32toFloat16Performance;
-
-#ifdef NN_DEBUGGABLE
-    // For debugging: behavior of IDevice::getSupportedOperations for SampleDriver.
-    // 0 - all operations reported by IDevice::getSupportedOperations() supported
-    // 1 - some operations reported by IDevice::getSupportedOperations() supported
-    uint32_t mSupported = 0;
-#endif  // NN_DEBUGGABLE
+    uint32_t getSizeOfData(const Operand& operand,
+                           const std::map<std::string, uint16_t>& extensionNameToPrefix) const;
 };
 
 // Manages the NN HAL devices.  Only one instance of this class will exist.
 // Use get() to retrieve it.
 class DeviceManager {
-public:
+   public:
     const std::vector<std::shared_ptr<Device>>& getDrivers() const {
         if (mSetCpuOnly || mDebugNNCpuOnly) {
-            return mNoDevices;
+            return mDevicesCpuOnly;
         }
         return mDevices;
     }
@@ -80,6 +75,14 @@ public:
     // For testing only:
     void setUseCpuOnly(bool useCpuOnly) { mSetCpuOnly = useCpuOnly; }
     bool getUseCpuOnly() const { return mSetCpuOnly; }
+    void setSyncExecHal(bool val) {
+        mSyncExecHal = val;
+        mSyncExecHalSetter = true;
+    }
+
+    bool syncExecCpu() const { return mSyncExecCpu; }
+    bool syncExecHal() const { return mSyncExecHal; }
+    bool syncExecRuntime() const { return mSyncExecRuntime; }
 
     // How to handle graph partitioning?
     // 0 - Don't do graph partitioning.
@@ -99,6 +102,9 @@ public:
     // Returns the singleton manager.
     static DeviceManager* get();
 
+    // Returns the singleton Cpu device.
+    static std::shared_ptr<Device> getCpuDevice();
+
     // These functions are solely intended for use by unit tests of
     // the introspection and control API.
     //
@@ -111,6 +117,9 @@ public:
         mDevices.clear();
         findAvailableDevices();
     }
+    // Make a test device
+    static std::shared_ptr<Device> forTest_makeDriverDevice(const std::string& name,
+                                                            const sp<V1_0::IDevice>& device);
 
    private:
     // Builds the list of available drivers and queries their capabilities.
@@ -121,16 +130,24 @@ public:
 
     void findAvailableDevices();
 
-    // List of all the devices we discovered.
+    // List of all the devices we discovered (including CpuDevice).
     std::vector<std::shared_ptr<Device>> mDevices;
 
-    // We leave this one always empty. To be used when mUseCpuOnly is true.
-    std::vector<std::shared_ptr<Device>> mNoDevices;
+    // We set this one to have CpuDevice only. To be used when m*CpuOnly is true.
+    std::vector<std::shared_ptr<Device>> mDevicesCpuOnly;
 
     // If either of these is true, we'll ignore the drivers that are
     // on the device and run everything on the CPU.
     bool mSetCpuOnly = false;      // set by setUseCpuOnly()
     bool mDebugNNCpuOnly = false;  // derived from system property debug.nn.cpuonly
+
+    // synchronous execution
+    bool mSyncExecCpu = false;
+    bool mSyncExecHal = true;         // Call executeSynchronously() when available on device.
+    bool mSyncExecHalSetter = false;  // Has mSyncExecHal been set by setSyncExecHal()?
+                                      // If so, don't allow the setting to be overridden
+                                      //     by system property debug.nn.syncexec-hal
+    bool mSyncExecRuntime = false;
 
     static const uint32_t kPartitioningDefault = kPartitioningWithFallback;
     uint32_t mPartitioning = kPartitioningDefault;

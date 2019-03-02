@@ -12,6 +12,12 @@ namespace fully_connected_quant8_large_weights_as_inputs {
 TEST_F(GeneratedTests, fully_connected_quant8_large_weights_as_inputs) {
     execute(fully_connected_quant8_large_weights_as_inputs::CreateModel,
             fully_connected_quant8_large_weights_as_inputs::is_ignored,
-            fully_connected_quant8_large_weights_as_inputs::examples);
+            fully_connected_quant8_large_weights_as_inputs::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, fully_connected_quant8_large_weights_as_inputs_dynamic_output_shape) {
+    execute(fully_connected_quant8_large_weights_as_inputs::CreateModel_dynamic_output_shape,
+            fully_connected_quant8_large_weights_as_inputs::is_ignored_dynamic_output_shape,
+            fully_connected_quant8_large_weights_as_inputs::get_examples_dynamic_output_shape());
 }
 

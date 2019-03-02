@@ -12,6 +12,12 @@ namespace sub {
 TEST_F(GeneratedTests, sub) {
     execute(sub::CreateModel,
             sub::is_ignored,
-            sub::examples);
+            sub::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, sub_dynamic_output_shape) {
+    execute(sub::CreateModel_dynamic_output_shape,
+            sub::is_ignored_dynamic_output_shape,
+            sub::get_examples_dynamic_output_shape());
 }
 

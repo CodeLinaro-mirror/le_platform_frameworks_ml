@@ -12,6 +12,12 @@ namespace squeeze {
 TEST_F(GeneratedTests, squeeze) {
     execute(squeeze::CreateModel,
             squeeze::is_ignored,
-            squeeze::examples);
+            squeeze::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, squeeze_dynamic_output_shape) {
+    execute(squeeze::CreateModel_dynamic_output_shape,
+            squeeze::is_ignored_dynamic_output_shape,
+            squeeze::get_examples_dynamic_output_shape());
 }
 

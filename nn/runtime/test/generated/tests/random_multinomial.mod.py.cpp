@@ -12,6 +12,12 @@ namespace random_multinomial {
 TEST_F(GeneratedTests, random_multinomial) {
     execute(random_multinomial::CreateModel,
             random_multinomial::is_ignored,
-            random_multinomial::examples);
+            random_multinomial::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, random_multinomial_dynamic_output_shape) {
+    execute(random_multinomial::CreateModel_dynamic_output_shape,
+            random_multinomial::is_ignored_dynamic_output_shape,
+            random_multinomial::get_examples_dynamic_output_shape());
 }
 

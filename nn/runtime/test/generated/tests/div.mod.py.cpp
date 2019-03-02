@@ -12,6 +12,12 @@ namespace div {
 TEST_F(GeneratedTests, div) {
     execute(div::CreateModel,
             div::is_ignored,
-            div::examples);
+            div::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, div_dynamic_output_shape) {
+    execute(div::CreateModel_dynamic_output_shape,
+            div::is_ignored_dynamic_output_shape,
+            div::get_examples_dynamic_output_shape());
 }
 

@@ -12,6 +12,12 @@ namespace rnn_state_relaxed {
 TEST_F(GeneratedTests, rnn_state_relaxed) {
     execute(rnn_state_relaxed::CreateModel,
             rnn_state_relaxed::is_ignored,
-            rnn_state_relaxed::examples);
+            rnn_state_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, rnn_state_relaxed_dynamic_output_shape) {
+    execute(rnn_state_relaxed::CreateModel_dynamic_output_shape,
+            rnn_state_relaxed::is_ignored_dynamic_output_shape,
+            rnn_state_relaxed::get_examples_dynamic_output_shape());
 }
 

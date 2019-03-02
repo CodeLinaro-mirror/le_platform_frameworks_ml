@@ -12,6 +12,12 @@ namespace div_broadcast_float16 {
 TEST_F(GeneratedTests, div_broadcast_float16) {
     execute(div_broadcast_float16::CreateModel,
             div_broadcast_float16::is_ignored,
-            div_broadcast_float16::examples);
+            div_broadcast_float16::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, div_broadcast_float16_dynamic_output_shape) {
+    execute(div_broadcast_float16::CreateModel_dynamic_output_shape,
+            div_broadcast_float16::is_ignored_dynamic_output_shape,
+            div_broadcast_float16::get_examples_dynamic_output_shape());
 }
 

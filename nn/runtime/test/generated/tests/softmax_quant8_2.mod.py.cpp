@@ -12,6 +12,12 @@ namespace softmax_quant8_2 {
 TEST_F(GeneratedTests, softmax_quant8_2) {
     execute(softmax_quant8_2::CreateModel,
             softmax_quant8_2::is_ignored,
-            softmax_quant8_2::examples);
+            softmax_quant8_2::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, softmax_quant8_2_dynamic_output_shape) {
+    execute(softmax_quant8_2::CreateModel_dynamic_output_shape,
+            softmax_quant8_2::is_ignored_dynamic_output_shape,
+            softmax_quant8_2::get_examples_dynamic_output_shape());
 }
 

@@ -12,6 +12,12 @@ namespace svdf {
 TEST_F(GeneratedTests, svdf) {
     execute(svdf::CreateModel,
             svdf::is_ignored,
-            svdf::examples);
+            svdf::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, svdf_dynamic_output_shape) {
+    execute(svdf::CreateModel_dynamic_output_shape,
+            svdf::is_ignored_dynamic_output_shape,
+            svdf::get_examples_dynamic_output_shape());
 }
 

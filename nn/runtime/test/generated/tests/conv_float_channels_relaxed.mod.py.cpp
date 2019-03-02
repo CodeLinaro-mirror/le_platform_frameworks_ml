@@ -12,6 +12,12 @@ namespace conv_float_channels_relaxed {
 TEST_F(GeneratedTests, conv_float_channels_relaxed) {
     execute(conv_float_channels_relaxed::CreateModel,
             conv_float_channels_relaxed::is_ignored,
-            conv_float_channels_relaxed::examples);
+            conv_float_channels_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, conv_float_channels_relaxed_dynamic_output_shape) {
+    execute(conv_float_channels_relaxed::CreateModel_dynamic_output_shape,
+            conv_float_channels_relaxed::is_ignored_dynamic_output_shape,
+            conv_float_channels_relaxed::get_examples_dynamic_output_shape());
 }
 

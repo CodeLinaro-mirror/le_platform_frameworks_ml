@@ -12,6 +12,12 @@ namespace conv_quant8_large {
 TEST_F(GeneratedTests, conv_quant8_large) {
     execute(conv_quant8_large::CreateModel,
             conv_quant8_large::is_ignored,
-            conv_quant8_large::examples);
+            conv_quant8_large::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, conv_quant8_large_dynamic_output_shape) {
+    execute(conv_quant8_large::CreateModel_dynamic_output_shape,
+            conv_quant8_large::is_ignored_dynamic_output_shape,
+            conv_quant8_large::get_examples_dynamic_output_shape());
 }
 

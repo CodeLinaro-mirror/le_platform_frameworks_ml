@@ -12,6 +12,12 @@ namespace lsh_projection {
 TEST_F(GeneratedTests, lsh_projection) {
     execute(lsh_projection::CreateModel,
             lsh_projection::is_ignored,
-            lsh_projection::examples);
+            lsh_projection::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, lsh_projection_dynamic_output_shape) {
+    execute(lsh_projection::CreateModel_dynamic_output_shape,
+            lsh_projection::is_ignored_dynamic_output_shape,
+            lsh_projection::get_examples_dynamic_output_shape());
 }
 

@@ -19,27 +19,30 @@
 
 #include <android/hardware/neuralnetworks/1.0/IExecutionCallback.h>
 #include <android/hardware/neuralnetworks/1.0/IPreparedModelCallback.h>
+#include <android/hardware/neuralnetworks/1.2/IExecutionCallback.h>
+#include <android/hardware/neuralnetworks/1.2/IPreparedModelCallback.h>
+#include <hidl/MQDescriptor.h>
+#include <hidl/Status.h>
 #include <chrono>
 #include <condition_variable>
 #include <functional>
-#include <hidl/MQDescriptor.h>
-#include <hidl/Status.h>
 #include <mutex>
 #include <thread>
 
 namespace android {
 namespace hardware {
 namespace neuralnetworks {
-namespace V1_0 {
+namespace V1_2 {
 namespace implementation {
 
+using ::android::sp;
 using ::android::hardware::hidl_array;
 using ::android::hardware::hidl_memory;
 using ::android::hardware::hidl_string;
 using ::android::hardware::hidl_vec;
 using ::android::hardware::Return;
 using ::android::hardware::Void;
-using ::android::sp;
+using V1_0::ErrorStatus;
 
 /**
  * The CallbackBase class is used internally by the NeuralNetworks runtime to
@@ -180,11 +183,11 @@ class CallbackBase {
  * asynchronously with respect to the runtime. If a calling thread calls wait*
  * or get* on a PreparedModelCallback object and the corresponding asynchronous
  * task has not finished preparing the model, the calling thread will block
- * until the asynchronous task has called notify. For more information on the
- * synchronization behavior, refer to the CallbackBase class.
+ * until the asynchronous task has either called notify or notify_1_2. For more
+ * information on the synchronization behavior, refer to the CallbackBase class.
  *
  * This class inherits the basic blocking and signaling calls from
- * CallbackBase, and implements the HIDL notify call from
+ * CallbackBase, and implements the HIDL notify and notify_1_2 calls from
  * IPreparedModelCallback. This callback object is passed as an argument to
  * IDevice::prepareModel.
  */
@@ -194,15 +197,15 @@ class PreparedModelCallback : public CallbackBase, public IPreparedModelCallback
     ~PreparedModelCallback() override;
 
     /**
-     * IPreparedModelCallback::notify marks the callback object with the return
-     * status of the asynchronous model preparation along with the prepared
-     * model, and calls CallbackBase::notify, enabling all prior and future
-     * wait* calls on the PreparedModelCallback object to proceed. For more
-     * information on the synchronization behavior, refer to the CallbackBase
-     * class.
+     * IPreparedModelCallback::notify and IPreparedModelCallback::notify_1_2
+     * mark the callback object with the return status of the asynchronous
+     * model preparation along with the prepared model, and call
+     * CallbackBase::notify, enabling all prior and future wait* calls on the
+     * PreparedModelCallback object to proceed. For more information on the
+     * synchronization behavior, refer to the CallbackBase class.
      *
-     * IPreparedModelCallback::notify must be called exactly once on a given
-     * PreparedModelCallback object.
+     * Either IPreparedModelCallback::notify or IPreparedModelCallback::notify_1_2
+     * must be called exactly once on a given PreparedModelCallback object.
      *
      * @param status Error status returned from asynchronously preparing the
      *               model; will be:
@@ -213,7 +216,9 @@ class PreparedModelCallback : public CallbackBase, public IPreparedModelCallback
      * @param preparedModel Returned model that has been prepared for execution,
      *                      nullptr if the model was unable to be prepared.
      */
-    Return<void> notify(ErrorStatus status, const sp<IPreparedModel>& preparedModel) override;
+    Return<void> notify(ErrorStatus status, const sp<V1_0::IPreparedModel>& preparedModel) override;
+    Return<void> notify_1_2(ErrorStatus status,
+                            const sp<V1_2::IPreparedModel>& preparedModel) override;
 
     /**
      * Retrieves the error status returned from the asynchronous task launched
@@ -241,11 +246,11 @@ class PreparedModelCallback : public CallbackBase, public IPreparedModelCallback
      *                       execution, nullptr if the model was unable to be
      *                       prepared.
      */
-    sp<IPreparedModel> getPreparedModel();
+    sp<V1_0::IPreparedModel> getPreparedModel();
 
- private:
+   private:
     ErrorStatus        mErrorStatus;
-    sp<IPreparedModel> mPreparedModel;
+    sp<V1_0::IPreparedModel> mPreparedModel;
 };
 
 /**
@@ -253,32 +258,36 @@ class PreparedModelCallback : public CallbackBase, public IPreparedModelCallback
  * execution from a task executing asynchronously with respect to the runtime.
  * If a calling thread calls wait* or get* on a PreparedModelCallback object and
  * the corresponding asynchronous task has not finished the execution, the
- * calling thread will block until the asynchronous task has called notify. For
- * more information on the synchronization behavior, refer to the CallbackBase
- * class.
+ * calling thread will block until the asynchronous task has either called notify
+ * or notify_1_2. For more information on the synchronization behavior, refer to
+ * the CallbackBase class.
  *
  * This class inherits the basic blocking and signaling calls from
- * CallbackBase, and implements the HIDL notify call from
+ * CallbackBase, and implements the HIDL notify and notify_1_2 calls from
  * IExecutionCallback. This callback object is passed as an argument to
  * IPreparedModel::execute.
  */
 class ExecutionCallback : public CallbackBase,  public IExecutionCallback {
- public:
+    using ExecutionFinish =
+            std::function<ErrorStatus(ErrorStatus, const std::vector<OutputShape>&)>;
+
+   public:
     ExecutionCallback();
     ~ExecutionCallback() override;
 
     /**
-     * IExecutionCallback::notify marks the callback object with the return
-     * status of the asynchronous execution that held this callback and enables
-     * all prior and future wait* calls on the ExecutionCallback object to
-     * proceed. For more information on the synchronization behavior, refer to
-     * the CallbackBase class.
+     * IExecutionCallback::notify and IExecutionCallback::notify_1_2 mark the
+     * callback object with the return status of the asynchronous execution that
+     * held this callback and enable all prior and future wait* calls on the
+     * ExecutionCallback object to proceed. For more information on the
+     * synchronization behavior, refer to the CallbackBase class.
      *
-     * IExecutionCallback::notify must be called exactly once on a given
-     * ExecutionCallback object.
+     * Either IExecutionCallback::notify or IExecutionCallback::notify_1_2 must
+     * be called exactly once on a given ExecutionCallback object.
      *
-     * @param status Error status returned from asynchronously preparing the
-     *               model; will be:
+     * @param status Error status returned from launching the asynchronous task
+     *               (if the launch fails) or from the asynchronous task itself
+     *               (if the launch succeeds). Must be:
      *               - NONE if the asynchronous execution was successful
      *               - DEVICE_UNAVAILABLE if driver is offline or busy
      *               - GENERAL_FAILURE if there is an unspecified error
@@ -289,24 +298,108 @@ class ExecutionCallback : public CallbackBase,  public IExecutionCallback {
     Return<void> notify(ErrorStatus status) override;
 
     /**
+     * Similar to IExecutionCallback::notify, but for V1_2::IPreparedModel to
+     * also notify output shapes along with error status.
+     *
+     * @param status Error status returned from launching the asynchronous task
+     *               (if the launch fails) or from the asynchronous task itself
+     *               (if the launch succeeds). Must be:
+     *               - NONE if the asynchronous execution was successful
+     *               - DEVICE_UNAVAILABLE if driver is offline or busy
+     *               - GENERAL_FAILURE if the asynchronous task resulted in an
+     *                 unspecified error
+     *               - OUTPUT_INSUFFICIENT_SIZE if at least one output
+     *                 operand buffer is not large enough to store the
+     *                 corresponding output
+     *               - INVALID_ARGUMENT if one of the input arguments to
+     *                 prepareModel is invalid
+     * @param outputShapes A list of shape information of model output operands.
+     *                     The index into "outputShapes" corresponds to the index
+     *                     of the output operand in the Request outputs vector.
+     *                     outputShapes must be empty unless the status is either
+     *                     NONE or OUTPUT_INSUFFICIENT_SIZE.
+     * @return Timing Duration of execution. Unless MeasureTiming::YES was passed when
+     *                launching the execution and status is NONE, all times must
+     *                be reported as UINT64_MAX. A driver may choose to report
+     *                any time as UINT64_MAX, indicating that particular measurement is
+     *                not available.
+     */
+    Return<void> notify_1_2(ErrorStatus status, const hidl_vec<OutputShape>& outputShapes,
+                            const Timing& timing) override;
+
+    // An overload of the latest notify interface to hide the version from ExecutionBuilder.
+    Return<void> notify(ErrorStatus status, const hidl_vec<OutputShape>& outputShapes,
+                        const Timing& timing) {
+        return notify_1_2(status, outputShapes, timing);
+    }
+
+    /**
      * Retrieves the error status returned from the asynchronous task launched
-     * by IPreparedModel::execute. If IPreparedModel::execute has not finished
+     * by either IPreparedModel::execute or IPreparedModel::execute_1_2. If
+     * IPreparedModel::execute or IPreparedModel::execute_1_2 has not finished
      * asynchronously executing, this call will block until the asynchronous task
      * notifies the object.
      *
-     * @return status Error status returned from asynchronously preparing the
-     *                model; will be:
+     * @return status Error status returned from launching the asynchronous task
+     *                (if the launch fails) or from the asynchronous task itself
+     *                (if the launch succeeds). Must be:
      *                - NONE if the asynchronous execution was successful
      *                - DEVICE_UNAVAILABLE if driver is offline or busy
-     *                - GENERAL_FAILURE if there is an unspecified error
-     *                - OUTPUT_INSUFFICIENT_SIZE if provided output buffer is
-     *                  not large enough to store the resultant values
-     *                - INVALID_ARGUMENT if the input request is invalid
+     *                - GENERAL_FAILURE if the asynchronous task resulted in an
+     *                  unspecified error
+     *                - OUTPUT_INSUFFICIENT_SIZE if at least one output
+     *                  operand buffer is not large enough to store the
+     *                  corresponding output
+     *                - INVALID_ARGUMENT if one of the input arguments to
+     *                  prepareModel is invalid
      */
     ErrorStatus getStatus();
 
- private:
-    ErrorStatus mErrorStatus;
+    /**
+     * Retrieves the output shapes returned from the asynchronous task launched
+     * by IPreparedModel::execute_1_2. If IPreparedModel::execute_1_2 has not finished
+     * asynchronously executing, this call will block until the asynchronous task
+     * notifies the object.
+     *
+     * If the asynchronous task was launched by IPreparedModel::execute, an empty vector
+     * will be returned.
+     *
+     * @return outputShapes A list of shape information of model output operands.
+     *                      The index into "outputShapes" corresponds to the index
+     *                      of the output operand in the Request outputs vector.
+     *                      outputShapes must be empty unless the status is either
+     *                      NONE or OUTPUT_INSUFFICIENT_SIZE. outputShaps may be
+     *                      empty if the status is NONE and all model output operands
+     *                      are fully-specified at execution time. outputShapes must
+     *                      have the same number of elements as the number of model
+     *                      output operands if the status is OUTPUT_INSUFFICIENT_SIZE,
+     *                      or if the status is NONE and the model has at least one
+     *                      output operand that is not fully-specified.
+     */
+    const std::vector<OutputShape>& getOutputShapes();
+
+    /**
+     * Retrieves the duration of execution ofthe asynchronous task launched
+     * by IPreparedModel::execute_1_2. If IPreparedModel::execute_1_2 has not finished
+     * asynchronously executing, this call will block until the asynchronous task
+     * notifies the object.
+     *
+     * If the asynchronous task was launched by IPreparedModel::execute, every time
+     * must be UINT64_MAX.
+     *
+     * @return timing Duration of the execution. Every time must be UINT64_MAX unless
+     *                the status is NONE.
+     */
+    Timing getTiming();
+
+    // The callback will invoke finish(mErrorStatus) on finish.
+    void setOnFinish(const ExecutionFinish& finish) { mOnFinish = finish; }
+
+   private:
+    ErrorStatus mErrorStatus = ErrorStatus::GENERAL_FAILURE;
+    std::vector<OutputShape> mOutputShapes = {};
+    Timing mTiming = {};
+    ExecutionFinish mOnFinish;
 };
 
 
@@ -323,7 +416,7 @@ std::cv_status CallbackBase::wait_for(const std::chrono::duration<Rep,Period>& t
 }
 
 }  // namespace implementation
-}  // namespace V1_0
+}  // namespace V1_2
 }  // namespace neuralnetworks
 }  // namespace hardware
 }  // namespace android

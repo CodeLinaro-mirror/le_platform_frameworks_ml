@@ -12,6 +12,12 @@ namespace lstm2 {
 TEST_F(GeneratedTests, lstm2) {
     execute(lstm2::CreateModel,
             lstm2::is_ignored,
-            lstm2::examples);
+            lstm2::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, lstm2_dynamic_output_shape) {
+    execute(lstm2::CreateModel_dynamic_output_shape,
+            lstm2::is_ignored_dynamic_output_shape,
+            lstm2::get_examples_dynamic_output_shape());
 }
 

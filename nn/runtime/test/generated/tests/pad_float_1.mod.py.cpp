@@ -12,6 +12,12 @@ namespace pad_float_1 {
 TEST_F(GeneratedTests, pad_float_1) {
     execute(pad_float_1::CreateModel,
             pad_float_1::is_ignored,
-            pad_float_1::examples);
+            pad_float_1::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, pad_float_1_dynamic_output_shape) {
+    execute(pad_float_1::CreateModel_dynamic_output_shape,
+            pad_float_1::is_ignored_dynamic_output_shape,
+            pad_float_1::get_examples_dynamic_output_shape());
 }
 

@@ -12,12 +12,24 @@ namespace split_quant8_2 {
 TEST_F(GeneratedTests, split_quant8_2) {
     execute(split_quant8_2::CreateModel,
             split_quant8_2::is_ignored,
-            split_quant8_2::examples);
+            split_quant8_2::get_examples());
 }
 
 TEST_F(GeneratedTests, split_quant8_2_relaxed) {
     execute(split_quant8_2::CreateModel_relaxed,
             split_quant8_2::is_ignored_relaxed,
-            split_quant8_2::examples_relaxed);
+            split_quant8_2::get_examples_relaxed());
+}
+
+TEST_F(DynamicOutputShapeTest, split_quant8_2_dynamic_output_shape) {
+    execute(split_quant8_2::CreateModel_dynamic_output_shape,
+            split_quant8_2::is_ignored_dynamic_output_shape,
+            split_quant8_2::get_examples_dynamic_output_shape());
+}
+
+TEST_F(DynamicOutputShapeTest, split_quant8_2_dynamic_output_shape_relaxed) {
+    execute(split_quant8_2::CreateModel_dynamic_output_shape_relaxed,
+            split_quant8_2::is_ignored_dynamic_output_shape_relaxed,
+            split_quant8_2::get_examples_dynamic_output_shape_relaxed());
 }
 

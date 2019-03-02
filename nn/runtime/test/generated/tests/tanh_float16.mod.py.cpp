@@ -12,6 +12,12 @@ namespace tanh_float16 {
 TEST_F(GeneratedTests, tanh_float16) {
     execute(tanh_float16::CreateModel,
             tanh_float16::is_ignored,
-            tanh_float16::examples);
+            tanh_float16::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, tanh_float16_dynamic_output_shape) {
+    execute(tanh_float16::CreateModel_dynamic_output_shape,
+            tanh_float16::is_ignored_dynamic_output_shape,
+            tanh_float16::get_examples_dynamic_output_shape());
 }
 

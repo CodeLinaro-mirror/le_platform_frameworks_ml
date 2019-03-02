@@ -12,6 +12,12 @@ namespace fully_connected_float {
 TEST_F(GeneratedTests, fully_connected_float) {
     execute(fully_connected_float::CreateModel,
             fully_connected_float::is_ignored,
-            fully_connected_float::examples);
+            fully_connected_float::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, fully_connected_float_dynamic_output_shape) {
+    execute(fully_connected_float::CreateModel_dynamic_output_shape,
+            fully_connected_float::is_ignored_dynamic_output_shape,
+            fully_connected_float::get_examples_dynamic_output_shape());
 }
 

@@ -12,6 +12,12 @@ namespace conv_quant8_channels {
 TEST_F(GeneratedTests, conv_quant8_channels) {
     execute(conv_quant8_channels::CreateModel,
             conv_quant8_channels::is_ignored,
-            conv_quant8_channels::examples);
+            conv_quant8_channels::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, conv_quant8_channels_dynamic_output_shape) {
+    execute(conv_quant8_channels::CreateModel_dynamic_output_shape,
+            conv_quant8_channels::is_ignored_dynamic_output_shape,
+            conv_quant8_channels::get_examples_dynamic_output_shape());
 }
 

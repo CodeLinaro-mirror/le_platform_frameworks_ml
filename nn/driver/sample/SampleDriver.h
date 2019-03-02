@@ -27,6 +27,9 @@ namespace android {
 namespace nn {
 namespace sample_driver {
 
+using ::android::hardware::MQDescriptorSync;
+using HidlToken = hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
+
 // Base class used to create sample drivers for the NN HAL.  This class
 // provides some implementation of the more common functions.
 //
@@ -38,16 +41,22 @@ public:
     ~SampleDriver() override {}
     Return<void> getCapabilities(getCapabilities_cb cb) override;
     Return<void> getVersionString(getVersionString_cb cb) override;
+    Return<void> getType(getType_cb cb) override;
+    Return<void> getSupportedExtensions(getSupportedExtensions_cb) override;
     Return<void> getSupportedOperations(const V1_0::Model& model,
                                         getSupportedOperations_cb cb) override;
     Return<void> getSupportedOperations_1_1(const V1_1::Model& model,
                                             getSupportedOperations_1_1_cb cb) override;
+    Return<void> isCachingSupported(isCachingSupported_cb cb) override;
     Return<ErrorStatus> prepareModel(const V1_0::Model& model,
-                                     const sp<IPreparedModelCallback>& callback) override;
+                                     const sp<V1_0::IPreparedModelCallback>& callback) override;
     Return<ErrorStatus> prepareModel_1_1(const V1_1::Model& model, ExecutionPreference preference,
-                                         const sp<IPreparedModelCallback>& callback) override;
+                                         const sp<V1_0::IPreparedModelCallback>& callback) override;
     Return<ErrorStatus> prepareModel_1_2(const V1_2::Model& model, ExecutionPreference preference,
-                                         const sp<IPreparedModelCallback>& callback) override;
+                                         const sp<V1_2::IPreparedModelCallback>& callback) override;
+    Return<ErrorStatus> prepareModelFromCache(
+            const hidl_handle& modelCache, const hidl_handle& dataCache, const HidlToken& token,
+            const sp<V1_2::IPreparedModelCallback>& callback) override;
     Return<DeviceStatus> getStatus() override;
 
     // Starts and runs the driver service.  Typically called from main().
@@ -63,11 +72,20 @@ public:
     ~SamplePreparedModel() override {}
     bool initialize();
     Return<ErrorStatus> execute(const Request& request,
-                                const sp<IExecutionCallback>& callback) override;
+                                const sp<V1_0::IExecutionCallback>& callback) override;
+    Return<ErrorStatus> execute_1_2(const Request& request, MeasureTiming measure,
+                                    const sp<V1_2::IExecutionCallback>& callback) override;
+    Return<void> executeSynchronously(const Request& request, MeasureTiming measure,
+                                      executeSynchronously_cb cb) override;
+    Return<void> configureExecutionBurst(
+            const sp<V1_2::IBurstCallback>& callback,
+            const MQDescriptorSync<V1_2::FmqRequestDatum>& requestChannel,
+            const MQDescriptorSync<V1_2::FmqResultDatum>& resultChannel,
+            configureExecutionBurst_cb cb) override;
+    Return<ErrorStatus> saveToCache(const hidl_handle& modelCache, const hidl_handle& dataCache,
+                                    const HidlToken& token) override;
 
-private:
-    void asyncExecute(const Request& request, const sp<IExecutionCallback>& callback);
-
+   private:
     Model mModel;
     std::vector<RunTimePoolInfo> mPoolInfos;
 };

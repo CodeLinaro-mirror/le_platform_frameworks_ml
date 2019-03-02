@@ -12,6 +12,12 @@ namespace avg_pool_quant8_3 {
 TEST_F(GeneratedTests, avg_pool_quant8_3) {
     execute(avg_pool_quant8_3::CreateModel,
             avg_pool_quant8_3::is_ignored,
-            avg_pool_quant8_3::examples);
+            avg_pool_quant8_3::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, avg_pool_quant8_3_dynamic_output_shape) {
+    execute(avg_pool_quant8_3::CreateModel_dynamic_output_shape,
+            avg_pool_quant8_3::is_ignored_dynamic_output_shape,
+            avg_pool_quant8_3::get_examples_dynamic_output_shape());
 }
 

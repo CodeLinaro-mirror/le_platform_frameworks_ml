@@ -12,6 +12,12 @@ namespace mobilenet_quantized {
 TEST_F(GeneratedTests, mobilenet_quantized) {
     execute(mobilenet_quantized::CreateModel,
             mobilenet_quantized::is_ignored,
-            mobilenet_quantized::examples);
+            mobilenet_quantized::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, mobilenet_quantized_dynamic_output_shape) {
+    execute(mobilenet_quantized::CreateModel_dynamic_output_shape,
+            mobilenet_quantized::is_ignored_dynamic_output_shape,
+            mobilenet_quantized::get_examples_dynamic_output_shape());
 }
 

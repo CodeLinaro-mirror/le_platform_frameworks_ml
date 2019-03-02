@@ -12,6 +12,12 @@ namespace conv_quant8_overflow {
 TEST_F(GeneratedTests, conv_quant8_overflow) {
     execute(conv_quant8_overflow::CreateModel,
             conv_quant8_overflow::is_ignored,
-            conv_quant8_overflow::examples);
+            conv_quant8_overflow::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, conv_quant8_overflow_dynamic_output_shape) {
+    execute(conv_quant8_overflow::CreateModel_dynamic_output_shape,
+            conv_quant8_overflow::is_ignored_dynamic_output_shape,
+            conv_quant8_overflow::get_examples_dynamic_output_shape());
 }
 

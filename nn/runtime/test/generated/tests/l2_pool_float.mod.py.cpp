@@ -12,6 +12,12 @@ namespace l2_pool_float {
 TEST_F(GeneratedTests, l2_pool_float) {
     execute(l2_pool_float::CreateModel,
             l2_pool_float::is_ignored,
-            l2_pool_float::examples);
+            l2_pool_float::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, l2_pool_float_dynamic_output_shape) {
+    execute(l2_pool_float::CreateModel_dynamic_output_shape,
+            l2_pool_float::is_ignored_dynamic_output_shape,
+            l2_pool_float::get_examples_dynamic_output_shape());
 }
 

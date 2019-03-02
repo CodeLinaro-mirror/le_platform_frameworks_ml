@@ -12,6 +12,12 @@ namespace strided_slice {
 TEST_F(GeneratedTests, strided_slice) {
     execute(strided_slice::CreateModel,
             strided_slice::is_ignored,
-            strided_slice::examples);
+            strided_slice::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, strided_slice_dynamic_output_shape) {
+    execute(strided_slice::CreateModel_dynamic_output_shape,
+            strided_slice::is_ignored_dynamic_output_shape,
+            strided_slice::get_examples_dynamic_output_shape());
 }
 

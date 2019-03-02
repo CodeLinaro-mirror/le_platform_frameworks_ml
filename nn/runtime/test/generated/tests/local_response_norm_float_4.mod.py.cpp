@@ -12,6 +12,12 @@ namespace local_response_norm_float_4 {
 TEST_F(GeneratedTests, local_response_norm_float_4) {
     execute(local_response_norm_float_4::CreateModel,
             local_response_norm_float_4::is_ignored,
-            local_response_norm_float_4::examples);
+            local_response_norm_float_4::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, local_response_norm_float_4_dynamic_output_shape) {
+    execute(local_response_norm_float_4::CreateModel_dynamic_output_shape,
+            local_response_norm_float_4::is_ignored_dynamic_output_shape,
+            local_response_norm_float_4::get_examples_dynamic_output_shape());
 }
 

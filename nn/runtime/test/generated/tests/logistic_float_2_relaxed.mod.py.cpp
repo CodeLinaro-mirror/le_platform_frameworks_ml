@@ -12,6 +12,12 @@ namespace logistic_float_2_relaxed {
 TEST_F(GeneratedTests, logistic_float_2_relaxed) {
     execute(logistic_float_2_relaxed::CreateModel,
             logistic_float_2_relaxed::is_ignored,
-            logistic_float_2_relaxed::examples);
+            logistic_float_2_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, logistic_float_2_relaxed_dynamic_output_shape) {
+    execute(logistic_float_2_relaxed::CreateModel_dynamic_output_shape,
+            logistic_float_2_relaxed::is_ignored_dynamic_output_shape,
+            logistic_float_2_relaxed::get_examples_dynamic_output_shape());
 }
 

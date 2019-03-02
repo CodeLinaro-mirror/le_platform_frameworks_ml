@@ -12,6 +12,12 @@ namespace logistic_quant8_2 {
 TEST_F(GeneratedTests, logistic_quant8_2) {
     execute(logistic_quant8_2::CreateModel,
             logistic_quant8_2::is_ignored,
-            logistic_quant8_2::examples);
+            logistic_quant8_2::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, logistic_quant8_2_dynamic_output_shape) {
+    execute(logistic_quant8_2::CreateModel_dynamic_output_shape,
+            logistic_quant8_2::is_ignored_dynamic_output_shape,
+            logistic_quant8_2::get_examples_dynamic_output_shape());
 }
 

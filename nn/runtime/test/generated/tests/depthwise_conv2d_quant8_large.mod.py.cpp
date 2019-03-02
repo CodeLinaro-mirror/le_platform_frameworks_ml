@@ -12,6 +12,12 @@ namespace depthwise_conv2d_quant8_large {
 TEST_F(GeneratedTests, depthwise_conv2d_quant8_large) {
     execute(depthwise_conv2d_quant8_large::CreateModel,
             depthwise_conv2d_quant8_large::is_ignored,
-            depthwise_conv2d_quant8_large::examples);
+            depthwise_conv2d_quant8_large::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, depthwise_conv2d_quant8_large_dynamic_output_shape) {
+    execute(depthwise_conv2d_quant8_large::CreateModel_dynamic_output_shape,
+            depthwise_conv2d_quant8_large::is_ignored_dynamic_output_shape,
+            depthwise_conv2d_quant8_large::get_examples_dynamic_output_shape());
 }
 

@@ -12,6 +12,12 @@ namespace transpose_float_1 {
 TEST_F(GeneratedTests, transpose_float_1) {
     execute(transpose_float_1::CreateModel,
             transpose_float_1::is_ignored,
-            transpose_float_1::examples);
+            transpose_float_1::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, transpose_float_1_dynamic_output_shape) {
+    execute(transpose_float_1::CreateModel_dynamic_output_shape,
+            transpose_float_1::is_ignored_dynamic_output_shape,
+            transpose_float_1::get_examples_dynamic_output_shape());
 }
 

@@ -12,6 +12,12 @@ namespace tanh {
 TEST_F(GeneratedTests, tanh) {
     execute(tanh::CreateModel,
             tanh::is_ignored,
-            tanh::examples);
+            tanh::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, tanh_dynamic_output_shape) {
+    execute(tanh::CreateModel_dynamic_output_shape,
+            tanh::is_ignored_dynamic_output_shape,
+            tanh::get_examples_dynamic_output_shape());
 }
 

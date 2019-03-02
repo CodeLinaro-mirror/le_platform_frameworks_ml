@@ -12,6 +12,12 @@ namespace conv_float {
 TEST_F(GeneratedTests, conv_float) {
     execute(conv_float::CreateModel,
             conv_float::is_ignored,
-            conv_float::examples);
+            conv_float::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, conv_float_dynamic_output_shape) {
+    execute(conv_float::CreateModel_dynamic_output_shape,
+            conv_float::is_ignored_dynamic_output_shape,
+            conv_float::get_examples_dynamic_output_shape());
 }
 

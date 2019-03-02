@@ -12,6 +12,12 @@ namespace reshape_quant8 {
 TEST_F(GeneratedTests, reshape_quant8) {
     execute(reshape_quant8::CreateModel,
             reshape_quant8::is_ignored,
-            reshape_quant8::examples);
+            reshape_quant8::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, reshape_quant8_dynamic_output_shape) {
+    execute(reshape_quant8::CreateModel_dynamic_output_shape,
+            reshape_quant8::is_ignored_dynamic_output_shape,
+            reshape_quant8::get_examples_dynamic_output_shape());
 }
 

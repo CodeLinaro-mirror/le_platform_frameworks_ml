@@ -12,6 +12,12 @@ namespace conv_quant8_large_weights_as_inputs {
 TEST_F(GeneratedTests, conv_quant8_large_weights_as_inputs) {
     execute(conv_quant8_large_weights_as_inputs::CreateModel,
             conv_quant8_large_weights_as_inputs::is_ignored,
-            conv_quant8_large_weights_as_inputs::examples);
+            conv_quant8_large_weights_as_inputs::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, conv_quant8_large_weights_as_inputs_dynamic_output_shape) {
+    execute(conv_quant8_large_weights_as_inputs::CreateModel_dynamic_output_shape,
+            conv_quant8_large_weights_as_inputs::is_ignored_dynamic_output_shape,
+            conv_quant8_large_weights_as_inputs::get_examples_dynamic_output_shape());
 }
 

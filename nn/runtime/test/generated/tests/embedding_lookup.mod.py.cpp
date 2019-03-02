@@ -12,6 +12,12 @@ namespace embedding_lookup {
 TEST_F(GeneratedTests, embedding_lookup) {
     execute(embedding_lookup::CreateModel,
             embedding_lookup::is_ignored,
-            embedding_lookup::examples);
+            embedding_lookup::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, embedding_lookup_dynamic_output_shape) {
+    execute(embedding_lookup::CreateModel_dynamic_output_shape,
+            embedding_lookup::is_ignored_dynamic_output_shape,
+            embedding_lookup::get_examples_dynamic_output_shape());
 }
 

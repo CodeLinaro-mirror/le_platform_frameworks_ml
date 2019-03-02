@@ -12,6 +12,12 @@ namespace reshape {
 TEST_F(GeneratedTests, reshape) {
     execute(reshape::CreateModel,
             reshape::is_ignored,
-            reshape::examples);
+            reshape::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, reshape_dynamic_output_shape) {
+    execute(reshape::CreateModel_dynamic_output_shape,
+            reshape::is_ignored_dynamic_output_shape,
+            reshape::get_examples_dynamic_output_shape());
 }
 

@@ -12,6 +12,12 @@ namespace svdf_state_relaxed {
 TEST_F(GeneratedTests, svdf_state_relaxed) {
     execute(svdf_state_relaxed::CreateModel,
             svdf_state_relaxed::is_ignored,
-            svdf_state_relaxed::examples);
+            svdf_state_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, svdf_state_relaxed_dynamic_output_shape) {
+    execute(svdf_state_relaxed::CreateModel_dynamic_output_shape,
+            svdf_state_relaxed::is_ignored_dynamic_output_shape,
+            svdf_state_relaxed::get_examples_dynamic_output_shape());
 }
 

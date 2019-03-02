@@ -12,6 +12,12 @@ namespace fully_connected_quant8_large {
 TEST_F(GeneratedTests, fully_connected_quant8_large) {
     execute(fully_connected_quant8_large::CreateModel,
             fully_connected_quant8_large::is_ignored,
-            fully_connected_quant8_large::examples);
+            fully_connected_quant8_large::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, fully_connected_quant8_large_dynamic_output_shape) {
+    execute(fully_connected_quant8_large::CreateModel_dynamic_output_shape,
+            fully_connected_quant8_large::is_ignored_dynamic_output_shape,
+            fully_connected_quant8_large::get_examples_dynamic_output_shape());
 }
 

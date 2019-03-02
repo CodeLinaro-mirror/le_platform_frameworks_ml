@@ -12,6 +12,12 @@ namespace logistic_float_1 {
 TEST_F(GeneratedTests, logistic_float_1) {
     execute(logistic_float_1::CreateModel,
             logistic_float_1::is_ignored,
-            logistic_float_1::examples);
+            logistic_float_1::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, logistic_float_1_dynamic_output_shape) {
+    execute(logistic_float_1::CreateModel_dynamic_output_shape,
+            logistic_float_1::is_ignored_dynamic_output_shape,
+            logistic_float_1::get_examples_dynamic_output_shape());
 }
 

@@ -12,6 +12,12 @@ namespace depth_to_space_float_2 {
 TEST_F(GeneratedTests, depth_to_space_float_2) {
     execute(depth_to_space_float_2::CreateModel,
             depth_to_space_float_2::is_ignored,
-            depth_to_space_float_2::examples);
+            depth_to_space_float_2::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, depth_to_space_float_2_dynamic_output_shape) {
+    execute(depth_to_space_float_2::CreateModel_dynamic_output_shape,
+            depth_to_space_float_2::is_ignored_dynamic_output_shape,
+            depth_to_space_float_2::get_examples_dynamic_output_shape());
 }
 

@@ -39,6 +39,7 @@ from test_generator import Configuration
 from test_generator import DataTypeConverter
 from test_generator import DataLayoutConverter
 from test_generator import Example
+from test_generator import Float16Scalar
 from test_generator import Float32Scalar
 from test_generator import Float32Vector
 from test_generator import GetJointStr
@@ -54,6 +55,7 @@ from test_generator import Parameter
 from test_generator import ParameterAsInputConverter
 from test_generator import RelaxedModeConverter
 from test_generator import SmartOpen
+from test_generator import SymmPerChannelQuantParams
 
 def IndentedPrint(s, indent=2, *args, **kwargs):
     print('\n'.join([" " * indent + i for i in s.split('\n')]), *args, **kwargs)
@@ -133,11 +135,17 @@ def DumpCtsModel(model, model_fd):
 
     # Phase 0: types
     for t in model.GetTypes():
-        if t.scale == 0.0 and t.zeroPoint == 0:
+        if t.scale == 0.0 and t.zeroPoint == 0 and t.extraParams is None:
             typeDef = "OperandType %s(Type::%s, %s);"%(t, t.type, t.GetDimensionsString())
         else:
-            typeDef = "OperandType %s(Type::%s, %s, %s, %d);"%(
-                t, t.type, t.GetDimensionsString(), tg.PrettyPrintAsFloat(t.scale), t.zeroPoint)
+            if t.extraParams is None or t.extraParams.hide:
+                typeDef = "OperandType %s(Type::%s, %s, %s, %d);"%(
+                    t, t.type, t.GetDimensionsString(), tg.PrettyPrintAsFloat(t.scale), t.zeroPoint)
+            else:
+                typeDef = "OperandType %s(Type::%s, %s, %s, %d, %s);"%(
+                    t, t.type, t.GetDimensionsString(), tg.PrettyPrintAsFloat(t.scale), t.zeroPoint,
+                    t.extraParams.GetConstructor())
+
         IndentedPrint(typeDef, file=model_fd)
 
     # Phase 1: add operands
@@ -173,13 +181,16 @@ def DumpCtsModel(model, model_fd):
 
 def DumpMixedType(operands, feedDict):
     supportedTensors = [
-        "TENSOR_FLOAT16",
+        "DIMENSIONS",
         "TENSOR_FLOAT32",
         "TENSOR_INT32",
         "TENSOR_QUANT8_ASYMM",
         "TENSOR_OEM_BYTE",
         "TENSOR_QUANT16_SYMM",
         "TENSOR_FLOAT16",
+        "TENSOR_BOOL8",
+        "TENSOR_QUANT8_SYMM_PER_CHANNEL",
+        "TENSOR_QUANT16_ASYMM",
     ]
     typedMap = {t: [] for t in supportedTensors}
     FeedAndGet = lambda op, d: op.Feed(d).GetListInitialization()
@@ -187,33 +198,49 @@ def DumpMixedType(operands, feedDict):
     for operand in operands:
         try:
             typedMap[operand.type.type].append(FeedAndGet(operand, feedDict))
+            typedMap["DIMENSIONS"].append("{%d, {%s}}"%(
+                operand.index, GetJointStr(operand.dimensions)))
         except KeyError as e:
             traceback.print_exc()
             sys.exit("Cannot dump tensor of type {}".format(operand.type.type))
     mixedTypeTemplate = """\
 {{ // See tools/test_generator/include/TestHarness.h:MixedTyped
+  // int -> Dimensions map
+  .operandDimensions = {{{dimensions_map}}},
   // int -> FLOAT32 map
-  {{{float32_map}}},
+  .float32Operands = {{{float32_map}}},
   // int -> INT32 map
-  {{{int32_map}}},
+  .int32Operands = {{{int32_map}}},
   // int -> QUANT8_ASYMM map
-  {{{uint8_map}}},
+  .quant8AsymmOperands = {{{uint8_map}}},
   // int -> QUANT16_SYMM map
-  {{{int16_map}}},
+  .quant16SymmOperands = {{{int16_map}}},
   // int -> FLOAT16 map
-  {{{float16_map}}},
+  .float16Operands = {{{float16_map}}},
+  // int -> BOOL8 map
+  .bool8Operands = {{{bool8_map}}},
+  // int -> QUANT8_SYMM_PER_CHANNEL map
+  .quant8ChannelOperands = {{{int8_map}}},
+  // int -> QUANT16_ASYMM map
+  .quant16AsymmOperands = {{{uint16_map}}},
 }}"""
     return mixedTypeTemplate.format(
+        dimensions_map=tg.GetJointStr(typedMap.get("DIMENSIONS", [])),
         float32_map=tg.GetJointStr(typedMap.get("TENSOR_FLOAT32", [])),
         int32_map=tg.GetJointStr(typedMap.get("TENSOR_INT32", [])),
         uint8_map=tg.GetJointStr(typedMap.get("TENSOR_QUANT8_ASYMM", []) +
                                  typedMap.get("TENSOR_OEM_BYTE", [])),
         int16_map=tg.GetJointStr(typedMap.get("TENSOR_QUANT16_SYMM", [])),
-        float16_map=tg.GetJointStr(typedMap.get("TENSOR_FLOAT16", [])))
+        float16_map=tg.GetJointStr(typedMap.get("TENSOR_FLOAT16", [])),
+        int8_map=tg.GetJointStr(typedMap.get("TENSOR_QUANT8_SYMM_PER_CHANNEL", [])),
+        bool8_map=tg.GetJointStr(typedMap.get("TENSOR_BOOL8", [])),
+        uint16_map=tg.GetJointStr(typedMap.get("TENSOR_QUANT16_ASYMM", []))
+    )
 
 # Dump Example file for Cts tests
 def DumpCtsExample(example, example_fd):
-    print("std::vector<MixedTypedExample> %s = {"%(example.examplesName), file=example_fd)
+    print("std::vector<MixedTypedExample>& get_%s() {" % (example.examplesName), file=example_fd)
+    print("static std::vector<MixedTypedExample> %s = {" % (example.examplesName), file=example_fd)
     for inputFeedDict, outputFeedDict in example.feedDicts:
         print ('// Begin of an example', file = example_fd)
         print ('{\n.operands = {', file = example_fd)
@@ -226,16 +253,20 @@ def DumpCtsExample(example, example_fd):
           print ('.expectedMultinomialDistributionTolerance = %f' %
                  example.expectedMultinomialDistributionTolerance, file = example_fd)
         print ('}, // End of an example', file = example_fd)
+    print("};", file=example_fd)
+    print("return %s;" % (example.examplesName), file=example_fd)
     print("};\n", file=example_fd)
 
 # Dump Test file for Cts tests
 def DumpCtsTest(example, test_fd):
     testTemplate = """\
-TEST_F(GeneratedTests, {test_name}) {{
+TEST_F({test_case_name}, {test_name}) {{
     execute({namespace}::{create_model_name},
             {namespace}::{is_ignored_name},
-            {namespace}::{examples_name}{log_file});\n}}\n"""
+            {namespace}::get_{examples_name}(){log_file});\n}}\n"""
     print(testTemplate.format(
+        test_case_name="DynamicOutputShapeTest" if example.model.hasDynamicOutputShape \
+                       else "GeneratedTests",
         test_name=str(example.testName),
         namespace=tg.FileNames.specName,
         create_model_name=str(example.model.createFunctionName),

@@ -12,6 +12,24 @@ namespace conv_1_h3_w2_SAME {
 TEST_F(GeneratedTests, conv_1_h3_w2_SAME) {
     execute(conv_1_h3_w2_SAME::CreateModel,
             conv_1_h3_w2_SAME::is_ignored,
-            conv_1_h3_w2_SAME::examples);
+            conv_1_h3_w2_SAME::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, conv_1_h3_w2_SAME_dynamic_output_shape) {
+    execute(conv_1_h3_w2_SAME::CreateModel_dynamic_output_shape,
+            conv_1_h3_w2_SAME::is_ignored_dynamic_output_shape,
+            conv_1_h3_w2_SAME::get_examples_dynamic_output_shape());
+}
+
+TEST_F(GeneratedTests, conv_1_h3_w2_SAME_2) {
+    execute(conv_1_h3_w2_SAME::CreateModel_2,
+            conv_1_h3_w2_SAME::is_ignored_2,
+            conv_1_h3_w2_SAME::get_examples_2());
+}
+
+TEST_F(DynamicOutputShapeTest, conv_1_h3_w2_SAME_dynamic_output_shape_2) {
+    execute(conv_1_h3_w2_SAME::CreateModel_dynamic_output_shape_2,
+            conv_1_h3_w2_SAME::is_ignored_dynamic_output_shape_2,
+            conv_1_h3_w2_SAME::get_examples_dynamic_output_shape_2());
 }
 

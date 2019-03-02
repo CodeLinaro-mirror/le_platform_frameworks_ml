@@ -12,6 +12,12 @@ namespace conv_quant8_2 {
 TEST_F(GeneratedTests, conv_quant8_2) {
     execute(conv_quant8_2::CreateModel,
             conv_quant8_2::is_ignored,
-            conv_quant8_2::examples);
+            conv_quant8_2::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, conv_quant8_2_dynamic_output_shape) {
+    execute(conv_quant8_2::CreateModel_dynamic_output_shape,
+            conv_quant8_2::is_ignored_dynamic_output_shape,
+            conv_quant8_2::get_examples_dynamic_output_shape());
 }
 

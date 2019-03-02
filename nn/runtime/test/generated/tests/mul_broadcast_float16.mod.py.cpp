@@ -12,6 +12,12 @@ namespace mul_broadcast_float16 {
 TEST_F(GeneratedTests, mul_broadcast_float16) {
     execute(mul_broadcast_float16::CreateModel,
             mul_broadcast_float16::is_ignored,
-            mul_broadcast_float16::examples);
+            mul_broadcast_float16::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, mul_broadcast_float16_dynamic_output_shape) {
+    execute(mul_broadcast_float16::CreateModel_dynamic_output_shape,
+            mul_broadcast_float16::is_ignored_dynamic_output_shape,
+            mul_broadcast_float16::get_examples_dynamic_output_shape());
 }
 

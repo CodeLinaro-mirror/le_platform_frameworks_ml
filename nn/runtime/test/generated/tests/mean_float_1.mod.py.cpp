@@ -12,6 +12,12 @@ namespace mean_float_1 {
 TEST_F(GeneratedTests, mean_float_1) {
     execute(mean_float_1::CreateModel,
             mean_float_1::is_ignored,
-            mean_float_1::examples);
+            mean_float_1::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, mean_float_1_dynamic_output_shape) {
+    execute(mean_float_1::CreateModel_dynamic_output_shape,
+            mean_float_1::is_ignored_dynamic_output_shape,
+            mean_float_1::get_examples_dynamic_output_shape());
 }
 

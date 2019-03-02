@@ -12,6 +12,12 @@ namespace strided_slice_quant8_3 {
 TEST_F(GeneratedTests, strided_slice_quant8_3) {
     execute(strided_slice_quant8_3::CreateModel,
             strided_slice_quant8_3::is_ignored,
-            strided_slice_quant8_3::examples);
+            strided_slice_quant8_3::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, strided_slice_quant8_3_dynamic_output_shape) {
+    execute(strided_slice_quant8_3::CreateModel_dynamic_output_shape,
+            strided_slice_quant8_3::is_ignored_dynamic_output_shape,
+            strided_slice_quant8_3::get_examples_dynamic_output_shape());
 }
 

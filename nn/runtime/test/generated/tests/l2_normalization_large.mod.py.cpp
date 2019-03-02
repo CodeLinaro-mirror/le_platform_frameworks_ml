@@ -12,6 +12,12 @@ namespace l2_normalization_large {
 TEST_F(GeneratedTests, l2_normalization_large) {
     execute(l2_normalization_large::CreateModel,
             l2_normalization_large::is_ignored,
-            l2_normalization_large::examples);
+            l2_normalization_large::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, l2_normalization_large_dynamic_output_shape) {
+    execute(l2_normalization_large::CreateModel_dynamic_output_shape,
+            l2_normalization_large::is_ignored_dynamic_output_shape,
+            l2_normalization_large::get_examples_dynamic_output_shape());
 }
 

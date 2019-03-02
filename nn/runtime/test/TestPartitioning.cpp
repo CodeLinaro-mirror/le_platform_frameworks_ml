@@ -117,6 +117,8 @@
 
 namespace {
 
+const Timing kBadTiming = {.timeOnDevice = UINT64_MAX, .timeInDriver = UINT64_MAX};
+
 using CompilationBuilder = ::android::nn::CompilationBuilder;
 using Device = ::android::nn::Device;
 using DeviceManager = ::android::nn::DeviceManager;
@@ -124,6 +126,8 @@ using ExecutePreference = ::android::nn::test_wrapper::ExecutePreference;
 using ExecutionPlan = ::android::nn::ExecutionPlan;
 using ExecutionStep = ::android::nn::ExecutionStep;
 using HidlModel = ::android::hardware::neuralnetworks::V1_2::Model;
+using HidlToken =
+        ::android::hardware::hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
 using ModelBuilder = ::android::nn::ModelBuilder;
 using Result = ::android::nn::test_wrapper::Result;
 using SampleDriver = ::android::nn::sample_driver::SampleDriver;
@@ -133,6 +137,8 @@ using WrapperOperandType = ::android::nn::test_wrapper::OperandType;
 using WrapperType = ::android::nn::test_wrapper::Type;
 
 template <typename T> using sp = ::android::sp<T>;
+template <typename T>
+using MQDescriptorSync = ::android::hardware::MQDescriptorSync<T>;
 
 // We employ an operation numbering scheme:
 // - 0..FuseCode-1 = ADD with the appropriate activation function
@@ -209,10 +215,30 @@ private:
     // Dummy class -- a prepared model must not be nullptr.
     class PartitioningPreparedModel : public IPreparedModel {
     public:
-        Return<ErrorStatus> execute(const Request&,
-                                    const sp<IExecutionCallback>&) override {
-            return ErrorStatus::DEVICE_UNAVAILABLE;
-        }
+     Return<ErrorStatus> execute(const Request&, const sp<V1_0::IExecutionCallback>&) override {
+         return ErrorStatus::DEVICE_UNAVAILABLE;
+     }
+     Return<ErrorStatus> execute_1_2(const Request&, MeasureTiming,
+                                     const sp<V1_2::IExecutionCallback>&) override {
+         return ErrorStatus::DEVICE_UNAVAILABLE;
+     }
+     Return<void> executeSynchronously(const Request&, MeasureTiming,
+                                       executeSynchronously_cb cb) override {
+         cb(ErrorStatus::DEVICE_UNAVAILABLE, {}, kBadTiming);
+         return Void();
+     }
+     Return<void> configureExecutionBurst(
+             const sp<V1_2::IBurstCallback>& /*callback*/,
+             const MQDescriptorSync<V1_2::FmqRequestDatum>& /*requestChannel*/,
+             const MQDescriptorSync<V1_2::FmqResultDatum>& /*resultChannel*/,
+             configureExecutionBurst_cb cb) override {
+         cb(ErrorStatus::DEVICE_UNAVAILABLE, nullptr);
+         return Void();
+     }
+     Return<ErrorStatus> saveToCache(const hidl_handle&, const hidl_handle&,
+                                     const HidlToken&) override {
+         return ErrorStatus::DEVICE_UNAVAILABLE;
+     }
     };
 public:
     enum OEM {
@@ -221,24 +247,32 @@ public:
         OEMYes,         // accepted by getSupportedOperations and prepareModel
     };
 
-    PartitioningDriver(const char *name, Capabilities capabilities,
-                       uint32_t operationMask, OEM oem = OEMNo) :
-            SampleDriver(name), mCapabilities(capabilities),
-            mOperationMask(operationMask), mOEM(oem) {}
+    PartitioningDriver(const char* name, const char* version, Capabilities capabilities,
+                       uint32_t operationMask, OEM oem = OEMNo)
+        : SampleDriver(name),
+          mVersionString(version),
+          mCapabilities(capabilities),
+          mOperationMask(operationMask),
+          mOEM(oem) {}
     ~PartitioningDriver() override {}
+
+    Return<void> getVersionString(getVersionString_cb cb) override {
+        cb(ErrorStatus::NONE, mVersionString);
+        return Void();
+    }
 
     Return<ErrorStatus> prepareModel_1_2(const Model& model, ExecutionPreference,
                                          const sp<IPreparedModelCallback>& cb) override {
         ErrorStatus status = ErrorStatus::NONE;
         if (mOEM != OEMYes) {
-            for (auto operation : model.operations) {
+            for (const auto& operation : model.operations) {
                 if (operation.type == OperationType::OEM_OPERATION) {
                     status = ErrorStatus::INVALID_ARGUMENT;
                     break;
                 }
             }
         }
-        cb->notify(status, new PartitioningPreparedModel);
+        cb->notify_1_2(status, new PartitioningPreparedModel);
         return status;
     }
 
@@ -275,17 +309,30 @@ public:
         return Void();
     }
 
-private:
+    Return<void> isCachingSupported(isCachingSupported_cb cb) override {
+        cb(ErrorStatus::NONE, true);
+        return Void();
+    }
+
+    Return<ErrorStatus> prepareModelFromCache(
+            const hidl_handle&, const hidl_handle&, const HidlToken&,
+            const sp<V1_2::IPreparedModelCallback>& callback) override {
+        callback->notify_1_2(ErrorStatus::NONE, new PartitioningPreparedModel);
+        return ErrorStatus::NONE;
+    }
+
+   private:
+    std::string mVersionString;
     Capabilities mCapabilities;
     uint32_t mOperationMask;
     OEM mOEM;
 };
 
 // This class adds some simple abstractions and utilities on top of
-// ::android::nn::wrapper::Model.  For example, it provides methods
-// that work in terms of operation kind (0..7); and because we care
-// about graph topology rather than details of operand types and
-// values, it greatly simplifies the process of creating operands.
+// WrapperModel.  For example, it provides methods that work in terms of
+// operation kind (0..7); and because we care about graph topology rather than
+// details of operand types and values, it greatly simplifies the process of
+// creating operands.
 class PartitioningModel : public WrapperModel {
 public:
     // Create a tensor operand of the specified type, and return the
@@ -365,7 +412,7 @@ private:
     }
 };
 
-// This class adds some utilities on top of ::android::nn::wrapper::Compilation.
+// This class adds some utilities on top of WrapperCompilation.
 class PartitioningCompilation : public WrapperCompilation {
 public:
  PartitioningCompilation(const WrapperModel* model,
@@ -433,31 +480,41 @@ protected:
     // From a vector of DeviceSpecification, create a vector of
     // Devices.
     struct DeviceSpecification {
-        DeviceSpecification(const std::string &name, Capabilities capabilities,
+        DeviceSpecification(const std::string& name, Capabilities capabilities,
                             uint32_t operationMask,
-                            PartitioningDriver::OEM oem = PartitioningDriver::OEMNo) :
-                mName(name), mCapabilities(capabilities),
-                mOperationMask(operationMask), mOEM(oem) { }
+                            PartitioningDriver::OEM oem = PartitioningDriver::OEMNo)
+            : mName(name),
+              mVersionString("JUST_AN_EXAMPLE"),
+              mCapabilities(capabilities),
+              mOperationMask(operationMask),
+              mOEM(oem) {}
+        DeviceSpecification(const std::string& name, const std::string& version,
+                            Capabilities capabilities, uint32_t operationMask,
+                            PartitioningDriver::OEM oem = PartitioningDriver::OEMNo)
+            : mName(name),
+              mVersionString(version),
+              mCapabilities(capabilities),
+              mOperationMask(operationMask),
+              mOEM(oem) {}
         std::string mName;
+        std::string mVersionString;
         Capabilities mCapabilities;
         uint32_t mOperationMask;
         PartitioningDriver::OEM mOEM;
     };
-    static std::vector<std::shared_ptr<Device>>
-    makeDevices(std::vector<DeviceSpecification> specifications) {
+    static std::vector<std::shared_ptr<Device>> makeDevices(
+            std::vector<DeviceSpecification> specifications) {
         std::vector<std::shared_ptr<Device>> devices;
         for (const auto& specification : specifications) {
-            devices.push_back(std::make_shared<Device>(
-                specification.mName,
-                new PartitioningDriver(specification.mName.c_str(),
-                                       specification.mCapabilities,
-                                       specification.mOperationMask,
-                                       specification.mOEM)));
-            if (!devices.back()->initialize()) {
-                EXPECT_NE("failed to initialize device", nullptr);
-                return {};
-            }
+            auto device = DeviceManager::forTest_makeDriverDevice(
+                    specification.mName,
+                    new PartitioningDriver(specification.mName.c_str(),
+                                           specification.mVersionString.c_str(),
+                                           specification.mCapabilities,
+                                           specification.mOperationMask, specification.mOEM));
+            devices.push_back(device);
         }
+        devices.push_back(DeviceManager::getCpuDevice());
         return devices;
     }
 
@@ -738,8 +795,8 @@ protected:
 
     /*-------------------------------------------------------------------------------------*/
 
-    bool compare(std::shared_ptr<const ExecutionStep> step,
-                 const WrapperModel* model, std::shared_ptr<Device> device) {
+    bool compare(std::shared_ptr<const ExecutionStep> step, const WrapperModel* model,
+                 std::shared_ptr<Device> device) {
         return (step->getDevice() == device) &&
                 compare(step->getSubModel(),
                         reinterpret_cast<const ModelBuilder*>(model->getHandle()));
@@ -773,18 +830,20 @@ TEST_F(PartitioningTest, SimpleModel) {
     ASSERT_STREQ(planA.forTest_simpleGetDevice()->getName(), "good");
 
     // Simple partition (two devices are each capable of everything, none better than CPU).
-    const auto devicesC = makeDevices(
-        {
-            {"bad", { .float32Performance = { .execTime = 1.1, .powerUsage = 1.1 },
-                            .quantized8Performance = { .execTime = 1.1, .powerUsage = 1.1 } }, ~0U},
-            {"bad2", { .float32Performance = { .execTime = 1.0, .powerUsage = 1.0 },
-                            .quantized8Performance = { .execTime = 1.0, .powerUsage = 1.0 } }, ~0U}
-        });
+    const auto devicesC =
+            makeDevices({{"bad",
+                          {.float32Performance = {.execTime = 1.1, .powerUsage = 1.1},
+                           .quantized8Performance = {.execTime = 1.1, .powerUsage = 1.1}},
+                          ~0U},
+                         {"bad2",
+                          {.float32Performance = {.execTime = 1.0, .powerUsage = 1.0},
+                           .quantized8Performance = {.execTime = 1.0, .powerUsage = 1.0}},
+                          ~0U}});
     ExecutionPlan planC;
     ASSERT_EQ(model.partitionTheWork(devicesC, ExecutePreference::PREFER_LOW_POWER, &planC),
               ANEURALNETWORKS_NO_ERROR);
     ASSERT_EQ(planC.forTest_getKind(), ExecutionPlan::Kind::SIMPLE);
-    ASSERT_EQ(planC.forTest_simpleGetDevice(), nullptr);
+    ASSERT_EQ(planC.forTest_simpleGetDevice(), DeviceManager::getCpuDevice());
 
     // Compound partition (two devices, each is capable of one of the
     // two operations).  We could do more extensive checking here --
@@ -929,7 +988,8 @@ TEST_F(PartitioningTest, Cpu) {
         model1.identifyInputsAndOutputs({ m1Opnd0, m1Opnd3, m1Opnd2 }, { m1Opnd4, m1Opnd5 });
         model1.finish();
         ASSERT_TRUE(model1.isValid());
-        ASSERT_NO_FATAL_FAILURE(ASSERT_TRUE(compare(step1, &model1, nullptr)));
+        ASSERT_NO_FATAL_FAILURE(
+                ASSERT_TRUE(compare(step1, &model1, DeviceManager::getCpuDevice())));
         ASSERT_EQ(step1->getModelInputs(),
                   (RemapVectorType{ { opnd0, m1Opnd0 } }));
         ASSERT_EQ(step1->getModelOutputs(),
@@ -990,21 +1050,24 @@ TEST_F(PartitioningTest, SetPartitioning) {
         });
 
     // Test kPartitioningNo.  We should not even attempt partitioning,
-    // so there should be no execution plan.
+    // so there should be a SIMPLE plan on CPU.
     PartitioningCompilation cPNo(&model, devices);
     ASSERT_EQ(cPNo.setPartitioning(DeviceManager::kPartitioningNo), Result::NO_ERROR);
     ASSERT_EQ(cPNo.finish(), Result::NO_ERROR);
-    ASSERT_EQ(cPNo.getExecutionPlan().forTest_getKind(), ExecutionPlan::Kind::EMPTY);
+    ASSERT_EQ(cPNo.getExecutionPlan().forTest_getKind(), ExecutionPlan::Kind::SIMPLE);
+    ASSERT_EQ(cPNo.getExecutionPlan().forTest_simpleGetDevice(), DeviceManager::getCpuDevice());
 
     // Test kPartitioningWithFallback.  We should attempt
     // partitioning, reach the end of the partitioning process (so we
-    // have an execution plan), discover the dimensionless
-    // intermediate operand, and still return success (because of
-    // fallback).
+    // have an unsuccessful execution plan), discover the dimensionless
+    // intermediate operand, then fallback to CPU with a SIMPLE plan, and
+    // finally return success.
     PartitioningCompilation cPWithFallback(&model, devices);
     ASSERT_EQ(cPWithFallback.setPartitioning(DeviceManager::kPartitioningWithFallback), Result::NO_ERROR);
     ASSERT_EQ(cPWithFallback.finish(), Result::NO_ERROR);
-    ASSERT_EQ(cPWithFallback.getExecutionPlan().forTest_getKind(), ExecutionPlan::Kind::ERROR);
+    ASSERT_EQ(cPWithFallback.getExecutionPlan().forTest_getKind(), ExecutionPlan::Kind::SIMPLE);
+    ASSERT_EQ(cPWithFallback.getExecutionPlan().forTest_simpleGetDevice(),
+              DeviceManager::getCpuDevice());
 
     // Test kPartitioningWithoutFallback.  We should attempt
     // partitioning, and fail.
@@ -1138,7 +1201,7 @@ TEST_F(PartitioningTest, OemOperations) {
     ASSERT_NE(compilationIndecisiveOEM.finish(), Result::NO_ERROR);
 
     // Verify that we get an error if there are no drivers (only CPU fallback).
-    PartitioningCompilation compilationNoDrivers(&model, {} /* no drivers */);
+    PartitioningCompilation compilationNoDrivers(&model, makeDevices({}) /* no drivers */);
     ASSERT_EQ(compilationNoDrivers.finish(), Result::BAD_DATA);
 }
 
@@ -1176,6 +1239,424 @@ TEST_F(PartitioningTest, RelaxedFP) {
 
     ASSERT_NO_FATAL_FAILURE(TrivialTest(false, "f32"));
     ASSERT_NO_FATAL_FAILURE(TrivialTest(true, "f16"));
+}
+
+void expectUniqueTokens(const std::vector<std::vector<uint8_t>>& tokens) {
+    for (uint32_t i = 0; i < tokens.size(); i++) {
+        SCOPED_TRACE(i);
+        for (uint32_t j = i + 1; j < tokens.size(); j++) {
+            SCOPED_TRACE(j);
+            EXPECT_NE(tokens[i], tokens[j]);
+        }
+    }
+}
+
+// Launch a single run of the partitioner against the provided model and device list with
+// cache token privided as tokenIn. Find the partition for the device with deviceName.
+// Record the tranformed token into tokenOut.
+// If tokenIn is empty, no caching information will be provided to the partitioner.
+void getTransformedCacheTokenSingle(const PartitioningModel& model,
+                                    const std::vector<std::shared_ptr<Device>>& devices,
+                                    const char* deviceName, const std::vector<uint8_t>& tokenIn,
+                                    ExecutePreference preference, std::vector<uint8_t>* tokenOut) {
+    // Compile the model and get the execution plan.
+    PartitioningCompilation compilation(&model, devices);
+    if (!tokenIn.empty()) {
+        compilation.setCaching("/data/local/tmp", tokenIn);
+    }
+    compilation.setPreference(preference);
+    ASSERT_EQ(compilation.finish(), Result::NO_ERROR);
+    const ExecutionPlan& plan = compilation.getExecutionPlan();
+
+    // Find the cache info for the device.
+    const uint8_t* token = nullptr;
+    if (plan.forTest_getKind() == ExecutionPlan::Kind::SIMPLE) {
+        ASSERT_STREQ(plan.forTest_simpleGetDevice()->getName(), deviceName);
+        token = plan.forTest_simpleGetCacheToken();
+    } else if (plan.forTest_getKind() == ExecutionPlan::Kind::COMPOUND) {
+        const auto& steps = plan.forTest_compoundGetSteps();
+        bool found = false;
+        for (const auto& step : steps) {
+            // In general, two or more partitions can be on the same device. However, this will
+            // not happen on the test models with only 2 operations.
+            if (strcmp(step->getDevice()->getName(), deviceName) == 0) {
+                ASSERT_FALSE(found);
+                token = step->forTest_getCacheToken();
+                found = true;
+            }
+        }
+        ASSERT_TRUE(found);
+    } else {
+        FAIL();
+    }
+
+    // Retrieve the transformed token from the cache info.
+    if (token == nullptr) {
+        tokenOut->clear();
+    } else {
+        tokenOut->resize(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN);
+        std::copy(token, token + ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, tokenOut->begin());
+    }
+}
+
+// A wrapper of getTransformedCacheTokenSingle, which runs getTransformedCacheTokenSingle
+// multiple times and checks if the transformation provides consistent result.
+void getTransformedCacheToken(const PartitioningModel& model,
+                              const std::vector<std::shared_ptr<Device>>& devices,
+                              const char* deviceName, const std::vector<uint8_t>& tokenIn,
+                              ExecutePreference preference, std::vector<uint8_t>* tokenOut) {
+    getTransformedCacheTokenSingle(model, devices, deviceName, tokenIn, preference, tokenOut);
+
+    // Test if the runtime maps to the same cache token every time for the same compilation setup.
+    for (uint32_t i = 0; i < 10; i++) {
+        std::vector<uint8_t> token;
+        SCOPED_TRACE(i);
+        getTransformedCacheTokenSingle(model, devices, deviceName, tokenIn, preference, &token);
+        EXPECT_EQ(*tokenOut, token);
+    }
+}
+
+void CreateModelForCachingTests(PartitioningModel* model) {
+    uint32_t opnd0 = model->addFloatOperand();
+    uint32_t opnd1 = model->addFloatOperand();
+    uint32_t opnd2 = model->addOperation2To1(0, opnd0, opnd1);
+    uint32_t opnd3 = model->addFloatOperand();
+    uint32_t opnd4 = model->addOperation2To1(1, opnd2, opnd3);
+    model->identifyInputsAndOutputs({opnd0, opnd1, opnd3}, {opnd4});
+    model->finish();
+    ASSERT_TRUE(model->isValid());
+}
+
+// Test the case when no token is provided by the application and the execution plan has a
+// simple body.
+TEST_F(PartitioningTest, CacheTokenNoneSimpleBody) {
+    PartitioningModel model;
+    CreateModelForCachingTests(&model);
+
+    // deviceA can execute the whole model.
+    const auto deviceA = makeDevices({
+            {"deviceA",
+             {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+              .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+             ~0U},
+    });
+
+    std::vector<uint8_t> tokenIn, tokenOut;
+    getTransformedCacheToken(model, deviceA, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &tokenOut);
+    EXPECT_TRUE(tokenOut.empty());
+}
+
+// Test if the runtime maps to different cache tokens for devices with different names in
+// execution plan with a simple body.
+TEST_F(PartitioningTest, CacheTokenDifferentDeviceNamesSimpleBody) {
+    PartitioningModel model;
+    CreateModelForCachingTests(&model);
+
+    // Two devices that can both execute the whole model.
+    const auto deviceA = makeDevices({
+            {"deviceA",
+             {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+              .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+             ~0U},
+    });
+    const auto deviceB = makeDevices({
+            {"deviceB",
+             {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+              .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+             ~0U},
+    });
+
+    std::vector<uint8_t> tokenIn(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, 0);
+    std::vector<uint8_t> deviceAToken, deviceBToken;
+    getTransformedCacheToken(model, deviceA, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &deviceAToken);
+    getTransformedCacheToken(model, deviceB, "deviceB", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &deviceBToken);
+    expectUniqueTokens({deviceAToken, deviceBToken});
+}
+
+// Test if the runtime maps to different cache tokens for devices with different version strings in
+// execution plan with a simple body.
+TEST_F(PartitioningTest, CacheTokenDifferentDeviceVersionStringsSimpleBody) {
+    PartitioningModel model;
+    CreateModelForCachingTests(&model);
+
+    // Two devices that can both execute the whole model.
+    const auto deviceA_1_0 = makeDevices({
+            {"deviceA",
+             "1.0",
+             {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+              .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+             ~0U},
+    });
+    const auto deviceA_1_1 = makeDevices({
+            {"deviceA",
+             "1.1",
+             {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+              .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+             ~0U},
+    });
+
+    std::vector<uint8_t> tokenIn(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, 0);
+    std::vector<uint8_t> deviceA_1_0_Token, deviceA_1_1_Token;
+    getTransformedCacheToken(model, deviceA_1_0, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &deviceA_1_0_Token);
+    getTransformedCacheToken(model, deviceA_1_1, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &deviceA_1_1_Token);
+    expectUniqueTokens({deviceA_1_0_Token, deviceA_1_1_Token});
+}
+
+// Test if the runtime maps to different cache tokens for compilations with different preferences
+// in execution plan with a simple body.
+TEST_F(PartitioningTest, CacheTokenDifferentPreferencesSimpleBody) {
+    PartitioningModel model;
+    CreateModelForCachingTests(&model);
+
+    // One device that can execute the whole model.
+    const auto deviceA = makeDevices({
+            {"deviceA",
+             {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+              .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+             ~0U},
+    });
+
+    std::vector<uint8_t> fastToken, powerToken, sustainedToken;
+    std::vector<uint8_t> tokenIn(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, 0);
+    getTransformedCacheToken(model, deviceA, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &fastToken);
+    getTransformedCacheToken(model, deviceA, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_LOW_POWER, &powerToken);
+    getTransformedCacheToken(model, deviceA, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_SUSTAINED_SPEED, &sustainedToken);
+    expectUniqueTokens({fastToken, powerToken, sustainedToken});
+}
+
+// Test if the runtime maps to different cache tokens for compilations with different tokens
+// provided by application in execution plan with a simple body.
+TEST_F(PartitioningTest, CacheTokenDifferentTokensSimpleBody) {
+    PartitioningModel model;
+    CreateModelForCachingTests(&model);
+
+    // One device that can execute the whole model.
+    const auto deviceA = makeDevices({
+            {"deviceA",
+             {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+              .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+             ~0U},
+    });
+
+    std::vector<uint8_t> tokenOut1, tokenOut2;
+    std::vector<uint8_t> tokenIn1(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, 0);
+    std::vector<uint8_t> tokenIn2(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, 1);
+    getTransformedCacheToken(model, deviceA, "deviceA", tokenIn1,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &tokenOut1);
+    getTransformedCacheToken(model, deviceA, "deviceA", tokenIn2,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &tokenOut2);
+    expectUniqueTokens({tokenOut1, tokenOut2});
+}
+
+// Test the case when no token is provided by the application and the execution plan has a
+// compound body.
+TEST_F(PartitioningTest, CacheTokenNoneCompoundBody) {
+    PartitioningModel model;
+    CreateModelForCachingTests(&model);
+
+    // DeviceA executes the first operation only.
+    const auto devices =
+            makeDevices({{"deviceA",
+                          {.float32Performance = {.execTime = 0.8, .powerUsage = 0.8},
+                           .quantized8Performance = {.execTime = 0.8, .powerUsage = 0.8}},
+                          ~0U},
+                         {"deviceB",
+                          {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+                           .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+                          1 << 1}});
+
+    std::vector<uint8_t> tokenIn, tokenOut;
+    getTransformedCacheToken(model, devices, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &tokenOut);
+    EXPECT_TRUE(tokenOut.empty());
+    getTransformedCacheToken(model, devices, "deviceB", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &tokenOut);
+    EXPECT_TRUE(tokenOut.empty());
+}
+
+// Test if the runtime maps to different cache tokens for devices with different names in
+// execution plan with a compound body.
+TEST_F(PartitioningTest, CacheTokenDifferentDeviceNamesCompoundBody) {
+    PartitioningModel model;
+    CreateModelForCachingTests(&model);
+
+    // DeviceA executes the first operation only.
+    const auto devices1 =
+            makeDevices({{"deviceA",
+                          {.float32Performance = {.execTime = 0.8, .powerUsage = 0.8},
+                           .quantized8Performance = {.execTime = 0.8, .powerUsage = 0.8}},
+                          ~0U},
+                         {"deviceC",
+                          {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+                           .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+                          1 << 1}});
+    // DeviceB executes the first operation only.
+    const auto devices2 =
+            makeDevices({{"deviceB",
+                          {.float32Performance = {.execTime = 0.8, .powerUsage = 0.8},
+                           .quantized8Performance = {.execTime = 0.8, .powerUsage = 0.8}},
+                          ~0U},
+                         {"deviceC",
+                          {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+                           .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+                          1 << 1}});
+
+    std::vector<uint8_t> tokenIn(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, 0);
+    std::vector<uint8_t> deviceAToken, deviceBToken;
+    getTransformedCacheToken(model, devices1, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &deviceAToken);
+    getTransformedCacheToken(model, devices2, "deviceB", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &deviceBToken);
+    expectUniqueTokens({deviceAToken, deviceBToken});
+}
+
+// Test if the runtime maps to different cache tokens for devices with different names in
+// execution plan with a compound body.
+TEST_F(PartitioningTest, CacheTokenDifferentDeviceVersionStringsCompoundBody) {
+    PartitioningModel model;
+    CreateModelForCachingTests(&model);
+
+    // DeviceA executes the first operation only.
+    const auto devices1 =
+            makeDevices({{"deviceA",
+                          "1.0",
+                          {.float32Performance = {.execTime = 0.8, .powerUsage = 0.8},
+                           .quantized8Performance = {.execTime = 0.8, .powerUsage = 0.8}},
+                          ~0U},
+                         {"deviceB",
+                          {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+                           .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+                          1 << 1}});
+    // DeviceB executes the first operation only.
+    const auto devices2 =
+            makeDevices({{"deviceA",
+                          "1.1",
+                          {.float32Performance = {.execTime = 0.8, .powerUsage = 0.8},
+                           .quantized8Performance = {.execTime = 0.8, .powerUsage = 0.8}},
+                          ~0U},
+                         {"deviceB",
+                          {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+                           .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+                          1 << 1}});
+
+    std::vector<uint8_t> tokenIn(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, 0);
+    std::vector<uint8_t> deviceA_1_0_Token, deviceA_1_1_Token;
+    getTransformedCacheToken(model, devices1, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &deviceA_1_0_Token);
+    getTransformedCacheToken(model, devices2, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &deviceA_1_1_Token);
+    expectUniqueTokens({deviceA_1_0_Token, deviceA_1_1_Token});
+}
+
+// Test if the runtime maps to different cache tokens for compilations with different preferences
+// in execution plan with a compound body.
+TEST_F(PartitioningTest, CacheTokenDifferentPreferencesCompoundBody) {
+    PartitioningModel model;
+    CreateModelForCachingTests(&model);
+
+    // DeviceA executes the first operation only.
+    const auto devices =
+            makeDevices({{"deviceA",
+                          {.float32Performance = {.execTime = 0.8, .powerUsage = 0.8},
+                           .quantized8Performance = {.execTime = 0.8, .powerUsage = 0.8}},
+                          ~0U},
+                         {"deviceB",
+                          {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+                           .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+                          1 << 1}});
+
+    std::vector<uint8_t> fastToken, powerToken, sustainedToken;
+    std::vector<uint8_t> tokenIn(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, 0);
+    getTransformedCacheToken(model, devices, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &fastToken);
+    getTransformedCacheToken(model, devices, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_LOW_POWER, &powerToken);
+    getTransformedCacheToken(model, devices, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_SUSTAINED_SPEED, &sustainedToken);
+    expectUniqueTokens({fastToken, powerToken, sustainedToken});
+}
+
+// Test if the runtime maps to different cache tokens for compilations with different tokens
+// provided by application in execution plan with a compound body.
+TEST_F(PartitioningTest, CacheTokenDifferentTokensCompoundBody) {
+    PartitioningModel model;
+    CreateModelForCachingTests(&model);
+
+    // DeviceA executes the first operation only.
+    const auto devices =
+            makeDevices({{"deviceA",
+                          {.float32Performance = {.execTime = 0.8, .powerUsage = 0.8},
+                           .quantized8Performance = {.execTime = 0.8, .powerUsage = 0.8}},
+                          ~0U},
+                         {"deviceB",
+                          {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+                           .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+                          1 << 1}});
+
+    std::vector<uint8_t> tokenOut1, tokenOut2;
+    std::vector<uint8_t> tokenIn1(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, 0);
+    std::vector<uint8_t> tokenIn2(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, 1);
+    getTransformedCacheToken(model, devices, "deviceA", tokenIn1,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &tokenOut1);
+    getTransformedCacheToken(model, devices, "deviceA", tokenIn2,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &tokenOut2);
+    expectUniqueTokens({tokenOut1, tokenOut2});
+}
+
+// Test if the runtime maps to different cache tokens for compilations with different partitioning
+// outcome in execution plan with a compound body.
+TEST_F(PartitioningTest, CacheTokenDifferentPartitionsCompoundBody) {
+    PartitioningModel model;
+    CreateModelForCachingTests(&model);
+
+    // DeviceA executes the whole model.
+    const auto devices1 =
+            makeDevices({{"deviceA",
+                          {.float32Performance = {.execTime = 0.8, .powerUsage = 0.8},
+                           .quantized8Performance = {.execTime = 0.8, .powerUsage = 0.8}},
+                          ~0U},
+                         {"deviceB",
+                          {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+                           .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+                          0U}});
+    // DeviceA executes the first operation only.
+    const auto devices2 =
+            makeDevices({{"deviceA",
+                          {.float32Performance = {.execTime = 0.8, .powerUsage = 0.8},
+                           .quantized8Performance = {.execTime = 0.8, .powerUsage = 0.8}},
+                          ~0U},
+                         {"deviceB",
+                          {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+                           .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+                          1 << 1}});
+    // DeviceA executes the second operation only.
+    const auto devices3 =
+            makeDevices({{"deviceA",
+                          {.float32Performance = {.execTime = 0.8, .powerUsage = 0.8},
+                           .quantized8Performance = {.execTime = 0.8, .powerUsage = 0.8}},
+                          ~0U},
+                         {"deviceB",
+                          {.float32Performance = {.execTime = 0.5, .powerUsage = 0.5},
+                           .quantized8Performance = {.execTime = 0.5, .powerUsage = 0.5}},
+                          1 << 0}});
+
+    std::vector<uint8_t> tokenIn(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, 0);
+    std::vector<uint8_t> tokenOut1, tokenOut2, tokenOut3;
+    getTransformedCacheToken(model, devices1, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &tokenOut1);
+    getTransformedCacheToken(model, devices2, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &tokenOut2);
+    getTransformedCacheToken(model, devices3, "deviceA", tokenIn,
+                             ExecutePreference::PREFER_FAST_SINGLE_ANSWER, &tokenOut3);
+    expectUniqueTokens({tokenOut1, tokenOut2, tokenOut3});
 }
 
 }  // namespace

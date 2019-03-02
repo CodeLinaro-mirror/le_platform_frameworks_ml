@@ -12,6 +12,12 @@ namespace hashtable_lookup_quant8 {
 TEST_F(GeneratedTests, hashtable_lookup_quant8) {
     execute(hashtable_lookup_quant8::CreateModel,
             hashtable_lookup_quant8::is_ignored,
-            hashtable_lookup_quant8::examples);
+            hashtable_lookup_quant8::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, hashtable_lookup_quant8_dynamic_output_shape) {
+    execute(hashtable_lookup_quant8::CreateModel_dynamic_output_shape,
+            hashtable_lookup_quant8::is_ignored_dynamic_output_shape,
+            hashtable_lookup_quant8::get_examples_dynamic_output_shape());
 }
 

@@ -12,6 +12,12 @@ namespace batch_to_space_relaxed {
 TEST_F(GeneratedTests, batch_to_space_relaxed) {
     execute(batch_to_space_relaxed::CreateModel,
             batch_to_space_relaxed::is_ignored,
-            batch_to_space_relaxed::examples);
+            batch_to_space_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, batch_to_space_relaxed_dynamic_output_shape) {
+    execute(batch_to_space_relaxed::CreateModel_dynamic_output_shape,
+            batch_to_space_relaxed::is_ignored_dynamic_output_shape,
+            batch_to_space_relaxed::get_examples_dynamic_output_shape());
 }
 

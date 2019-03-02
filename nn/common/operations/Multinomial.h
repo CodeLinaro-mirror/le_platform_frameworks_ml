@@ -19,7 +19,7 @@
 
 #include "HalOperation.h"
 
-#include "tensorflow/contrib/lite/kernels/internal/tensor_utils.h"
+#include "tensorflow/lite/kernels/internal/tensor_utils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -46,6 +46,8 @@ class Multinomial {
     static constexpr int kOutputTensor = 0;
 
    private:
+    void EvalFloat32(const float* inputData);
+
     RunTimeOperandInfo* input_;
     int sample_count_;
     RunTimeOperandInfo* random_seeds_;

@@ -12,6 +12,12 @@ namespace max_pool_float_2_relaxed {
 TEST_F(GeneratedTests, max_pool_float_2_relaxed) {
     execute(max_pool_float_2_relaxed::CreateModel,
             max_pool_float_2_relaxed::is_ignored,
-            max_pool_float_2_relaxed::examples);
+            max_pool_float_2_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, max_pool_float_2_relaxed_dynamic_output_shape) {
+    execute(max_pool_float_2_relaxed::CreateModel_dynamic_output_shape,
+            max_pool_float_2_relaxed::is_ignored_dynamic_output_shape,
+            max_pool_float_2_relaxed::get_examples_dynamic_output_shape());
 }
 

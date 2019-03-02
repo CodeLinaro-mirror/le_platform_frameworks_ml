@@ -12,6 +12,12 @@ namespace dequantize {
 TEST_F(GeneratedTests, dequantize) {
     execute(dequantize::CreateModel,
             dequantize::is_ignored,
-            dequantize::examples);
+            dequantize::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, dequantize_dynamic_output_shape) {
+    execute(dequantize::CreateModel_dynamic_output_shape,
+            dequantize::is_ignored_dynamic_output_shape,
+            dequantize::get_examples_dynamic_output_shape());
 }
 

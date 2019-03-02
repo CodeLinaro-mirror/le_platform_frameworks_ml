@@ -12,6 +12,12 @@ namespace mean_quant8_2 {
 TEST_F(GeneratedTests, mean_quant8_2) {
     execute(mean_quant8_2::CreateModel,
             mean_quant8_2::is_ignored,
-            mean_quant8_2::examples);
+            mean_quant8_2::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, mean_quant8_2_dynamic_output_shape) {
+    execute(mean_quant8_2::CreateModel_dynamic_output_shape,
+            mean_quant8_2::is_ignored_dynamic_output_shape,
+            mean_quant8_2::get_examples_dynamic_output_shape());
 }
 

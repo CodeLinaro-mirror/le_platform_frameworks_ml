@@ -12,6 +12,12 @@ namespace mean {
 TEST_F(GeneratedTests, mean) {
     execute(mean::CreateModel,
             mean::is_ignored,
-            mean::examples);
+            mean::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, mean_dynamic_output_shape) {
+    execute(mean::CreateModel_dynamic_output_shape,
+            mean::is_ignored_dynamic_output_shape,
+            mean::get_examples_dynamic_output_shape());
 }
 

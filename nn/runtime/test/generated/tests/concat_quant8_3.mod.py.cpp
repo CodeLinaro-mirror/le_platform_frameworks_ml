@@ -12,6 +12,12 @@ namespace concat_quant8_3 {
 TEST_F(GeneratedTests, concat_quant8_3) {
     execute(concat_quant8_3::CreateModel,
             concat_quant8_3::is_ignored,
-            concat_quant8_3::examples);
+            concat_quant8_3::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, concat_quant8_3_dynamic_output_shape) {
+    execute(concat_quant8_3::CreateModel_dynamic_output_shape,
+            concat_quant8_3::is_ignored_dynamic_output_shape,
+            concat_quant8_3::get_examples_dynamic_output_shape());
 }
 

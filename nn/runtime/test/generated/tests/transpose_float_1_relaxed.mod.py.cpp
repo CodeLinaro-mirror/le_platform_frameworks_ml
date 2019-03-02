@@ -12,6 +12,12 @@ namespace transpose_float_1_relaxed {
 TEST_F(GeneratedTests, transpose_float_1_relaxed) {
     execute(transpose_float_1_relaxed::CreateModel,
             transpose_float_1_relaxed::is_ignored,
-            transpose_float_1_relaxed::examples);
+            transpose_float_1_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, transpose_float_1_relaxed_dynamic_output_shape) {
+    execute(transpose_float_1_relaxed::CreateModel_dynamic_output_shape,
+            transpose_float_1_relaxed::is_ignored_dynamic_output_shape,
+            transpose_float_1_relaxed::get_examples_dynamic_output_shape());
 }
 

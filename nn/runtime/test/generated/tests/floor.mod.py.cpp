@@ -12,6 +12,12 @@ namespace floor {
 TEST_F(GeneratedTests, floor) {
     execute(floor::CreateModel,
             floor::is_ignored,
-            floor::examples);
+            floor::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, floor_dynamic_output_shape) {
+    execute(floor::CreateModel_dynamic_output_shape,
+            floor::is_ignored_dynamic_output_shape,
+            floor::get_examples_dynamic_output_shape());
 }
 

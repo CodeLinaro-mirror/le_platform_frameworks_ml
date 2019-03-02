@@ -12,6 +12,24 @@ namespace relu_quant8_1 {
 TEST_F(GeneratedTests, relu_quant8_1) {
     execute(relu_quant8_1::CreateModel,
             relu_quant8_1::is_ignored,
-            relu_quant8_1::examples);
+            relu_quant8_1::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, relu_quant8_1_dynamic_output_shape) {
+    execute(relu_quant8_1::CreateModel_dynamic_output_shape,
+            relu_quant8_1::is_ignored_dynamic_output_shape,
+            relu_quant8_1::get_examples_dynamic_output_shape());
+}
+
+TEST_F(GeneratedTests, relu_quant8_1_2) {
+    execute(relu_quant8_1::CreateModel_2,
+            relu_quant8_1::is_ignored_2,
+            relu_quant8_1::get_examples_2());
+}
+
+TEST_F(DynamicOutputShapeTest, relu_quant8_1_dynamic_output_shape_2) {
+    execute(relu_quant8_1::CreateModel_dynamic_output_shape_2,
+            relu_quant8_1::is_ignored_dynamic_output_shape_2,
+            relu_quant8_1::get_examples_dynamic_output_shape_2());
 }
 

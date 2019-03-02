@@ -12,6 +12,12 @@ namespace relu_float_1_relaxed {
 TEST_F(GeneratedTests, relu_float_1_relaxed) {
     execute(relu_float_1_relaxed::CreateModel,
             relu_float_1_relaxed::is_ignored,
-            relu_float_1_relaxed::examples);
+            relu_float_1_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, relu_float_1_relaxed_dynamic_output_shape) {
+    execute(relu_float_1_relaxed::CreateModel_dynamic_output_shape,
+            relu_float_1_relaxed::is_ignored_dynamic_output_shape,
+            relu_float_1_relaxed::get_examples_dynamic_output_shape());
 }
 

@@ -12,6 +12,12 @@ namespace lstm_relaxed {
 TEST_F(GeneratedTests, lstm_relaxed) {
     execute(lstm_relaxed::CreateModel,
             lstm_relaxed::is_ignored,
-            lstm_relaxed::examples);
+            lstm_relaxed::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, lstm_relaxed_dynamic_output_shape) {
+    execute(lstm_relaxed::CreateModel_dynamic_output_shape,
+            lstm_relaxed::is_ignored_dynamic_output_shape,
+            lstm_relaxed::get_examples_dynamic_output_shape());
 }
 

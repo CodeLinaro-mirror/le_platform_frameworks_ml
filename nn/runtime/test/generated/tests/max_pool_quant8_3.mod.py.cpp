@@ -12,6 +12,12 @@ namespace max_pool_quant8_3 {
 TEST_F(GeneratedTests, max_pool_quant8_3) {
     execute(max_pool_quant8_3::CreateModel,
             max_pool_quant8_3::is_ignored,
-            max_pool_quant8_3::examples);
+            max_pool_quant8_3::get_examples());
+}
+
+TEST_F(DynamicOutputShapeTest, max_pool_quant8_3_dynamic_output_shape) {
+    execute(max_pool_quant8_3::CreateModel_dynamic_output_shape,
+            max_pool_quant8_3::is_ignored_dynamic_output_shape,
+            max_pool_quant8_3::get_examples_dynamic_output_shape());
 }
 
