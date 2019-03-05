@@ -209,8 +209,8 @@ std::ostream& operator<<(std::ostream& os, const hidl_string& str);
 // - as well as all of its cross-process dups() - remain opened.
 struct hidl_memory {
 
-    hidl_memory() : mHandle(nullptr), mSize(0), mName("") {
-    }
+    hidl_memory() : mHandle(nullptr), mSize(0), mShpMemHandle(nullptr), mName("")
+    {}
 
     /**
      * Creates a hidl_memory object whose handle has the same lifetime
