@@ -54,6 +54,8 @@ const OperationRegistration* register_REDUCE_MAX();
 const OperationRegistration* register_REDUCE_MIN();
 const OperationRegistration* register_REDUCE_PROD();
 const OperationRegistration* register_REDUCE_SUM();
+const OperationRegistration* register_RESIZE_BILINEAR();
+const OperationRegistration* register_RESIZE_NEAREST_NEIGHBOR();
 const OperationRegistration* register_ROI_ALIGN();
 const OperationRegistration* register_ROI_POOLING();
 const OperationRegistration* register_RSQRT();
@@ -63,7 +65,7 @@ const OperationRegistration* register_SQRT();
 const OperationRegistration* register_UNIDIRECTIONAL_SEQUENCE_LSTM();
 const OperationRegistration* register_UNIDIRECTIONAL_SEQUENCE_RNN();
 
-OperationResolver::OperationResolver() {
+BuiltinOperationResolver::BuiltinOperationResolver() {
     registerOperation(register_ABS());
     registerOperation(register_AXIS_ALIGNED_BBOX_TRANSFORM());
     registerOperation(register_BIDIRECTIONAL_SEQUENCE_RNN());
@@ -94,6 +96,8 @@ OperationResolver::OperationResolver() {
     registerOperation(register_REDUCE_MIN());
     registerOperation(register_REDUCE_PROD());
     registerOperation(register_REDUCE_SUM());
+    registerOperation(register_RESIZE_BILINEAR());
+    registerOperation(register_RESIZE_NEAREST_NEIGHBOR());
     registerOperation(register_ROI_ALIGN());
     registerOperation(register_ROI_POOLING());
     registerOperation(register_RSQRT());
@@ -104,7 +108,8 @@ OperationResolver::OperationResolver() {
     registerOperation(register_UNIDIRECTIONAL_SEQUENCE_RNN());
 }
 
-const OperationRegistration* OperationResolver::findOperation(OperationType operationType) const {
+const OperationRegistration* BuiltinOperationResolver::findOperation(
+        OperationType operationType) const {
     auto index = static_cast<int32_t>(operationType);
     if (index < 0 || index >= kNumberOfOperationTypes) {
         return nullptr;
@@ -112,7 +117,8 @@ const OperationRegistration* OperationResolver::findOperation(OperationType oper
     return mRegistrations[index];
 }
 
-void OperationResolver::registerOperation(const OperationRegistration* operationRegistration) {
+void BuiltinOperationResolver::registerOperation(
+        const OperationRegistration* operationRegistration) {
     CHECK(operationRegistration != nullptr);
     auto index = static_cast<int32_t>(operationRegistration->type);
     CHECK_LE(0, index);
