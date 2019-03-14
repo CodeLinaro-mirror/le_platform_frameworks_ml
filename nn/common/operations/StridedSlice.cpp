@@ -21,7 +21,7 @@
 #include "Operations.h"
 #include "CpuOperationUtils.h"
 
-#include "tensorflow/contrib/lite/kernels/internal/reference/reference_ops.h"
+#include "tensorflow/lite/kernels/internal/reference/legacy_reference_ops.h"
 
 namespace android {
 namespace nn {
@@ -54,12 +54,13 @@ bool stridedSliceGeneric(const uint8_t* inputData, const Shape& inputShape,
 
     beginMask = ReverseMaskBits(beginMask, numInputDims);
     endMask = ReverseMaskBits(endMask, numInputDims);
+    shrinkAxisMask = ReverseMaskBits(shrinkAxisMask, numInputDims);
 
     if (inputShape.type == OperandType::TENSOR_FLOAT32) {
         tflite::reference_ops::StridedSlice(
                 reinterpret_cast<const float*>(inputData),
                 convertShapeToDims(inputShape),
-                beginMask, endMask,
+                beginMask, endMask, shrinkAxisMask,
                 starts, stops, strides,
                 reinterpret_cast<float*>(outputData),
                 convertShapeToDims(outputShape));
@@ -67,7 +68,7 @@ bool stridedSliceGeneric(const uint8_t* inputData, const Shape& inputShape,
         tflite::reference_ops::StridedSlice(
                 reinterpret_cast<const uint8_t*>(inputData),
                 convertShapeToDims(inputShape),
-                beginMask, endMask,
+                beginMask, endMask, shrinkAxisMask,
                 starts, stops, strides,
                 reinterpret_cast<uint8_t*>(outputData),
                 convertShapeToDims(outputShape));

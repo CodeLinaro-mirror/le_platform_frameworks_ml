@@ -21,8 +21,8 @@
 #include "Operations.h"
 #include "CpuOperationUtils.h"
 
-#include "tensorflow/contrib/lite/kernels/internal/optimized/optimized_ops.h"
-#include "tensorflow/contrib/lite/kernels/internal/reference/reference_ops.h"
+#include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
+#include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
 
 namespace android {
 namespace nn {

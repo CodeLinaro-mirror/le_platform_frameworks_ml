@@ -18,7 +18,7 @@
 #define FRAMEWORKS_ML_NN_LSTMCELL_H
 
 #include "ActivationFunctor.h"
-#include "tensorflow/contrib/lite/kernels/internal/tensor_utils.h"
+#include "tensorflow/lite/kernels/internal/tensor_utils.h"
 
 #include <algorithm>
 #include <cmath>

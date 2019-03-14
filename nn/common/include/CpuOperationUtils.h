@@ -19,7 +19,7 @@
 
 #include "OperationsUtils.h"
 
-#include "tensorflow/contrib/lite/kernels/internal/types.h"
+#include "tensorflow/lite/kernels/internal/types.h"
 
 namespace android {
 namespace nn {
