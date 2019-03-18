@@ -21,10 +21,11 @@
 #include "Utils.h"
 #include "VersionedIDevice.h"
 
-#include <android-base/macros.h>
 #include <map>
 #include <unordered_set>
 #include <vector>
+
+#include "external/android-base/macros.h"
 
 namespace android {
 namespace nn {

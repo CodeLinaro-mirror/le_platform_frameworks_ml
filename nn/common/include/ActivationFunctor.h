@@ -17,7 +17,7 @@
 #ifndef ANDROID_ML_NN_ACTIVATION_FUNCTOR_H
 #define ANDROID_ML_NN_ACTIVATION_FUNCTOR_H
 
-#include "android/log.h"
+#include "external/android-base/logging.h"
 
 #include <algorithm>
 #include <cmath>
@@ -49,9 +49,9 @@ class ActivationFunctor {
       case kActivationSigmoid:
         return 1.0f / (1.0f + std::exp(-a));
       default:
-        __android_log_print(ANDROID_LOG_ERROR, "NN API",
-                            "Invalid enum value for activation function: 0x%0X",
-                            act_);
+        ALOG(ERROR, "NN API",
+             "Invalid enum value for activation function: 0x%0X",
+             act_);
         abort();
     }
   }

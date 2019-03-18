@@ -20,9 +20,10 @@
 #include "NeuralNetworks.h"
 #include "Utils.h"
 
-#include <cutils/native_handle.h>
 #include <sys/mman.h>
 #include <unordered_map>
+
+#include "external/cutils/native_handle.h"
 
 namespace android {
 namespace nn {

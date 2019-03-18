@@ -19,6 +19,8 @@
 
 #include "tensorflow/contrib/lite/kernels/internal/optimized/optimized_ops.h"
 
+#include <mutex>
+
 namespace android {
 namespace nn {
 
@@ -93,11 +95,14 @@ bool convFloat32(const float* inputData, const Shape& inputShape,
 
     // Prevent concurrent executions that may access the scratch buffer.
     std::unique_lock<std::mutex> lock(executionMutex);
+    int32_t dilationWidthFactor = 1, dilationHeightFactor = 1;
     tflite::optimized_ops::Conv(
             inputData, convertShapeToDims(inputShape),
             filterData, convertShapeToDims(filterShape),
             biasData, convertShapeToDims(biasShape),
-            stride_width, stride_height, paddingWidth, paddingHeight,
+            stride_width, stride_height,
+            dilationWidthFactor, dilationHeightFactor,
+            paddingWidth, paddingHeight,
             output_activation_min, output_activation_max,
             outputData, convertShapeToDims(outputShape),
             im2colData, im2colDim);

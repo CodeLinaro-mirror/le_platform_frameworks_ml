@@ -20,9 +20,11 @@
 #include "HalInterfaces.h"
 #include "Utils.h"
 
+#if !defined(_LE_NN_)
 #include <android/hidl/manager/1.0/IServiceManager.h>
 #include <hidl/HidlTransportSupport.h>
 #include <hidl/ServiceManagement.h>
+#endif
 
 #include <algorithm>
 #include <functional>

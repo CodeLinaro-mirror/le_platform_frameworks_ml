@@ -19,9 +19,10 @@
 
 #include "HalInterfaces.h"
 
-#include <android-base/macros.h>
 #include <string>
 #include <tuple>
+
+#include "external/android-base/macros.h"
 
 namespace android {
 namespace nn {

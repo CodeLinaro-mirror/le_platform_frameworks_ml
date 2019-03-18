@@ -23,8 +23,10 @@
 #include "Utils.h"
 #include "ValidateHal.h"
 
-#include <android-base/logging.h>
+#include "external/android-base/logging.h"
+#if !defined(_LE_NN_)
 #include <hidl/LegacySupport.h>
+#endif
 #include <thread>
 
 namespace android {

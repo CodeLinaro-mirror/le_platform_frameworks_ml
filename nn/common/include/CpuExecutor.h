@@ -22,8 +22,9 @@
 #include "Utils.h"
 
 #include <algorithm>
-#include <android-base/macros.h>
 #include <vector>
+
+#include "external/android-base/macros.h"
 
 namespace android {
 namespace nn {
@@ -167,7 +168,9 @@ public:
     ~ScopedOpenmpSettings();
     DISALLOW_COPY_AND_ASSIGN(ScopedOpenmpSettings);
 private:
+#if !defined(_LE_NN_)
     int mBlocktimeInitial;
+#endif
 #if NNAPI_LIMIT_CPU_THREADS
     int mMaxThreadsInitial;
 #endif

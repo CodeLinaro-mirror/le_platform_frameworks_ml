@@ -20,8 +20,9 @@
 #include "HalInterfaces.h"
 #include "NeuralNetworks.h"
 
-#include <android-base/logging.h>
 #include <vector>
+
+#include "external/android-base/logging.h"
 
 namespace android {
 namespace nn {

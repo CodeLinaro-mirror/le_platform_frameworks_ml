@@ -20,6 +20,8 @@
 #include "tensorflow/contrib/lite/kernels/internal/optimized/optimized_ops.h"
 #include "tensorflow/contrib/lite/kernels/internal/reference/reference_ops.h"
 
+#include <mutex>
+
 namespace android {
 namespace nn {
 
