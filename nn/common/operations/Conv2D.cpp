@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The Android Open Source Project
+ * Copyright (C) 2017,2019 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,25 +57,31 @@ static std::mutex executionMutex;
     }                                                                           \
                                                                                 \
     Type* im2colData = nullptr;                                                 \
-    uint64_t im2colByteSize = sizeof(Type);                                     \
-    std::unique_ptr<Type[]> im2colGuard;                                        \
-    for (int i=0; i<4; i++) {                                                   \
-        im2colByteSize *= im2colDim.sizes[i];                                   \
-    }                                                                           \
-    /* http://b/77982879, tflite::optimized_ops::Conv uses int for offsets */   \
-    if (im2colByteSize >= 0x7fffffff)  {                                        \
-        LOG(ERROR) << "Conv size is too large, not enough memory";              \
-        return false;                                                           \
-    }                                                                           \
-    if (im2colByteSize <= kStaticBufferSize) {                                  \
-        im2colData = reinterpret_cast<Type *>(static_scratch_buffer);           \
-    } else {                                                                    \
-        im2colData = new (std::nothrow) Type[im2colByteSize / sizeof(Type)];    \
-        if (im2colData == nullptr) {                                            \
+    const bool need_im2col = stride_width != 1 || stride_height != 1 ||         \
+                           filterWidth != 1 || filterHeight != 1;               \
+    /* Make sure we do not set im2colData if it is not needed. */               \
+    if (need_im2col) {                                                          \
+        uint64_t im2colByteSize = sizeof(Type);                                 \
+        std::unique_ptr<Type[]> im2colGuard;                                    \
+        for (int i=0; i<4; i++) {                                               \
+            im2colByteSize *= im2colDim.sizes[i];                               \
+        }                                                                       \
+        /*http://b/77982879, tflite::optimized_ops::Conv uses int for offsets*/ \
+        if (im2colByteSize >= 0x7fffffff)  {                                    \
             LOG(ERROR) << "Conv size is too large, not enough memory";          \
             return false;                                                       \
         }                                                                       \
-        im2colGuard.reset(im2colData);                                          \
+        if (im2colByteSize <= kStaticBufferSize) {                              \
+            im2colData = reinterpret_cast<Type *>(static_scratch_buffer);       \
+        } else {                                                                \
+            im2colData =                                                        \
+              new (std::nothrow) Type[im2colByteSize / sizeof(Type)];           \
+            if (im2colData == nullptr) {                                        \
+                LOG(ERROR) << "conv size is too large, not enough memory";      \
+                return false;                                                   \
+            }                                                                   \
+            im2colGuard.reset(im2colData);                                      \
+        }                                                                       \
     }
 
 bool convFloat32(const float* inputData, const Shape& inputShape,
