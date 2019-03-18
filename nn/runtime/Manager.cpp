@@ -28,6 +28,8 @@
 
 #include <algorithm>
 #include <functional>
+#include <dirent.h>
+#include <dlfcn.h>
 
 namespace android {
 namespace nn {
@@ -133,6 +135,49 @@ DeviceManager* DeviceManager::get() {
 }
 
 void DeviceManager::findAvailableDevices() {
+#if defined(_LE_NN_)
+    // LE doesn't support HIDL service registration and querying,
+    // so loads the devices as shared libraries.
+    std::string path("/usr/lib/nn/");
+    DIR *dir = opendir(path.c_str());
+    if (nullptr == dir) {
+        LOG(ERROR) << "Failed to open nn drivers folder " << strerror(errno);
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (std::string(entry->d_name).compare(".") == 0 ||
+            std::string(entry->d_name).compare("..") == 0) {
+            continue;
+        }
+        std::string library = path + entry->d_name;
+        try {
+            void *lib_handle;
+            dlerror();
+            lib_handle = dlopen(library.c_str(), RTLD_NOW);
+
+            const char *dlsym_error = dlerror();
+            if (!lib_handle || dlsym_error) {
+                LOG(ERROR) << dlsym_error;
+                continue;
+            }
+            mLibHandles.push_back(lib_handle);
+            sp<V1_0::IDevice> (*NNHalDeviceNewFunc)();
+            NNHalDeviceNewFunc =
+                (sp<V1_0::IDevice> (*)()) dlsym(lib_handle, "NNHalDeviceNew");
+            if (dlsym_error) {
+                LOG(ERROR) << dlsym_error;
+                continue;
+            }
+            sp<V1_0::IDevice> device(NNHalDeviceNewFunc());
+            registerDevice(entry->d_name, device);
+        } catch (const std::exception &e) {
+            LOG(ERROR) << e.what();
+        }
+    }
+    closedir(dir);
+#else
     using ::android::hidl::manager::V1_0::IServiceManager;
     VLOG(MANAGER) << "findAvailableDevices";
 
@@ -153,6 +198,7 @@ void DeviceManager::findAvailableDevices() {
             registerDevice(name.c_str(), device);
         }
     });
+#endif
 }
 
 void DeviceManager::registerDevice(const char* name, const sp<V1_0::IDevice>& device) {
@@ -169,6 +215,21 @@ DeviceManager::DeviceManager() {
     mPartitioning = getProp("debug.nn.partition", kPartitioningDefault);
     mDebugNNCpuOnly = (getProp("debug.nn.cpuonly") != 0);
 #endif  // NN_DEBUGGABLE
+}
+
+DeviceManager::~DeviceManager() {
+    for (auto &device : mDevices) {
+        device = nullptr;
+    }
+    for (auto handle : mLibHandles) {
+        try {
+            if (nullptr != handle) {
+                dlclose(handle);
+            }
+        } catch (const std::exception &e) {
+            LOG(ERROR) << e.what();
+        }
+    }
 }
 
 }  // namespace nn

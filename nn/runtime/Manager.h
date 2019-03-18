@@ -100,6 +100,8 @@ private:
     // Builds the list of available drivers and queries their capabilities.
     DeviceManager();
 
+    ~DeviceManager();
+
     // Adds a device for the manager to use.
     void registerDevice(const char* name, const sp<V1_0::IDevice>& device);
 
@@ -118,6 +120,7 @@ private:
 
     static const uint32_t kPartitioningDefault = kPartitioningWithFallback;
     uint32_t mPartitioning = kPartitioningDefault;
+    std::vector<void *> mLibHandles;
 };
 
 } // namespace nn

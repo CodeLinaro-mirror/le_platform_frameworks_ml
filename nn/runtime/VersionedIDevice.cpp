@@ -26,7 +26,13 @@ namespace nn {
 // HIDL guarantees all V1_1 interfaces inherit from their corresponding V1_0 interfaces.
 VersionedIDevice::VersionedIDevice(sp<V1_0::IDevice> device) :
         mDeviceV1_0(device),
+#if !defined(_LE_NN_)
         mDeviceV1_1(V1_1::IDevice::castFrom(mDeviceV1_0).withDefault(nullptr)) {}
+#else
+        // LE doesn't support HIDL casting.
+        // Dynamically cast to V1_1::IDevice.
+        mDeviceV1_1(dynamic_cast<V1_1::IDevice*>(mDeviceV1_0.get())) {}
+#endif
 
 std::pair<ErrorStatus, Capabilities> VersionedIDevice::getCapabilities() {
     std::pair<ErrorStatus, Capabilities> result;
