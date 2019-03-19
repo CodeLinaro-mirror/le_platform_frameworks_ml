@@ -29,6 +29,7 @@
 #ifdef NNAPI_OPENMP
 #include <omp.h>
 #endif  // NNAPI_OPENMP
+#include <android/hardware_buffer.h>
 #include <sys/mman.h>
 
 namespace android {
@@ -236,18 +237,25 @@ RunTimePoolInfo::RunTimePoolInfo(const hidl_memory& hidlMemory, bool* fail) {
             return;
         }
     } else if (memType == "hardware_buffer_blob") {
-        // CpuExecutor uses BLOB mode hardware_buffer the same way as mmap_fd.
-        size_t size = hidlMemory.size();
-        int fd = hidlMemory.handle()->data[0];
-        // TODO: only map as READ & WRITE when needed.
-        int prot = PROT_READ | PROT_WRITE;
-        size_t offset = 0;
-        buffer = static_cast<uint8_t*>(mmap(nullptr, size, prot, MAP_SHARED, fd, offset));
-        if (buffer == MAP_FAILED) {
-            LOG(ERROR) << "RunTimePoolInfo::set(): Can't mmap the file descriptor.";
+        auto handle = hidlMemory.handle();
+        auto format = AHARDWAREBUFFER_FORMAT_BLOB;
+        auto usage = AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN;
+        const uint32_t width = hidlMemory.size();
+        const uint32_t height = 1;  // height is always 1 for BLOB mode AHardwareBuffer.
+        const uint32_t layers = 1;  // layers is always 1 for BLOB mode AHardwareBuffer.
+        const uint32_t stride = hidlMemory.size();
+        mGraphicBuffer = new GraphicBuffer(handle, GraphicBuffer::HandleWrapMethod::CLONE_HANDLE,
+                                           width, height, format, layers, usage, stride);
+        void* gBuffer = nullptr;
+        int32_t outBytesPerPixel, outBytesPerStride;
+        status_t status =
+                mGraphicBuffer->lock(usage, &gBuffer, &outBytesPerPixel, &outBytesPerStride);
+        if (status != NO_ERROR) {
+            LOG(ERROR) << "RunTimePoolInfo Can't lock the AHardwareBuffer.";
             if (fail) *fail = true;
             return;
         }
+        buffer = static_cast<uint8_t*>(gBuffer);
     } else {
         LOG(ERROR) << "RunTimePoolInfo::set(): unsupported hidl_memory type";
         if (fail) *fail = true;
@@ -291,11 +299,14 @@ void RunTimePoolInfo::release() {
     auto memType = mHidlMemory.name();
     if (memType == "ashmem") {
         // nothing to do
-    } else if (memType == "mmap_fd" || memType == "hardware_buffer_blob") {
+    } else if (memType == "mmap_fd") {
         size_t size = mHidlMemory.size();
         if (munmap(mBuffer, size)) {
             LOG(ERROR) << "RunTimePoolInfo::release(): Can't munmap";
         }
+    } else if (memType == "hardware_buffer_blob") {
+        mGraphicBuffer->unlock();
+        mGraphicBuffer = nullptr;
     } else if (memType == "") {
         // Represents a POINTER argument; nothing to do
     } else {
@@ -700,28 +711,6 @@ int CpuExecutor::executeOperation(const Operation& operation) {
             } else if (input.type == OperandType::TENSOR_FLOAT16) {
                 success = floorFloat16(reinterpret_cast<const _Float16*>(input.buffer),
                                        reinterpret_cast<_Float16*>(output.buffer), outShape);
-            }
-        } break;
-        case OperationType::DEQUANTIZE: {
-            if (!allParametersPresent(1, 1)) {
-                return ANEURALNETWORKS_BAD_DATA;
-            }
-            const RunTimeOperandInfo& input = mOperands[ins[0]];
-            RunTimeOperandInfo& output = mOperands[outs[0]];
-            Shape outShape = output.shape();
-
-            if (!dequantizePrepare(input.shape(), &outShape) ||
-                !setInfoAndAllocateIfNeeded(&output, outShape, &result)) {
-                break;
-            }
-            if (output.type == OperandType::TENSOR_FLOAT32) {
-                success = dequantizeQuant8ToFloat32(reinterpret_cast<const uint8_t*>(input.buffer),
-                                                    reinterpret_cast<float*>(output.buffer),
-                                                    input.shape());
-            } else if (output.type == OperandType::TENSOR_FLOAT16) {
-                success = dequantizeQuant8ToFloat16(reinterpret_cast<const uint8_t*>(input.buffer),
-                                                    reinterpret_cast<_Float16*>(output.buffer),
-                                                    input.shape());
             }
         } break;
         case OperationType::QUANTIZE: {
@@ -1627,52 +1616,6 @@ int CpuExecutor::executeOperation(const Operation& operation) {
                                      getNumberOfElements(targetShape.shape()), &outShape) &&
                       setInfoAndAllocateIfNeeded(&output, outShape, &result) &&
                       copyData(input.buffer, input.shape(), output.buffer, outShape);
-        } break;
-        case OperationType::RESIZE_BILINEAR: {
-            const size_t inCount = ins.size();
-            if ((inCount != 4 && inCount != 3) || !allParametersPresent(inCount, 1)) {
-                return ANEURALNETWORKS_BAD_DATA;
-            }
-            const RunTimeOperandInfo& input = mOperands[ins[0]];
-            int32_t width = getScalarData<int32_t>(mOperands[ins[1]]);
-            int32_t height = getScalarData<int32_t>(mOperands[ins[2]]);
-            bool data_layout = inCount == 4 ? getScalarData<bool>(mOperands[ins[3]]) : 0;
-
-            RunTimeOperandInfo& output = mOperands[outs[0]];
-            Shape outShape = output.shape();
-
-            RunTimeOperandInfo input_tmp, output_tmp;
-            std::unique_ptr<uint8_t[]> input_tmp_guard, output_tmp_guard;
-            if (!convertToNhwc(input_tmp, input, input_tmp_guard, data_layout)) {
-                success = false;
-                break;
-            }
-            output_tmp.lifetime = OperandLifeTime::TEMPORARY_VARIABLE;
-            output_tmp.buffer = data_layout ? nullptr : output.buffer;
-            output_tmp.length = data_layout ? 0 : output.length;
-
-            if (!resizeBilinearPrepare(input_tmp.shape(), width, height, &outShape) ||
-                !setInfoAndAllocateIfNeeded(&output_tmp, outShape, &result)) {
-                if (!data_layout) output.dimensions = output_tmp.dimensions;
-                break;
-            }
-            if (input_tmp.type == OperandType::TENSOR_FLOAT32) {
-                success = resizeBilinearFloat32(
-                        reinterpret_cast<const float*>(input_tmp.buffer), input_tmp.shape(),
-                        reinterpret_cast<float*>(output_tmp.buffer), outShape);
-            } else if (input_tmp.type == OperandType::TENSOR_FLOAT16) {
-                success = resizeBilinearFloat16(
-                        reinterpret_cast<const _Float16*>(input_tmp.buffer), input_tmp.shape(),
-                        reinterpret_cast<_Float16*>(output_tmp.buffer), outShape);
-            }
-
-            if (data_layout) {
-                output_tmp_guard.reset(output_tmp.buffer);
-            }
-            if (!success || !convertFromNhwc(output, output_tmp, data_layout, &result)) {
-                success = false;
-                break;
-            }
         } break;
         case OperationType::DEPTH_TO_SPACE: {
             const size_t inCount = ins.size();
@@ -2699,7 +2642,7 @@ int CpuExecutor::executeOperation(const Operation& operation) {
         } break;
         default: {
             const OperationRegistration* operationRegistration =
-                    OperationResolver::get()->findOperation(operation.type);
+                    mOperationResolver->findOperation(operation.type);
             if (operationRegistration == nullptr) {
                 LOG(ERROR) << getOperationName(operation.type) << " not registered";
             } else if (operationRegistration->prepare == nullptr ||
