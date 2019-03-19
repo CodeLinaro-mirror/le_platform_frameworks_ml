@@ -18,11 +18,13 @@
 #define ANDROID_ML_NN_COMMON_CPU_EXECUTOR_H
 
 #include "HalInterfaces.h"
+#include "OperationResolver.h"
 #include "OperationsUtils.h"
 #include "Utils.h"
 
-#include <algorithm>
 #include <android-base/macros.h>
+#include <ui/GraphicBuffer.h>
+#include <algorithm>
 #include <vector>
 
 namespace android {
@@ -108,9 +110,10 @@ private:
     void release();
     void moveFrom(RunTimePoolInfo&& other);
 
-    hidl_memory mHidlMemory;     // always used
-    uint8_t* mBuffer = nullptr;  // always used
-    sp<IMemory> mMemory;         // only used when hidlMemory.name() == "ashmem"
+    hidl_memory mHidlMemory;           // always used
+    uint8_t* mBuffer = nullptr;        // always used
+    sp<IMemory> mMemory;               // only used when hidlMemory.name() == "ashmem"
+    sp<GraphicBuffer> mGraphicBuffer;  // only used when hidlMemory.name() == "hardware_buffer_blob"
 };
 
 bool setRunTimePoolInfosFromHidlMemories(std::vector<RunTimePoolInfo>* poolInfos,
@@ -118,7 +121,20 @@ bool setRunTimePoolInfosFromHidlMemories(std::vector<RunTimePoolInfo>* poolInfos
 
 // This class is used to execute a model on the CPU.
 class CpuExecutor {
-public:
+   public:
+    // This constructor allows clients of CpuExecutor to provide custom CPU
+    // operation implementations. It is used by a sample driver to test
+    // extension support.
+    //
+    // Note that it is not possible to provide custom CPU implementations for
+    // non-OperationResolver operations (b/124041202).
+    //
+    // The operation resolver must outlive the executor.
+    explicit CpuExecutor(const IOperationResolver* operationResolver)
+        : mOperationResolver(operationResolver) {}
+
+    CpuExecutor() : CpuExecutor(BuiltinOperationResolver::get()) {}
+
     // Executes the model. The results will be stored at the locations
     // specified in the constructor.
     // The model must outlive the executor.  We prevent it from being modified
@@ -132,7 +148,7 @@ public:
         return mOutputShapes;
     }
 
-private:
+   private:
     bool initializeRunTimeInfo(const std::vector<RunTimePoolInfo>& modelPoolInfos,
                                const std::vector<RunTimePoolInfo>& requestPoolInfos);
     // Runs one operation of the graph.
@@ -151,7 +167,7 @@ private:
     const Request* mRequest = nullptr;
 
     // We're copying the list of all the dimensions from the model, as
-    // these may be modified when we run the operatins.  Since we're
+    // these may be modified when we run the operations.  Since we're
     // making a full copy, the indexes used in the operand description
     // stay valid.
     //    std::vector<uint32_t> mDimensions;
@@ -163,6 +179,8 @@ private:
 
     // Whether execution is finished and mOutputShapes is ready
     bool mFinished = false;
+
+    const IOperationResolver* mOperationResolver;
 };
 
 // Class for setting reasonable OpenMP threading settings. (OpenMP is used by
