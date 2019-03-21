@@ -61,9 +61,6 @@ bool mulQuant8(const uint8_t* in1, const Shape& shape1, const uint8_t* in2, cons
 bool floorFloat16(const _Float16* inputData, _Float16* outputData, const Shape& shape);
 bool floorFloat32(const float* inputData, float* outputData, const Shape& shape);
 
-bool dequantizeQuant8ToFloat16(const uint8_t* inputData, _Float16* outputData, const Shape& shape);
-bool dequantizeQuant8ToFloat32(const uint8_t* inputData, float* outputData, const Shape& shape);
-
 bool quantizeFloat32ToQuant8(const float* inputData, uint8_t* outputData, const Shape& outputShape);
 bool quantizeFloat16ToQuant8(const _Float16* inputData, uint8_t* outputData,
                              const Shape& outputShape);
@@ -235,11 +232,6 @@ bool localResponseNormFloat32(const float* inputData, const Shape& inputShape, i
 
 bool copyData(const void* inputData, const Shape& inputShape, void* outputData,
               const Shape& outputShape);
-
-bool resizeBilinearFloat16(const _Float16* inputData, const Shape& inputShape, _Float16* outputData,
-                           const Shape& outputShape);
-bool resizeBilinearFloat32(const float* inputData, const Shape& inputShape, float* outputData,
-                           const Shape& outputShape);
 
 template <typename T>
 bool depthToSpaceGeneric(const T* inputData, const Shape& inputShape, int32_t blockSize,
