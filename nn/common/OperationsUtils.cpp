@@ -95,9 +95,7 @@ bool combineDimensions(const std::vector<uint32_t>& lhs, const std::vector<uint3
         *combined = rhs;
         return true;
     }
-    if (lhs.size() != rhs.size()) {
-        return false;
-    }
+    NN_RET_CHECK_EQ(lhs.size(), rhs.size()) << "incompatible ranks";
     combined->resize(lhs.size());
     for (uint32_t i = 0; i < lhs.size(); i++) {
         if (lhs[i] == 0) {
@@ -108,9 +106,7 @@ bool combineDimensions(const std::vector<uint32_t>& lhs, const std::vector<uint3
             (*combined)[i] = lhs[i];
             continue;
         }
-        if (lhs[i] != rhs[i]) {
-            return false;
-        }
+        NN_RET_CHECK_EQ(lhs[i], rhs[i]) << "incompatible dimension: " << i;
         (*combined)[i] = lhs[i];
     }
     return true;
@@ -318,21 +314,6 @@ bool floorPrepare(const Shape& input, Shape* output) {
     return SetShape(input, output);
 }
 
-bool dequantizePrepare(const Shape& input, Shape* output) {
-    if (input.type != OperandType::TENSOR_QUANT8_ASYMM ||
-        (output->type != OperandType::TENSOR_FLOAT16 &&
-         output->type != OperandType::TENSOR_FLOAT32)) {
-        LOG(ERROR) << "bad input / output operand type.";
-        return false;
-    }
-    if (input.dimensions.size() != output->dimensions.size()) {
-        LOG(ERROR) << "input and output tensors don't have the same rank.";
-        return false;
-    }
-    output->dimensions = input.dimensions;
-    return true;
-}
-
 bool quantizePrepare(const Shape& input, Shape* output) {
     if (input.dimensions.size() != output->dimensions.size()) {
         LOG(ERROR) << "QUANTIZE input and output tensors must have the same rank";
@@ -369,6 +350,11 @@ bool convPrepare(const Shape& input, const Shape& filter, const Shape& bias, int
     uint32_t filterWidth  = getSizeOfDimension(filter, 2);
     uint32_t filterHeight = getSizeOfDimension(filter, 1);
     uint32_t batches      = getSizeOfDimension(input, 0);
+
+    NN_RET_CHECK_GT(filterWidth, padding_left);
+    NN_RET_CHECK_GT(filterWidth, padding_right);
+    NN_RET_CHECK_GT(filterHeight, padding_top);
+    NN_RET_CHECK_GT(filterHeight, padding_bottom);
 
     uint32_t outWidth = computeOutSize(width, filterWidth, stride_width, dilation_width_factor,
                                        padding_left, padding_right);
@@ -410,6 +396,10 @@ bool depthwiseConvPrepare(const Shape& input, const Shape& filter, const Shape& 
     uint32_t batches      = getSizeOfDimension(input, 0);
 
     NN_OPS_CHECK(depth_multiplier * channels_in == channels_out);
+    NN_RET_CHECK_GT(filterWidth, padding_left);
+    NN_RET_CHECK_GT(filterWidth, padding_right);
+    NN_RET_CHECK_GT(filterHeight, padding_top);
+    NN_RET_CHECK_GT(filterHeight, padding_bottom);
 
     uint32_t outWidth = computeOutSize(width, filterWidth, stride_width, dilation_width_factor,
                                        padding_left, padding_right);
@@ -433,6 +423,11 @@ bool genericPoolingPrepare(const Shape& input,
     uint32_t width        = getSizeOfDimension(input, 2);
     uint32_t height       = getSizeOfDimension(input, 1);
     uint32_t channels_out = getSizeOfDimension(input, 3);
+
+    NN_RET_CHECK_GT(filter_width, padding_left);
+    NN_RET_CHECK_GT(filter_width, padding_right);
+    NN_RET_CHECK_GT(filter_height, padding_top);
+    NN_RET_CHECK_GT(filter_height, padding_bottom);
 
     uint32_t outWidth = computeOutSize(width, filter_width, stride_width,
                                        padding_left, padding_right);
@@ -549,20 +544,6 @@ bool reshapePrepare(const Shape& input,
     output->dimensions = outDims;
     output->offset = input.offset;
     output->scale = input.scale;
-
-    return true;
-}
-
-bool resizeBilinearPrepare(const Shape& input,
-                           int32_t width,
-                           int32_t height,
-                           Shape* output) {
-    NN_OPS_CHECK(getNumberOfDimensions(input) == 4);
-    uint32_t batches  = getSizeOfDimension(input, 0);
-    uint32_t channels = getSizeOfDimension(input, 3);
-
-    output->type = input.type;
-    output->dimensions = {batches, (uint32_t)height, (uint32_t)width, channels};
 
     return true;
 }
@@ -1057,6 +1038,11 @@ bool groupedConvPrepare(const Shape& input, const Shape& filter, const Shape& bi
     uint32_t filterHeight = getSizeOfDimension(filter, 1);
     uint32_t batches = getSizeOfDimension(input, 0);
 
+    NN_RET_CHECK_GT(filterWidth, padding_left);
+    NN_RET_CHECK_GT(filterWidth, padding_right);
+    NN_RET_CHECK_GT(filterHeight, padding_top);
+    NN_RET_CHECK_GT(filterHeight, padding_bottom);
+
     uint32_t outWidth =
             computeOutSize(width, filterWidth, stride_width, padding_left, padding_right);
     uint32_t outHeight =
@@ -1098,6 +1084,9 @@ bool transposeConvPrepare(const Shape& input, const Shape& filter, const Shape& 
                                                     padding_right);
     uint32_t outHeight = computeOutSizeTransposeConv(height, filterHeight, stride_height,
                                                      padding_top, padding_bottom);
+
+    NN_RET_CHECK_GT(outWidth, 0);
+    NN_RET_CHECK_GT(outHeight, 0);
 
     output->type = input.type;
     output->dimensions = {batches, outHeight, outWidth, channels_out};

@@ -52,7 +52,6 @@ cc_library {
         android: {
             version_script: "libneuralnetworks.map.txt",
             shared_libs: [
-                "libartbase",
                 "libbase",
                 "libcutils",
                 "libhidlbase",
@@ -60,6 +59,7 @@ cc_library {
                 "libhidlmemory",
                 "liblog",
                 "libnativewindow",
+                "libui",
                 "libutils",
                 "android.hardware.neuralnetworks@1.0",
                 "android.hardware.neuralnetworks@1.1",
