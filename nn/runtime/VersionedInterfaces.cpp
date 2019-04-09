@@ -22,19 +22,118 @@
 #include "Utils.h"
 
 #include <android-base/logging.h>
-
-using ::android::hardware::neuralnetworks::V1_2::implementation::ExecutionCallback;
-using HidlToken = hidl_array<uint8_t, static_cast<uint32_t>(Constant::BYTE_SIZE_OF_CACHE_TOKEN)>;
+#include <android-base/scopeguard.h>
+#include <android-base/thread_annotations.h>
+#include <functional>
 
 namespace android {
 namespace nn {
 
+// anonymous namespace
+namespace {
+
+using HidlToken = hidl_array<uint8_t, static_cast<uint32_t>(Constant::BYTE_SIZE_OF_CACHE_TOKEN)>;
+
 const Timing kBadTiming = {.timeOnDevice = UINT64_MAX, .timeInDriver = UINT64_MAX};
 
+void sendFailureMessage(const sp<IPreparedModelCallback>& cb) {
+    cb->notify(ErrorStatus::GENERAL_FAILURE, nullptr);
+}
+
+void sendFailureMessage(const sp<IExecutionCallback>& cb) {
+    cb->notify(ErrorStatus::GENERAL_FAILURE);
+}
+
+// This class is thread safe
+template <typename ICallback>
+class DeathHandler : public hardware::hidl_death_recipient {
+   public:
+    void serviceDied(uint64_t /*cookie*/, const wp<hidl::base::V1_0::IBase>& /*who*/) override {
+        LOG(ERROR) << "DeathHandler::serviceDied -- service unexpectedly died!";
+        std::lock_guard<std::mutex> hold(mMutex);
+        std::for_each(mCallbacks.begin(), mCallbacks.end(),
+                      [](const auto& cb) { sendFailureMessage(cb); });
+    }
+
+    [[nodiscard]] base::ScopeGuard<std::function<void()>> protectCallback(
+            const sp<ICallback>& callback) {
+        registerCallback(callback);
+        return ::android::base::make_scope_guard(
+                [this, callback] { unregisterCallback(callback); });
+    }
+
+    private : void registerCallback(const sp<ICallback>& callback) {
+        std::lock_guard<std::mutex> hold(mMutex);
+        mCallbacks.push_back(callback);
+    }
+
+    void unregisterCallback(const sp<ICallback>& callback) {
+        std::lock_guard<std::mutex> hold(mMutex);
+        mCallbacks.erase(std::remove(mCallbacks.begin(), mCallbacks.end(), callback),
+                         mCallbacks.end());
+    }
+
+    std::mutex mMutex;
+    std::vector<sp<ICallback>> mCallbacks GUARDED_BY(mMutex);
+};
+
+}  // anonymous namespace
+
+class IDeviceDeathHandler : public DeathHandler<IPreparedModelCallback> {};
+class IPreparedModelDeathHandler : public DeathHandler<IExecutionCallback> {};
+
+std::shared_ptr<VersionedIPreparedModel> VersionedIPreparedModel::create(
+        sp<V1_0::IPreparedModel> preparedModel) {
+    // verify input
+    if (!preparedModel) {
+        LOG(ERROR) << "VersionedIPreparedModel::create -- passed invalid preparedModel object.";
+        return nullptr;
+    }
+
+    // create death handler object
+    sp<IPreparedModelDeathHandler> deathHandler = new (std::nothrow) IPreparedModelDeathHandler();
+    if (!deathHandler) {
+        LOG(ERROR) << "VersionedIDevice::create -- Failed to create IPreparedModelDeathHandler.";
+        return nullptr;
+    }
+
+    // linkToDeath registers a callback that will be invoked on service death to
+    // proactively handle service crashes. If the linkToDeath call fails,
+    // asynchronous calls are susceptible to hangs if the service crashes before
+    // providing the response.
+    const Return<bool> ret = preparedModel->linkToDeath(deathHandler, 0);
+    if (!ret.isOk() || ret != true) {
+        LOG(ERROR) << "VersionedIDevice::create -- Failed to register a death recipient for the "
+                      "IPreparedModel object.";
+        return nullptr;
+    }
+
+    // return a valid VersionedIPreparedModel object
+    return std::make_shared<VersionedIPreparedModel>(std::move(preparedModel),
+                                                     std::move(deathHandler));
+}
+
+VersionedIPreparedModel::VersionedIPreparedModel(sp<V1_0::IPreparedModel> preparedModel,
+                                                 sp<IPreparedModelDeathHandler> deathHandler)
+    : mPreparedModelV1_0(std::move(preparedModel)),
+      mPreparedModelV1_2(V1_2::IPreparedModel::castFrom(mPreparedModelV1_0).withDefault(nullptr)),
+      mDeathHandler(std::move(deathHandler)) {}
+
+VersionedIPreparedModel::~VersionedIPreparedModel() {
+    // It is safe to ignore any errors resulting from this unlinkToDeath call
+    // because the VersionedIPreparedModel object is already being destroyed and
+    // its underlying IPreparedModel object is no longer being used by the NN
+    // runtime.
+    mPreparedModelV1_0->unlinkToDeath(mDeathHandler).isOk();
+}
+
 ErrorStatus VersionedIPreparedModel::execute(const Request& request, MeasureTiming measure,
-                                             const sp<IExecutionCallback>& callback) {
+                                             const sp<ExecutionCallback>& callback) {
+    const auto scoped = mDeathHandler->protectCallback(callback);
+
     if (mPreparedModelV1_2 != nullptr) {
         Return<ErrorStatus> ret = mPreparedModelV1_2->execute_1_2(request, measure, callback);
+        callback->wait();
         if (!ret.isOk()) {
             LOG(ERROR) << "execute_1_2 failure: " << ret.description();
             return ErrorStatus::GENERAL_FAILURE;
@@ -42,6 +141,7 @@ ErrorStatus VersionedIPreparedModel::execute(const Request& request, MeasureTimi
         return static_cast<ErrorStatus>(ret);
     } else if (mPreparedModelV1_0 != nullptr) {
         Return<ErrorStatus> ret = mPreparedModelV1_0->execute(request, callback);
+        callback->wait();
         if (!ret.isOk()) {
             LOG(ERROR) << "execute failure: " << ret.description();
             return ErrorStatus::GENERAL_FAILURE;
@@ -91,25 +191,6 @@ std::unique_ptr<ExecutionBurstController> VersionedIPreparedModel::configureExec
     }
 }
 
-ErrorStatus VersionedIPreparedModel::saveToCache(const hidl_handle& cache1,
-                                                 const hidl_handle& cache2,
-                                                 const HidlToken& token) {
-    if (mPreparedModelV1_2 != nullptr) {
-        Return<ErrorStatus> ret = mPreparedModelV1_2->saveToCache(cache1, cache2, token);
-        if (!ret.isOk()) {
-            LOG(ERROR) << "saveToCache failure: " << ret.description();
-            return ErrorStatus::GENERAL_FAILURE;
-        }
-        return static_cast<ErrorStatus>(ret);
-    } else if (mPreparedModelV1_0 != nullptr) {
-        LOG(ERROR) << "saveToCache called on V1_0 preparedModel";
-        return ErrorStatus::GENERAL_FAILURE;
-    } else {
-        LOG(ERROR) << "saveToCache called with no preparedModel";
-        return ErrorStatus::GENERAL_FAILURE;
-    }
-}
-
 bool VersionedIPreparedModel::operator==(nullptr_t) const {
     return mPreparedModelV1_0 == nullptr;
 }
@@ -118,20 +199,68 @@ bool VersionedIPreparedModel::operator!=(nullptr_t) const {
     return mPreparedModelV1_0 != nullptr;
 }
 
+std::shared_ptr<VersionedIDevice> VersionedIDevice::create(sp<V1_0::IDevice> device) {
+    // verify input
+    if (!device) {
+        LOG(ERROR) << "VersionedIDevice::create -- passed invalid device object.";
+        return nullptr;
+    }
+
+    // create death handler object
+    sp<IDeviceDeathHandler> deathHandler = new (std::nothrow) IDeviceDeathHandler();
+    if (!deathHandler) {
+        LOG(ERROR) << "VersionedIDevice::create -- Failed to create IDeviceDeathHandler.";
+        return nullptr;
+    }
+
+    // linkToDeath registers a callback that will be invoked on service death to
+    // proactively handle service crashes. If the linkToDeath call fails,
+    // asynchronous calls are susceptible to hangs if the service crashes before
+    // providing the response.
+    const Return<bool> ret = device->linkToDeath(deathHandler, 0);
+    if (!ret.isOk() || ret != true) {
+        LOG(ERROR) << "VersionedIDevice::create -- Failed to register a death recipient for the "
+                      "IDevice object.";
+        return nullptr;
+    }
+
+    // return a valid VersionedIDevice object
+    return std::make_shared<VersionedIDevice>(std::move(device), std::move(deathHandler));
+}
+
 // HIDL guarantees all V1_1 interfaces inherit from their corresponding V1_0 interfaces.
-VersionedIDevice::VersionedIDevice(sp<V1_0::IDevice> device)
-    : mDeviceV1_0(device),
+VersionedIDevice::VersionedIDevice(sp<V1_0::IDevice> device, sp<IDeviceDeathHandler> deathHandler)
+    : mDeviceV1_0(std::move(device)),
       mDeviceV1_1(V1_1::IDevice::castFrom(mDeviceV1_0).withDefault(nullptr)),
-      mDeviceV1_2(V1_2::IDevice::castFrom(mDeviceV1_0).withDefault(nullptr)) {}
+      mDeviceV1_2(V1_2::IDevice::castFrom(mDeviceV1_0).withDefault(nullptr)),
+      mDeathHandler(std::move(deathHandler)) {}
+
+VersionedIDevice::~VersionedIDevice() {
+    // It is safe to ignore any errors resulting from this unlinkToDeath call
+    // because the VersionedIDevice object is already being destroyed and its
+    // underlying IDevice object is no longer being used by the NN runtime.
+    mDeviceV1_0->unlinkToDeath(mDeathHandler).isOk();
+}
 
 std::pair<ErrorStatus, Capabilities> VersionedIDevice::getCapabilities() {
     std::pair<ErrorStatus, Capabilities> result;
 
-    if (mDeviceV1_1 != nullptr) {
-        NNTRACE_FULL(NNTRACE_LAYER_IPC, NNTRACE_PHASE_INITIALIZATION, "getCapabilities_1_1");
-        Return<void> ret = mDeviceV1_1->getCapabilities_1_1(
+    if (mDeviceV1_2 != nullptr) {
+        NNTRACE_FULL(NNTRACE_LAYER_IPC, NNTRACE_PHASE_INITIALIZATION, "getCapabilities_1_2");
+        Return<void> ret = mDeviceV1_2->getCapabilities_1_2(
                 [&result](ErrorStatus error, const Capabilities& capabilities) {
                     result = std::make_pair(error, capabilities);
+                });
+        if (!ret.isOk()) {
+            LOG(ERROR) << "getCapabilities_1_2 failure: " << ret.description();
+            return {ErrorStatus::GENERAL_FAILURE, {}};
+        }
+    } else if (mDeviceV1_1 != nullptr) {
+        NNTRACE_FULL(NNTRACE_LAYER_IPC, NNTRACE_PHASE_INITIALIZATION, "getCapabilities_1_1");
+        Return<void> ret = mDeviceV1_1->getCapabilities_1_1(
+                [&result](ErrorStatus error, const V1_1::Capabilities& capabilities) {
+                    // Time taken to convert capabilities is trivial
+                    result = std::make_pair(error, convertToV1_2(capabilities));
                 });
         if (!ret.isOk()) {
             LOG(ERROR) << "getCapabilities_1_1 failure: " << ret.description();
@@ -142,7 +271,7 @@ std::pair<ErrorStatus, Capabilities> VersionedIDevice::getCapabilities() {
         Return<void> ret = mDeviceV1_0->getCapabilities(
                 [&result](ErrorStatus error, const V1_0::Capabilities& capabilities) {
                     // Time taken to convert capabilities is trivial
-                    result = std::make_pair(error, convertToV1_1(capabilities));
+                    result = std::make_pair(error, convertToV1_2(capabilities));
                 });
         if (!ret.isOk()) {
             LOG(ERROR) << "getCapabilities failure: " << ret.description();
@@ -224,9 +353,16 @@ std::pair<ErrorStatus, hidl_vec<bool>> VersionedIDevice::getSupportedOperations(
 }
 
 ErrorStatus VersionedIDevice::prepareModel(const Model& model, ExecutionPreference preference,
-                                           const sp<IPreparedModelCallback>& callback) {
+                                           const hidl_vec<hidl_handle>& modelCache,
+                                           const hidl_vec<hidl_handle>& dataCache,
+                                           const HidlToken& token,
+                                           const sp<PreparedModelCallback>& callback) {
+    const auto scoped = mDeathHandler->protectCallback(callback);
+
     if (mDeviceV1_2 != nullptr) {
-        Return<ErrorStatus> ret = mDeviceV1_2->prepareModel_1_2(model, preference, callback);
+        Return<ErrorStatus> ret = mDeviceV1_2->prepareModel_1_2(model, preference, modelCache,
+                                                                dataCache, token, callback);
+        callback->wait();
         if (!ret.isOk()) {
             LOG(ERROR) << "prepareModel_1_2 failure: " << ret.description();
             return ErrorStatus::GENERAL_FAILURE;
@@ -248,6 +384,7 @@ ErrorStatus VersionedIDevice::prepareModel(const Model& model, ExecutionPreferen
         }
         if (compliant) {
             Return<ErrorStatus> ret = mDeviceV1_1->prepareModel_1_1(model11, preference, callback);
+            callback->wait();
             if (!ret.isOk()) {
                 LOG(ERROR) << "prepareModel_1_1 failure: " << ret.description();
                 return ErrorStatus::GENERAL_FAILURE;
@@ -275,6 +412,7 @@ ErrorStatus VersionedIDevice::prepareModel(const Model& model, ExecutionPreferen
         }
         if (compliant) {
             Return<ErrorStatus> ret = mDeviceV1_0->prepareModel(model10, callback);
+            callback->wait();
             if (!ret.isOk()) {
                 LOG(ERROR) << "prepareModel failure: " << ret.description();
                 return ErrorStatus::GENERAL_FAILURE;
@@ -292,13 +430,16 @@ ErrorStatus VersionedIDevice::prepareModel(const Model& model, ExecutionPreferen
     }
 }
 
-ErrorStatus VersionedIDevice::prepareModelFromCache(const hidl_handle& cache1,
-                                                    const hidl_handle& cache2,
+ErrorStatus VersionedIDevice::prepareModelFromCache(const hidl_vec<hidl_handle>& modelCache,
+                                                    const hidl_vec<hidl_handle>& dataCache,
                                                     const HidlToken& token,
-                                                    const sp<IPreparedModelCallback>& callback) {
+                                                    const sp<PreparedModelCallback>& callback) {
+    const auto scoped = mDeathHandler->protectCallback(callback);
+
     if (mDeviceV1_2 != nullptr) {
         Return<ErrorStatus> ret =
-                mDeviceV1_2->prepareModelFromCache(cache1, cache2, token, callback);
+                mDeviceV1_2->prepareModelFromCache(modelCache, dataCache, token, callback);
+        callback->wait();
         if (!ret.isOk()) {
             LOG(ERROR) << "prepareModelFromCache failure: " << ret.description();
             return ErrorStatus::GENERAL_FAILURE;
@@ -380,24 +521,24 @@ std::pair<ErrorStatus, hidl_string> VersionedIDevice::getVersionString() {
     }
 }
 
-std::pair<ErrorStatus, bool> VersionedIDevice::isCachingSupported() {
-    std::pair<ErrorStatus, bool> result;
+std::tuple<ErrorStatus, uint32_t, uint32_t> VersionedIDevice::getNumberOfCacheFilesNeeded() {
+    std::tuple<ErrorStatus, uint32_t, uint32_t> result;
 
     if (mDeviceV1_2 != nullptr) {
-        Return<void> ret =
-                mDeviceV1_2->isCachingSupported([&result](ErrorStatus error, bool supported) {
-                    result = std::make_pair(error, supported);
+        Return<void> ret = mDeviceV1_2->getNumberOfCacheFilesNeeded(
+                [&result](ErrorStatus error, uint32_t numModelCache, uint32_t numDataCache) {
+                    result = {error, numModelCache, numDataCache};
                 });
         if (!ret.isOk()) {
-            LOG(ERROR) << "isCachingSupported failure: " << ret.description();
-            return {ErrorStatus::GENERAL_FAILURE, false};
+            LOG(ERROR) << "getNumberOfCacheFilesNeeded failure: " << ret.description();
+            return {ErrorStatus::GENERAL_FAILURE, 0, 0};
         }
         return result;
     } else if (mDeviceV1_1 != nullptr || mDeviceV1_0 != nullptr) {
-        return {ErrorStatus::NONE, false};
+        return {ErrorStatus::NONE, 0, 0};
     } else {
-        LOG(ERROR) << "Could not handle isCachingSupported";
-        return {ErrorStatus::GENERAL_FAILURE, false};
+        LOG(ERROR) << "Could not handle getNumberOfCacheFilesNeeded";
+        return {ErrorStatus::GENERAL_FAILURE, 0, 0};
     }
 }
 

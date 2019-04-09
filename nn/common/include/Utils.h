@@ -154,6 +154,22 @@ class FalseyErrorStream {
     std::ostringstream mBuffer;
 };
 
+// Return a vector with one entry for each non extension OperandType, set to the
+// specified PerformanceInfo value.  The vector will be sorted by OperandType.
+hidl_vec<Capabilities::OperandPerformance> nonExtensionOperandPerformance(PerformanceInfo perf);
+
+// Update the vector entry corresponding to the specified OperandType with the
+// specified PerformanceInfo value.  The vector must already have an entry for
+// that OperandType, and must be sorted by OperandType.
+void update(hidl_vec<Capabilities::OperandPerformance>* operandPerformance, OperandType type,
+            PerformanceInfo perf);
+
+// Look for a vector entry corresponding to the specified OperandType.  If
+// found, return the associated PerformanceInfo.  If not, return a pessimistic
+// PerformanceInfo (FLT_MAX).  The vector must be sorted by OperandType.
+PerformanceInfo lookup(const hidl_vec<Capabilities::OperandPerformance>& operandPerformance,
+                       OperandType type);
+
 // Returns true if an operand type is an extension type.
 bool isExtensionOperandType(OperandType type);
 
@@ -161,15 +177,31 @@ bool isExtensionOperandType(OperandType type);
 bool isExtensionOperationType(OperationType type);
 
 // Returns the amount of space needed to store a value of the specified
-// dimensions and type. For a tensor with at least one
+// dimensions and type. For a tensor with unspecified rank or at least one
 // unspecified dimension, returns zero.
-uint32_t sizeOfData(OperandType type, const std::vector<uint32_t>& dimensions);
+//
+// Aborts if the specified type is an extension type.
+//
+// See also TypeManager::getSizeOfData(OperandType, const std::vector<uint32_t>&).
+uint32_t nonExtensionOperandSizeOfData(OperandType type, const std::vector<uint32_t>& dimensions);
 
 // Returns the amount of space needed to store a value of the dimensions and
-// type of this operand.
-inline uint32_t sizeOfData(const Operand& operand) {
-    return sizeOfData(operand.type, operand.dimensions);
+// type of this operand. For a tensor with unspecified rank or at least one
+// unspecified dimension, returns zero.
+//
+// Aborts if the specified type is an extension type.
+//
+// See also TypeManager::getSizeOfData(const Operand&).
+inline uint32_t nonExtensionOperandSizeOfData(const Operand& operand) {
+    return nonExtensionOperandSizeOfData(operand.type, operand.dimensions);
 }
+
+// Returns true if a non-extension operand type is a scalar type.
+//
+// Aborts if the specified type is an extension type.
+//
+// See also TypeManager::isTensorType(OperandType).
+bool nonExtensionOperandTypeIsScalar(int type);
 
 // Returns the name of the operation type in ASCII.
 std::string getOperationName(OperationType opCode);
@@ -177,10 +209,12 @@ std::string getOperationName(OperationType opCode);
 // Returns the name of the operand type in ASCII.
 std::string getOperandTypeName(OperandType type);
 
-// Whether a operand has a tensor type that is not fully specified.
-bool hasUnspecifiedDimensions(int type, const uint32_t* dim, uint32_t dimCount);
-bool hasUnspecifiedDimensions(const Operand& operand);
-bool hasUnspecifiedDimensions(const ANeuralNetworksOperandType* type);
+// Whether an operand of tensor type has unspecified dimensions.
+//
+// Undefined behavior if the operand type is a scalar type.
+bool tensorHasUnspecifiedDimensions(int type, const uint32_t* dim, uint32_t dimCount);
+bool tensorHasUnspecifiedDimensions(const Operand& operand);
+bool tensorHasUnspecifiedDimensions(const ANeuralNetworksOperandType* type);
 
 // Memory is unmapped.
 // Memory is reference counted by hidl_memory instances, and is deallocated
@@ -235,8 +269,14 @@ bool validateOperandSymmPerChannelQuantParams(
         const Operand& halOperand, const ANeuralNetworksSymmPerChannelQuantParams& channelQuant,
         const char* tag);
 
-// Validates the type. If allowPartial is true, the dimensions may be underspecified.
-int validateOperandType(const ANeuralNetworksOperandType& type, const char* tag, bool allowPartial);
+// Validates an operand type.
+//
+// extensionOperandTypeInfo must be nullptr iff the type is not an extension type.
+//
+// If allowPartial is true, the dimensions may be underspecified.
+int validateOperandType(const ANeuralNetworksOperandType& type,
+                        const Extension::OperandTypeInformation* const extensionOperandTypeInfo,
+                        const char* tag, bool allowPartial);
 int validateOperandList(uint32_t count, const uint32_t* list, uint32_t operandCount,
                         const char* tag);
 
@@ -263,8 +303,13 @@ int convertErrorStatusToResultCode(ErrorStatus status);
 
 bool compliantWithV1_0(const V1_0::Capabilities& capabilities);
 bool compliantWithV1_0(const V1_1::Capabilities& capabilities);
+bool compliantWithV1_0(const V1_2::Capabilities& capabilities);
 bool compliantWithV1_1(const V1_0::Capabilities& capabilities);
 bool compliantWithV1_1(const V1_1::Capabilities& capabilities);
+bool compliantWithV1_1(const V1_2::Capabilities& capabilities);
+bool compliantWithV1_2(const V1_0::Capabilities& capabilities);
+bool compliantWithV1_2(const V1_1::Capabilities& capabilities);
+bool compliantWithV1_2(const V1_2::Capabilities& capabilities);
 
 bool compliantWithV1_0(const V1_0::Model& model);
 bool compliantWithV1_0(const V1_1::Model& model);
@@ -275,8 +320,13 @@ bool compliantWithV1_1(const V1_2::Model& model);
 
 V1_0::Capabilities convertToV1_0(const V1_0::Capabilities& capabilities);
 V1_0::Capabilities convertToV1_0(const V1_1::Capabilities& capabilities);
+V1_0::Capabilities convertToV1_0(const V1_2::Capabilities& capabilities);
 V1_1::Capabilities convertToV1_1(const V1_0::Capabilities& capabilities);
 V1_1::Capabilities convertToV1_1(const V1_1::Capabilities& capabilities);
+V1_1::Capabilities convertToV1_1(const V1_2::Capabilities& capabilities);
+V1_2::Capabilities convertToV1_2(const V1_0::Capabilities& capabilities);
+V1_2::Capabilities convertToV1_2(const V1_1::Capabilities& capabilities);
+V1_2::Capabilities convertToV1_2(const V1_2::Capabilities& capabilities);
 
 V1_0::Model convertToV1_0(const V1_0::Model& model);
 V1_0::Model convertToV1_0(const V1_1::Model& model);

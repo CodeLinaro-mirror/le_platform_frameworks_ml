@@ -25,6 +25,7 @@
 #include "Manager.h"
 #include "ModelBuilder.h"
 #include "Tracing.h"
+#include "TypeManager.h"
 #include "Utils.h"
 
 #include <mutex>
@@ -33,6 +34,8 @@
 
 namespace android {
 namespace nn {
+
+using HidlToken = hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
 
 const Timing kNoTiming = {.timeOnDevice = UINT64_MAX, .timeInDriver = UINT64_MAX};
 
@@ -43,7 +46,12 @@ static MeasureTiming measureTiming(const ExecutionBuilder* execution) {
 static bool checkDimensionInfo(const Operand& operand, const ANeuralNetworksOperandType* newType,
                                const char* tag, bool allowUnspecified) {
     if (newType != nullptr) {
-        if (validateOperandType(*newType, tag, allowUnspecified) != ANEURALNETWORKS_NO_ERROR) {
+        const Extension::OperandTypeInformation* info = nullptr;
+        if (isExtensionOperandType(operand.type)) {
+            NN_RET_CHECK(TypeManager::get()->getExtensionOperandTypeInfo(operand.type, &info));
+        }
+        if (validateOperandType(*newType, info, tag, allowUnspecified) !=
+            ANEURALNETWORKS_NO_ERROR) {
             LOG(ERROR) << tag << ": Invalid newType";
             return false;
         }
@@ -61,7 +69,8 @@ static bool checkDimensionInfo(const Operand& operand, const ANeuralNetworksOper
             }
         }
     } else {
-        if (!allowUnspecified && hasUnspecifiedDimensions(operand)) {
+        if (!allowUnspecified && TypeManager::get()->isTensorType(operand.type) &&
+            tensorHasUnspecifiedDimensions(operand)) {
             LOG(ERROR) << tag << ": Setting with operand type that is not fully specified";
             return false;
         }
@@ -82,8 +91,8 @@ int ModelArgumentInfo::setFromPointer(const Operand& operand,
         state = ModelArgumentInfo::HAS_NO_VALUE;
     } else {
         NN_RETURN_IF_ERROR(updateDimensionInfo(operand, type));
-        if (!isExtensionOperandType(operand.type) && operand.type != OperandType::OEM) {
-            uint32_t neededLength = sizeOfData(operand.type, dimensions);
+        if (operand.type != OperandType::OEM) {
+            uint32_t neededLength = TypeManager::get()->getSizeOfData(operand.type, dimensions);
             if (neededLength != length && neededLength != 0) {
                 LOG(ERROR) << "Setting argument with invalid length: " << length
                            << ", expected length: " << neededLength;
@@ -100,8 +109,8 @@ int ModelArgumentInfo::setFromPointer(const Operand& operand,
 int ModelArgumentInfo::setFromMemory(const Operand& operand, const ANeuralNetworksOperandType* type,
                                      uint32_t poolIndex, uint32_t offset, uint32_t length) {
     NN_RETURN_IF_ERROR(updateDimensionInfo(operand, type));
-    if (!isExtensionOperandType(operand.type) && operand.type != OperandType::OEM) {
-        uint32_t neededLength = sizeOfData(operand.type, dimensions);
+    if (operand.type != OperandType::OEM) {
+        uint32_t neededLength = TypeManager::get()->getSizeOfData(operand.type, dimensions);
         if (neededLength != length && neededLength != 0) {
             LOG(ERROR) << "Setting argument with invalid length: " << length
                        << ", expected length: " << neededLength;
@@ -118,8 +127,8 @@ int ModelArgumentInfo::setFromMemory(const Operand& operand, const ANeuralNetwor
 int ModelArgumentInfo::setFromTemporaryMemory(const Operand& operand, uint32_t poolIndex,
                                               uint32_t offset, uint32_t length) {
     NN_RETURN_IF_ERROR(updateDimensionInfo(operand, nullptr));
-    if (!isExtensionOperandType(operand.type) && operand.type != OperandType::OEM) {
-        uint32_t neededLength = sizeOfData(operand.type, dimensions);
+    if (operand.type != OperandType::OEM) {
+        uint32_t neededLength = TypeManager::get()->getSizeOfData(operand.type, dimensions);
         if (neededLength != length) {
             LOG(ERROR) << "Setting argument with invalid length: " << length
                        << ", expected length: " << neededLength;
@@ -687,8 +696,7 @@ int StepExecutor::setInputOrOutputFromTemporaryMemory(const Operand& inputOrOutp
     //     ExecutionBuilder::setOutputFromMemory()
 
     uint32_t poolIndex = mMemories.add(memory);
-    uint32_t length =
-            mDevice->getSizeOfData(inputOrOutputOperand, mModel->getExtensionNameToPrefixMap());
+    uint32_t length = TypeManager::get()->getSizeOfData(inputOrOutputOperand);
     return inputOrOutputInfo->setFromTemporaryMemory(inputOrOutputOperand, poolIndex, offset,
                                                      length);
 }
@@ -756,8 +764,9 @@ int StepExecutor::startComputeOnDevice(sp<ExecutionCallback>* synchronizationCal
         // encountered on an #if-removed code.
         ExecutionPreference preference =
                 static_cast<ExecutionPreference>(ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER);
-        ErrorStatus prepareLaunchStatus =
-                mDevice->getInterface()->prepareModel(model, preference, preparedModelCallback);
+        ErrorStatus prepareLaunchStatus = mDevice->getInterface()->prepareModel(
+                model, preference, hidl_vec<hidl_handle>(), hidl_vec<hidl_handle>(), HidlToken(),
+                preparedModelCallback);
         if (prepareLaunchStatus != ErrorStatus::NONE) {
             return convertErrorStatusToResultCode(prepareLaunchStatus);
         }
@@ -767,7 +776,7 @@ int StepExecutor::startComputeOnDevice(sp<ExecutionCallback>* synchronizationCal
         preparedModelCallback->wait();
         ErrorStatus prepareReturnStatus = preparedModelCallback->getStatus();
         if (auto preparedModel = preparedModelCallback->getPreparedModel()) {
-            mPreparedModel = std::make_shared<VersionedIPreparedModel>(preparedModel);
+            mPreparedModel = VersionedIPreparedModel::create(preparedModel);
         }
         if (prepareReturnStatus != ErrorStatus::NONE) {
             return convertErrorStatusToResultCode(prepareReturnStatus);
