@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "CompilationBuilder.h"
 #include "HalInterfaces.h"
 #include "Manager.h"
 #include "NeuralNetworks.h"
@@ -30,6 +31,7 @@
 
 namespace {
 
+using CompilationBuilder = ::android::nn::CompilationBuilder;
 using Device = ::android::nn::Device;
 using DeviceManager = ::android::nn::DeviceManager;
 using ExecutePreference = ::android::nn::test_wrapper::ExecutePreference;
@@ -51,7 +53,7 @@ class TestDriver : public SampleDriver {
         : SampleDriver(name), mCapabilities(capabilities), mSupportedOps(supportedOps) {}
     ~TestDriver() override {}
 
-    Return<void> getCapabilities_1_1(getCapabilities_1_1_cb cb) override {
+    Return<void> getCapabilities_1_2(getCapabilities_1_2_cb cb) override {
         cb(ErrorStatus::NONE, mCapabilities);
         return Void();
     }
@@ -93,9 +95,14 @@ class IntrospectionControlTest : public ::testing::Test {
     }
 
     struct DeviceSpecification {
-        DeviceSpecification(const std::string& name, Capabilities capabilities,
-                            std::vector<bool>& supportedOps)
-            : mName(name), mCapabilities(capabilities), mSupportedOps(supportedOps) {}
+        DeviceSpecification(const std::string& name, float perf, std::vector<bool>& supportedOps)
+            : mName(name), mSupportedOps(supportedOps) {
+            PerformanceInfo perfInfo = {.execTime = perf, .powerUsage = perf};
+            mCapabilities = {
+                    .relaxedFloat32toFloat16PerformanceScalar = perfInfo,
+                    .relaxedFloat32toFloat16PerformanceTensor = perfInfo,
+                    .operandPerformance = ::android::nn::nonExtensionOperandPerformance(perfInfo)};
+        }
         std::string mName;
         Capabilities mCapabilities;
         std::vector<bool> mSupportedOps;
@@ -178,7 +185,6 @@ void createSimpleAddModel(WrapperModel* model) {
     ASSERT_TRUE(model->isValid());
 }
 
-// TODO(b/117983761): update the test to make sure the model is actually running on the test device.
 // This test verifies that a simple ADD model is able to run on a single device that claims being
 // able to handle all operations.
 TEST_F(IntrospectionControlTest, SimpleAddModel) {
@@ -192,17 +198,17 @@ TEST_F(IntrospectionControlTest, SimpleAddModel) {
 
     std::string driverName = "test-all";
     std::vector<bool> ops(android::nn::kNumberOfOperationTypes, true);
-    registerDevices({{
-            driverName,
-            {.float32Performance = {.execTime = 0.9, .powerUsage = 0.9},
-             .quantized8Performance = {.execTime = 0.9, .powerUsage = 0.9},
-             .relaxedFloat32toFloat16Performance = {.execTime = 0.9, .powerUsage = 0.9}},
-            ops,
-    }});
+    registerDevices({{driverName, 0.9, ops}});
 
     EXPECT_TRUE(selectDeviceByName(driverName));
     EXPECT_TRUE(isSupportedOpListExpected({true}));
     EXPECT_EQ(prepareForExecution(), ANEURALNETWORKS_NO_ERROR);
+
+    // Verify that the mCompilation is actually using the "test-all" device.
+    CompilationBuilder* c = reinterpret_cast<CompilationBuilder*>(mCompilation);
+    const char* deviceNameBuffer =
+            c->forTest_getExecutionPlan().forTest_simpleGetDevice()->getName();
+    EXPECT_TRUE(driverName.compare(deviceNameBuffer) == 0);
 
     float input1[2] = {1.0f, 2.0f};
     float input2[2] = {3.0f, 4.0f};
@@ -277,15 +283,11 @@ TEST_F(IntrospectionControlTest, PartialModelNotSupported) {
 
     createAddMulModel(&mModel, false);
 
-    Capabilities capabilities = {
-            .float32Performance = {.execTime = 0.9, .powerUsage = 0.9},
-            .quantized8Performance = {.execTime = 0.9, .powerUsage = 0.9},
-            .relaxedFloat32toFloat16Performance = {.execTime = 0.9, .powerUsage = 0.9}};
     std::string addOnlyDriver = "test-onlyAdd";
     std::vector<bool> addOnlyOp(android::nn::kNumberOfOperationTypes, false);
     addOnlyOp[ANEURALNETWORKS_ADD] = true;
 
-    registerDevices({{addOnlyDriver, capabilities, addOnlyOp}});
+    registerDevices({{addOnlyDriver, 0.9, addOnlyOp}});
 
     EXPECT_TRUE(selectDeviceByName(addOnlyDriver));
     EXPECT_TRUE(isSupportedOpListExpected({true, false}));
@@ -311,15 +313,11 @@ TEST_F(IntrospectionControlTest, PartialModelNotSupportedOrder) {
 
     createAddMulModel(&mModel, true);
 
-    Capabilities capabilities = {
-            .float32Performance = {.execTime = 0.9, .powerUsage = 0.9},
-            .quantized8Performance = {.execTime = 0.9, .powerUsage = 0.9},
-            .relaxedFloat32toFloat16Performance = {.execTime = 0.9, .powerUsage = 0.9}};
     std::string addOnlyDriver = "test-onlyAdd";
     std::vector<bool> addOnlyOp(android::nn::kNumberOfOperationTypes, false);
     addOnlyOp[ANEURALNETWORKS_ADD] = true;
 
-    registerDevices({{addOnlyDriver, capabilities, addOnlyOp}});
+    registerDevices({{addOnlyDriver, 0.9, addOnlyOp}});
 
     EXPECT_TRUE(selectDeviceByName(addOnlyDriver));
     EXPECT_TRUE(isSupportedOpListExpected({false, true}));
@@ -337,10 +335,6 @@ TEST_F(IntrospectionControlTest, ModelNeedTwoDevices) {
 
     createAddMulModel(&mModel, false);
 
-    Capabilities capabilities = {
-            .float32Performance = {.execTime = 0.9, .powerUsage = 0.9},
-            .quantized8Performance = {.execTime = 0.9, .powerUsage = 0.9},
-            .relaxedFloat32toFloat16Performance = {.execTime = 0.9, .powerUsage = 0.9}};
     std::string addOnlyDriver = "test-onlyAdd";
     std::vector<bool> addOnlyOp(android::nn::kNumberOfOperationTypes, false);
     addOnlyOp[ANEURALNETWORKS_ADD] = true;
@@ -350,8 +344,8 @@ TEST_F(IntrospectionControlTest, ModelNeedTwoDevices) {
     mulOnlyOp[ANEURALNETWORKS_MUL] = true;
 
     registerDevices({
-            {addOnlyDriver, capabilities, addOnlyOp},
-            {mulOnlyDriver, capabilities, mulOnlyOp},
+            {addOnlyDriver, 0.9, addOnlyOp},
+            {mulOnlyDriver, 0.9, mulOnlyOp},
     });
 
     EXPECT_TRUE(selectDeviceByName(addOnlyDriver));

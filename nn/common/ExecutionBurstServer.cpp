@@ -21,61 +21,112 @@
 #include <android-base/logging.h>
 #include <set>
 #include <string>
+#include "Tracing.h"
 
-namespace android {
-namespace nn {
+namespace android::nn {
 
-BurstMemoryCache::BurstMemoryCache(const sp<IBurstCallback>& callback) : mCallback(callback) {}
+ExecutionBurstServer::BurstMemoryCache::BurstMemoryCache(const sp<IBurstCallback>& callback)
+    : mCallback(callback) {}
 
-hidl_vec<hidl_memory> BurstMemoryCache::getMemories(const std::vector<int32_t>& slots) {
+hidl_vec<hidl_memory> ExecutionBurstServer::BurstMemoryCache::getMemories(
+        const std::vector<int32_t>& slots) {
     std::lock_guard<std::mutex> guard(mMutex);
 
+    const auto slotIsKnown = [this](int32_t slot) {
+        return slot < mMemoryCache.size() && mMemoryCache[slot].valid();
+    };
+
     // find unique unknown slots
-    std::set<int32_t> setOfUnknownSlots;
-    for (int32_t slot : slots) {
-        if (mSlotToMemoryCache.find(slot) == mSlotToMemoryCache.end()) {
-            setOfUnknownSlots.insert(slot);
-        }
-    }
-    const std::vector<int32_t> unknownSlots(setOfUnknownSlots.begin(), setOfUnknownSlots.end());
+    std::vector<int32_t> unknownSlots = slots;
+    auto unknownSlotsEnd = unknownSlots.end();
+    std::sort(unknownSlots.begin(), unknownSlotsEnd);
+    unknownSlotsEnd = std::unique(unknownSlots.begin(), unknownSlotsEnd);
+    unknownSlotsEnd = std::remove_if(unknownSlots.begin(), unknownSlotsEnd, slotIsKnown);
+    unknownSlots.erase(unknownSlotsEnd, unknownSlots.end());
 
     // retrieve unknown slots
     if (!unknownSlots.empty()) {
-        LOG(ERROR) << "server calling getMemories";
         ErrorStatus errorStatus = ErrorStatus::GENERAL_FAILURE;
         std::vector<hidl_memory> returnedMemories;
-        Return<void> ret = mCallback->getMemories(
-                unknownSlots, [&errorStatus, &returnedMemories](
-                                      ErrorStatus status, const hidl_vec<hidl_memory>& memories) {
-                    errorStatus = status;
-                    if (status == ErrorStatus::NONE) {
-                        returnedMemories = memories;
-                    }
-                });
+        auto cb = [&errorStatus, &returnedMemories](ErrorStatus status,
+                                                    const hidl_vec<hidl_memory>& memories) {
+            errorStatus = status;
+            returnedMemories = memories;
+        };
 
-        if (!ret.isOk() || errorStatus != ErrorStatus::NONE) {
+        Return<void> ret = mCallback->getMemories(unknownSlots, cb);
+
+        // Ensure that the memories were successfully returned.
+        // IBurstCallback.hal specifies the that the number of memories returned
+        // must match the number of slots requested:
+        //     "slots.size() == buffers.size()"
+        if (!ret.isOk() || errorStatus != ErrorStatus::NONE ||
+            returnedMemories.size() != unknownSlots.size()) {
             LOG(ERROR) << "Error retrieving memories";
             return {};
         }
 
+        // resize cache to fit new slots if necessary
+        const int32_t maxUnknownSlot = unknownSlots.back();
+        if (maxUnknownSlot >= mMemoryCache.size()) {
+            mMemoryCache.resize(maxUnknownSlot + 1);
+        }
+
         // add memories to unknown slots
         for (size_t i = 0; i < unknownSlots.size(); ++i) {
-            mSlotToMemoryCache[unknownSlots[i]] = returnedMemories[i];
+            mMemoryCache[unknownSlots[i]] = returnedMemories[i];
         }
     }
 
     // get all slots
     hidl_vec<hidl_memory> memories(slots.size());
-    for (size_t i = 0; i < slots.size(); ++i) {
-        memories[i] = mSlotToMemoryCache[slots[i]];
+    std::transform(slots.begin(), slots.end(), memories.begin(),
+                   [this](int32_t slot) { return mMemoryCache[slot]; });
+
+    // Ensure all slots are valid. Although this case is never expected to
+    // occur, theoretically IBurstCallback::getMemories could return invalid
+    // hidl_memory objects that must be protected against.
+    if (!std::all_of(memories.begin(), memories.end(),
+                     [](const hidl_memory& memory) { return memory.valid(); })) {
+        LOG(ERROR) << "Error, not all slots are valid!";
+        return {};
     }
 
     return memories;
 }
 
-void BurstMemoryCache::freeMemory(int32_t slot) {
+void ExecutionBurstServer::BurstMemoryCache::freeMemory(int32_t slot) {
     std::lock_guard<std::mutex> guard(mMutex);
-    mSlotToMemoryCache.erase(slot);
+    if (slot < mMemoryCache.size()) {
+        mMemoryCache[slot] = {};
+    }
+}
+
+sp<ExecutionBurstServer> ExecutionBurstServer::create(
+        const sp<IBurstCallback>& callback, const MQDescriptorSync<FmqRequestDatum>& requestChannel,
+        const MQDescriptorSync<FmqResultDatum>& resultChannel, IPreparedModel* preparedModel) {
+    // check inputs
+    if (callback == nullptr || preparedModel == nullptr) {
+        LOG(ERROR) << "ExecutionBurstServer::create passed a nullptr";
+        return nullptr;
+    }
+
+    // create FMQ objects
+    std::unique_ptr<FmqRequestChannel> fmqRequestChannel{new (std::nothrow)
+                                                                 FmqRequestChannel(requestChannel)};
+    std::unique_ptr<FmqResultChannel> fmqResultChannel{new (std::nothrow)
+                                                               FmqResultChannel(resultChannel)};
+
+    // check FMQ objects
+    if (!fmqRequestChannel || !fmqResultChannel || !fmqRequestChannel->isValid() ||
+        !fmqResultChannel->isValid()) {
+        LOG(ERROR) << "ExecutionBurstServer::create failed to create FastMessageQueue";
+        return nullptr;
+    }
+
+    // make and return context
+    return new ExecutionBurstServer(callback, std::move(fmqRequestChannel),
+                                    std::move(fmqResultChannel), preparedModel);
 }
 
 ExecutionBurstServer::ExecutionBurstServer(const sp<IBurstCallback>& callback,
@@ -160,13 +211,19 @@ std::vector<FmqRequestDatum> ExecutionBurstServer::getPacketBlocking() {
         return {};
     }
 
+    NNTRACE_FULL(NNTRACE_LAYER_IPC, NNTRACE_PHASE_EXECUTION, "ExecutionBurstServer getting packet");
+
     // unpack packet information
     const auto& packetInfo = datum.packetInformation();
     const size_t count = packetInfo.packetSize;
 
     // retrieve remaining elements
     // NOTE: all of the data is already available at this point, so there's no
-    // need to do a blocking wait to wait for more data
+    // need to do a blocking wait to wait for more data. This is known because
+    // in FMQ, all writes are published (made available) atomically. Currently,
+    // the producer always publishes the entire packet in one function call, so
+    // if the first element of the packet is available, the remaining elements
+    // are also available.
     std::vector<FmqRequestDatum> packet(count);
     packet.front() = datum;
     success = mFmqRequestChannel->read(packet.data() + 1, packet.size() - 1);
@@ -386,6 +443,9 @@ void ExecutionBurstServer::task() {
             return;
         }
 
+        NNTRACE_FULL(NNTRACE_LAYER_IPC, NNTRACE_PHASE_EXECUTION,
+                     "ExecutionBurstServer processing packet and returning results");
+
         // continue processing
         Request request;
         MeasureTiming measure;
@@ -417,33 +477,4 @@ void ExecutionBurstServer::task() {
     }
 }
 
-sp<IBurstContext> createBurstContext(const sp<IBurstCallback>& callback,
-                                     const MQDescriptorSync<FmqRequestDatum>& requestChannel,
-                                     const MQDescriptorSync<FmqResultDatum>& resultChannel,
-                                     IPreparedModel* preparedModel) {
-    // check inputs
-    if (callback == nullptr || preparedModel == nullptr) {
-        LOG(ERROR) << "createExecutionBurstServer passed a nullptr";
-        return nullptr;
-    }
-
-    // create FMQ objects
-    std::unique_ptr<FmqRequestChannel> fmqRequestChannel{new (std::nothrow)
-                                                                 FmqRequestChannel(requestChannel)};
-    std::unique_ptr<FmqResultChannel> fmqResultChannel{new (std::nothrow)
-                                                               FmqResultChannel(resultChannel)};
-
-    // check FMQ objects
-    if (!fmqRequestChannel || !fmqResultChannel || !fmqRequestChannel->isValid() ||
-        !fmqResultChannel->isValid()) {
-        LOG(ERROR) << "createExecutionBurstServer failed to create FastMessageQueue";
-        return nullptr;
-    }
-
-    // make and return context
-    return new ExecutionBurstServer(callback, std::move(fmqRequestChannel),
-                                    std::move(fmqResultChannel), preparedModel);
-}
-
-}  // namespace nn
-}  // namespace android
+}  // namespace android::nn

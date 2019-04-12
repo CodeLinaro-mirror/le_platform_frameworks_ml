@@ -45,20 +45,21 @@ class Device {
     virtual hidl_vec<Extension> getSupportedExtensions() const = 0;
     virtual void getSupportedOperations(const Model& hidlModel,
                                         hidl_vec<bool>* supportedOperations) = 0;
-    virtual PerformanceInfo getFloat32Performance() const = 0;
-    virtual PerformanceInfo getQuantized8Performance() const = 0;
-    virtual PerformanceInfo getRelaxedFloat32toFloat16Performance() const = 0;
-    virtual bool isCachingSupported() const = 0;
+    virtual PerformanceInfo getPerformance(OperandType type) const = 0;
+    virtual PerformanceInfo getRelaxedFloat32toFloat16PerformanceScalar() const = 0;
+    virtual PerformanceInfo getRelaxedFloat32toFloat16PerformanceTensor() const = 0;
+    virtual std::pair<uint32_t, uint32_t> getNumberOfCacheFilesNeeded() const = 0;
+    bool isCachingSupported() const;
 
-    virtual int prepareModel(const Model& hidlModel, ExecutionPreference executionPreference,
-                             std::shared_ptr<VersionedIPreparedModel>* preparedModel) = 0;
-    virtual int prepareModelFromCache(
-            const hidl_handle& modelCache, const hidl_handle& dataCache,
+    virtual int prepareModel(
+            const Model& hidlModel, ExecutionPreference executionPreference,
+            const hidl_vec<hidl_handle>& modelCache, const hidl_vec<hidl_handle>& dataCache,
             const hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>& token,
             std::shared_ptr<VersionedIPreparedModel>* preparedModel) = 0;
-
-    uint32_t getSizeOfData(const Operand& operand,
-                           const std::map<std::string, uint16_t>& extensionNameToPrefix) const;
+    virtual int prepareModelFromCache(
+            const hidl_vec<hidl_handle>& modelCache, const hidl_vec<hidl_handle>& dataCache,
+            const hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>& token,
+            std::shared_ptr<VersionedIPreparedModel>* preparedModel) = 0;
 };
 
 // Manages the NN HAL devices.  Only one instance of this class will exist.
@@ -105,21 +106,27 @@ class DeviceManager {
     // Returns the singleton Cpu device.
     static std::shared_ptr<Device> getCpuDevice();
 
-    // These functions are solely intended for use by unit tests of
-    // the introspection and control API.
-    //
+    // The functions below are solely intended for use by unit tests.
+
     // Register a test device.
     void forTest_registerDevice(const char* name, const sp<V1_0::IDevice>& device) {
         registerDevice(name, device);
     }
+
     // Re-initialize the list of available devices.
     void forTest_reInitializeDeviceList() {
         mDevices.clear();
+        mDevicesCpuOnly.clear();
         findAvailableDevices();
     }
+
     // Make a test device
     static std::shared_ptr<Device> forTest_makeDriverDevice(const std::string& name,
                                                             const sp<V1_0::IDevice>& device);
+
+    bool forTest_isCpuDevice(const ANeuralNetworksDevice* device) const {
+        return reinterpret_cast<const Device*>(device) == getCpuDevice().get();
+    }
 
    private:
     // Builds the list of available drivers and queries their capabilities.
@@ -142,7 +149,7 @@ class DeviceManager {
     bool mDebugNNCpuOnly = false;  // derived from system property debug.nn.cpuonly
 
     // synchronous execution
-    bool mSyncExecCpu = false;
+    bool mSyncExecCpu = true;
     bool mSyncExecHal = true;         // Call executeSynchronously() when available on device.
     bool mSyncExecHalSetter = false;  // Has mSyncExecHal been set by setSyncExecHal()?
                                       // If so, don't allow the setting to be overridden
