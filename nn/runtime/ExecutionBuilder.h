@@ -117,7 +117,7 @@ public:
     // If burst is provided, then the burst path will be used. If a burst is not
     // provided (i.e., is nullptr), then a synchronous execution will occur.
     //
-    // Providing both synchronizationCallbak and burstBuilder is an error.
+    // Providing both synchronizationCallback and burstBuilder is an error.
     int compute(sp<ExecutionCallback>* synchronizationCallback,
                 BurstBuilder* burstBuilder = nullptr);
 
@@ -213,7 +213,7 @@ class StepExecutor {
 
     // Executes using the (driver, preparedModel) specified at construction time.
     int startCompute(sp<ExecutionCallback>* synchronizationCallback,
-                     ExecutionBurstController* burstController = nullptr);
+                     const std::shared_ptr<ExecutionBurstController>& burstController = nullptr);
 
     // Executes using the CPU, regardless of the (driver,
     // preparedModel) specified at construction time.
@@ -229,7 +229,7 @@ class StepExecutor {
    private:
     int allocatePointerArgumentsToPool(std::vector<ModelArgumentInfo>* args, Memory* memory);
     int startComputeOnDevice(sp<ExecutionCallback>* synchronizationCallback,
-                             ExecutionBurstController* burstController = nullptr);
+                             const std::shared_ptr<ExecutionBurstController>& burstController);
 
     void mapInputOrOutput(const ModelArgumentInfo& builderInputOrOutput,
                           ModelArgumentInfo* executorInputOrOutput);
