@@ -20,7 +20,6 @@
 #define ANDROID_ML_NN_RUNTIME_NEURAL_NETWORKS_WRAPPER_H
 
 #include "NeuralNetworks.h"
-#include "NeuralNetworksExtensions.h"
 
 #include <math.h>
 #include <optional>
@@ -86,6 +85,23 @@ struct OperandType {
     std::vector<uint32_t> dimensions;
     std::optional<SymmPerChannelQuantParams> channelQuant;
 
+    OperandType(const OperandType& other)
+        : operandType(other.operandType),
+          dimensions(other.dimensions),
+          channelQuant(other.channelQuant) {
+        operandType.dimensions = dimensions.size() > 0 ? dimensions.data() : nullptr;
+    }
+
+    OperandType& operator=(const OperandType& other) {
+        if (this != &other) {
+            operandType = other.operandType;
+            dimensions = other.dimensions;
+            channelQuant = other.channelQuant;
+            operandType.dimensions = dimensions.size() > 0 ? dimensions.data() : nullptr;
+        }
+        return *this;
+    }
+
     OperandType(Type type, std::vector<uint32_t> d, float scale = 0.0f, int32_t zeroPoint = 0)
         : dimensions(std::move(d)), channelQuant(std::nullopt) {
         operandType = {
@@ -111,7 +127,7 @@ struct OperandType {
 };
 
 class Memory {
-public:
+   public:
     Memory(size_t size, int protect, int fd, size_t offset) {
         mValid = ANeuralNetworksMemory_createFromFd(size, protect, fd, offset, &mMemory) ==
                  ANEURALNETWORKS_NO_ERROR;
@@ -148,13 +164,13 @@ public:
     ANeuralNetworksMemory* get() const { return mMemory; }
     bool isValid() const { return mValid; }
 
-private:
+   private:
     ANeuralNetworksMemory* mMemory = nullptr;
     bool mValid = true;
 };
 
 class Model {
-public:
+   public:
     Model() {
         // TODO handle the value returned by this call
         ANeuralNetworksModel_create(&mModel);
@@ -194,26 +210,6 @@ public:
         } else {
             return Result::BAD_STATE;
         }
-    }
-
-    int32_t getExtensionOperandType(const char* extensionName, uint16_t typeWithinExtension) {
-        int32_t result;
-        if (ANeuralNetworksModel_getExtensionOperandType(mModel, extensionName, typeWithinExtension,
-                                                         &result) != ANEURALNETWORKS_NO_ERROR) {
-            mValid = false;
-        }
-        return result;
-    }
-
-    ANeuralNetworksOperationType getExtensionOperationType(const char* extensionName,
-                                                           uint16_t typeWithinExtension) {
-        ANeuralNetworksOperationType result;
-        if (ANeuralNetworksModel_getExtensionOperationType(mModel, extensionName,
-                                                           typeWithinExtension,
-                                                           &result) != ANEURALNETWORKS_NO_ERROR) {
-            mValid = false;
-        }
-        return result;
     }
 
     uint32_t addOperand(const OperandType* type) {
@@ -257,16 +253,16 @@ public:
     void identifyInputsAndOutputs(const std::vector<uint32_t>& inputs,
                                   const std::vector<uint32_t>& outputs) {
         if (ANeuralNetworksModel_identifyInputsAndOutputs(
-                        mModel, static_cast<uint32_t>(inputs.size()), inputs.data(),
-                        static_cast<uint32_t>(outputs.size()),
-                        outputs.data()) != ANEURALNETWORKS_NO_ERROR) {
+                    mModel, static_cast<uint32_t>(inputs.size()), inputs.data(),
+                    static_cast<uint32_t>(outputs.size()),
+                    outputs.data()) != ANEURALNETWORKS_NO_ERROR) {
             mValid = false;
         }
     }
 
     void relaxComputationFloat32toFloat16(bool isRelax) {
         if (ANeuralNetworksModel_relaxComputationFloat32toFloat16(mModel, isRelax) ==
-                ANEURALNETWORKS_NO_ERROR) {
+            ANEURALNETWORKS_NO_ERROR) {
             mRelaxed = isRelax;
         }
     }
@@ -275,7 +271,7 @@ public:
     bool isValid() const { return mValid; }
     bool isRelaxed() const { return mRelaxed; }
 
-private:
+   protected:
     ANeuralNetworksModel* mModel = nullptr;
     // We keep track of the operand ID as a convenience to the caller.
     uint32_t mNextOperandId = 0;
@@ -284,7 +280,7 @@ private:
 };
 
 class Event {
-public:
+   public:
     Event() {}
     ~Event() { ANeuralNetworksEvent_free(mEvent); }
 
@@ -315,12 +311,12 @@ public:
         mEvent = newEvent;
     }
 
-private:
+   private:
     ANeuralNetworksEvent* mEvent = nullptr;
 };
 
 class Compilation {
-public:
+   public:
     Compilation(const Model* model) {
         int result = ANeuralNetworksCompilation_create(model->getHandle(), &mCompilation);
         if (result != 0) {
@@ -351,7 +347,7 @@ public:
 
     Result setPreference(ExecutePreference preference) {
         return static_cast<Result>(ANeuralNetworksCompilation_setPreference(
-                    mCompilation, static_cast<int32_t>(preference)));
+                mCompilation, static_cast<int32_t>(preference)));
     }
 
     Result setCaching(const std::string& cacheDir, const std::vector<uint8_t>& token) {
@@ -366,12 +362,12 @@ public:
 
     ANeuralNetworksCompilation* getHandle() const { return mCompilation; }
 
-private:
+   private:
     ANeuralNetworksCompilation* mCompilation = nullptr;
 };
 
 class Execution {
-public:
+   public:
     Execution(const Compilation* compilation) {
         int result = ANeuralNetworksExecution_create(compilation->getHandle(), &mExecution);
         if (result != 0) {
@@ -403,25 +399,25 @@ public:
     Result setInput(uint32_t index, const void* buffer, size_t length,
                     const ANeuralNetworksOperandType* type = nullptr) {
         return static_cast<Result>(
-                    ANeuralNetworksExecution_setInput(mExecution, index, type, buffer, length));
+                ANeuralNetworksExecution_setInput(mExecution, index, type, buffer, length));
     }
 
     Result setInputFromMemory(uint32_t index, const Memory* memory, uint32_t offset,
                               uint32_t length, const ANeuralNetworksOperandType* type = nullptr) {
         return static_cast<Result>(ANeuralNetworksExecution_setInputFromMemory(
-                    mExecution, index, type, memory->get(), offset, length));
+                mExecution, index, type, memory->get(), offset, length));
     }
 
     Result setOutput(uint32_t index, void* buffer, size_t length,
                      const ANeuralNetworksOperandType* type = nullptr) {
         return static_cast<Result>(
-                    ANeuralNetworksExecution_setOutput(mExecution, index, type, buffer, length));
+                ANeuralNetworksExecution_setOutput(mExecution, index, type, buffer, length));
     }
 
     Result setOutputFromMemory(uint32_t index, const Memory* memory, uint32_t offset,
                                uint32_t length, const ANeuralNetworksOperandType* type = nullptr) {
         return static_cast<Result>(ANeuralNetworksExecution_setOutputFromMemory(
-                    mExecution, index, type, memory->get(), offset, length));
+                mExecution, index, type, memory->get(), offset, length));
     }
 
     Result startCompute(Event* event) {

@@ -28,6 +28,7 @@
 #include "OperationsUtils.h"
 #include "TokenHasher.h"
 #include "Tracing.h"
+#include "TypeManager.h"
 #include "Utils.h"
 
 #include <cutils/native_handle.h>
@@ -48,27 +49,14 @@ using HidlToken = hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
 namespace android {
 namespace nn {
 
-// compilationCachingMutex is used to protect concurrent access of the caching files
-// std::mutex is safe for pthreads on Android.
-// TODO(xusongw): Consider switching to a file lock per cache entry.
-static std::mutex compilationCachingMutex;
-
 namespace {
-
-enum class AccessMode { READ_ONLY, WRITE_ONLY };
 
 // Opens cache file by filename and sets the handle to the opened fd. Returns false on fail. The
 // handle is expected to come in as empty, and is only set to a fd when the function returns true.
-bool createCacheHandle(const std::string& cache, AccessMode mode, hidl_handle* handle) {
+// The file descriptor is always opened with both read and write permission.
+bool createCacheHandle(const std::string& cache, bool createIfNotExist, hidl_handle* handle) {
     CHECK(handle->getNativeHandle() == nullptr);
-    int fd;
-    if (mode == AccessMode::READ_ONLY) {
-        fd = open(cache.c_str(), O_RDONLY);
-    } else if (mode == AccessMode::WRITE_ONLY) {
-        fd = open(cache.c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
-    } else {
-        NN_RET_CHECK_FAIL();
-    }
+    int fd = open(cache.c_str(), createIfNotExist ? (O_RDWR | O_CREAT) : O_RDWR, S_IRUSR | S_IWUSR);
     NN_RET_CHECK_GE(fd, 0);
     native_handle_t* cacheNativeHandle = native_handle_create(1, 0);
     if (cacheNativeHandle == nullptr) {
@@ -80,11 +68,30 @@ bool createCacheHandle(const std::string& cache, AccessMode mode, hidl_handle* h
     return true;
 }
 
-// Maps token to cache file names and sets the handles to the opened fds. Returns false on fail.
-// Each handle is expected to come in as empty, and is only set a fd when the function returns true.
-bool getCacheHandle(const std::string& cacheDir, const uint8_t* token, AccessMode mode,
-                    hidl_handle* cache1, hidl_handle* cache2) {
-    std::string filename(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN * 2, '0');
+// Opens a list of cache files and returns the handle vector. Returns empty vector on fail.
+// The file descriptors are always opened with both read and write permission.
+hidl_vec<hidl_handle> createCacheHandleVec(uint32_t numCacheFiles, const std::string& baseFileName,
+                                           bool createIfNotExist) {
+    CHECK(numCacheFiles <= static_cast<uint32_t>(Constant::MAX_NUMBER_OF_CACHE_FILES));
+    hidl_vec<hidl_handle> handles(numCacheFiles);
+    for (uint32_t i = 0; i < numCacheFiles; i++) {
+        std::string filename = baseFileName + std::to_string(i);
+        VLOG(COMPILATION) << "Cache " << i << ": " << filename;
+        if (!createCacheHandle(filename, createIfNotExist, &handles[i])) {
+            return hidl_vec<hidl_handle>();
+        }
+    }
+    return handles;
+}
+
+// Maps token to cache file names and sets the handle vectors to the opened fds. Returns false on
+// fail and leaves the vectors empty. Each vector is expected to come in as empty.
+bool getCacheHandles(const std::string& cacheDir, const uint8_t* token,
+                     const std::pair<uint32_t, uint32_t>& numCacheFiles, bool createIfNotExist,
+                     hidl_vec<hidl_handle>* modelCache, hidl_vec<hidl_handle>* dataCache) {
+    // The filename includes ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN * 2 characters for token,
+    // and 1 character for model/data cache identifier.
+    std::string filename(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN * 2 + 1, '0');
     for (uint32_t i = 0; i < ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN; i++) {
         filename[i * 2] = 'A' + (token[i] & 0x0F);
         filename[i * 2 + 1] = 'A' + (token[i] >> 4);
@@ -92,13 +99,17 @@ bool getCacheHandle(const std::string& cacheDir, const uint8_t* token, AccessMod
     CHECK(cacheDir.empty() || cacheDir.back() == '/');
     std::string cacheFileName = cacheDir + filename;
 
-    cacheFileName.push_back('1');
-    VLOG(COMPILATION) << "Compilation cache 1: " << cacheFileName;
-    NN_RET_CHECK(createCacheHandle(cacheFileName, mode, cache1));
-
-    cacheFileName.back() = '2';
-    VLOG(COMPILATION) << "Compilation cache 2: " << cacheFileName;
-    NN_RET_CHECK(createCacheHandle(cacheFileName, mode, cache2));
+    cacheFileName[ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN * 2] = '1';
+    *modelCache = createCacheHandleVec(numCacheFiles.first, cacheFileName, createIfNotExist);
+    if (modelCache->size() != numCacheFiles.first) {
+        return false;
+    }
+    cacheFileName[ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN * 2] = '2';
+    *dataCache = createCacheHandleVec(numCacheFiles.second, cacheFileName, createIfNotExist);
+    if (dataCache->size() != numCacheFiles.second) {
+        modelCache->resize(0);
+        return false;
+    }
     return true;
 }
 
@@ -108,36 +119,33 @@ bool compileFromCache(const std::shared_ptr<Device>& device, const std::string& 
                       std::shared_ptr<VersionedIPreparedModel>* preparedModel) {
     CHECK(token != nullptr && device != nullptr);
     VLOG(COMPILATION) << "compileFromCache";
-    std::unique_lock<std::mutex> lock(compilationCachingMutex);
     *preparedModel = nullptr;
-    hidl_handle cache1, cache2;
-    NN_RET_CHECK(getCacheHandle(cacheDir, token, AccessMode::READ_ONLY, &cache1, &cache2));
     HidlToken cacheToken(token);
-
-    int ret = device->prepareModelFromCache(cache1, cache2, cacheToken, preparedModel);
-    if (ret != ANEURALNETWORKS_NO_ERROR || *preparedModel == nullptr) {
-        LOG(ERROR) << "Failed to prepare from cache files" << ret;
-        *preparedModel = nullptr;
-        return false;
-    }
-    return true;
+    hidl_vec<hidl_handle> modelCache, dataCache;
+    NN_RET_CHECK(getCacheHandles(cacheDir, token, device->getNumberOfCacheFilesNeeded(),
+                                 /*createIfNotExist=*/false, &modelCache, &dataCache));
+    int ret = device->prepareModelFromCache(modelCache, dataCache, cacheToken, preparedModel);
+    return ret == ANEURALNETWORKS_NO_ERROR;
 }
 
-bool saveToCache(const std::shared_ptr<VersionedIPreparedModel>& preparedModel,
-                 const std::string& cacheDir, const uint8_t* token) {
-    CHECK(token != nullptr && preparedModel != nullptr);
-    VLOG(COMPILATION) << "saveToCache";
-    std::unique_lock<std::mutex> lock(compilationCachingMutex);
-    hidl_handle cache1, cache2;
-    NN_RET_CHECK(getCacheHandle(cacheDir, token, AccessMode::WRITE_ONLY, &cache1, &cache2));
-    HidlToken cacheToken(token);
-
-    ErrorStatus ret = preparedModel->saveToCache(cache1, cache2, cacheToken);
-    if (ret != ErrorStatus::NONE) {
-        LOG(ERROR) << "Failed to save the prepared model to cache files";
-        return false;
+int compileModelAndCache(const std::shared_ptr<Device>& device, const ModelBuilder* model,
+                         int32_t executionPreference, const std::string& cacheDir,
+                         const uint8_t* token,
+                         std::shared_ptr<VersionedIPreparedModel>* preparedModel) {
+    CHECK(device != nullptr);
+    *preparedModel = nullptr;
+    uint8_t dummyToken[ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN] = {0};
+    HidlToken cacheToken(token == nullptr ? dummyToken : token);
+    hidl_vec<hidl_handle> modelCache, dataCache;
+    if (token == nullptr || !getCacheHandles(cacheDir, token, device->getNumberOfCacheFilesNeeded(),
+                                             /*createIfNotExist=*/true, &modelCache, &dataCache)) {
+        modelCache.resize(0);
+        dataCache.resize(0);
     }
-    return true;
+    Model hidlModel;
+    model->setHidlModel(&hidlModel);
+    return device->prepareModel(hidlModel, static_cast<ExecutionPreference>(executionPreference),
+                                modelCache, dataCache, cacheToken, preparedModel);
 }
 
 // Compiles the model on device.
@@ -148,22 +156,18 @@ bool saveToCache(const std::shared_ptr<VersionedIPreparedModel>& preparedModel,
 int compile(std::shared_ptr<Device> device, const ModelBuilder* model, int32_t executionPreference,
             const std::string& cacheDir, TokenHasher* token,
             std::shared_ptr<VersionedIPreparedModel>* preparedModel) {
-    nnAssert(device != nullptr);
+    CHECK(device != nullptr);
+    const uint8_t* tokenData = nullptr;
     if (device->isCachingSupported() && token->ok() && token->updateFromString(device->getName()) &&
         token->updateFromString(device->getVersionString()) &&
-        token->update(&executionPreference, sizeof(executionPreference)) && token->finish() &&
-        compileFromCache(device, cacheDir, token->getCacheToken(), preparedModel)) {
+        token->update(&executionPreference, sizeof(executionPreference)) && token->finish()) {
+        tokenData = token->getCacheToken();
+    }
+    if (tokenData != nullptr && compileFromCache(device, cacheDir, tokenData, preparedModel)) {
         return ANEURALNETWORKS_NO_ERROR;
     }
-
-    Model hidlModel;
-    model->setHidlModel(&hidlModel);
-    NN_RETURN_IF_ERROR(device->prepareModel(
-            hidlModel, static_cast<ExecutionPreference>(executionPreference), preparedModel));
-    if (device->isCachingSupported() && token->ok()) {
-        saveToCache(*preparedModel, cacheDir, token->getCacheToken());
-    }
-    return ANEURALNETWORKS_NO_ERROR;
+    return compileModelAndCache(device, model, executionPreference, cacheDir, tokenData,
+                                preparedModel);
 }
 
 typedef std::function<void(uint32_t)> OperationReadyCallback;
@@ -491,7 +495,6 @@ int ExecutionStep::finishSubModel(const ModelBuilder* fromModel, bool* hasOutput
     }
 
     mSubModel.relaxComputationFloat32toFloat16(fromModel->isComputationFloat32RelaxedToFloat16());
-    mSubModel.setExtensionNameToPrefixMap(fromModel->getExtensionNameToPrefixMap());
 
     // Input order: mModelInputs, mTempsAsSubModelInputs, mOutputsAsSubModelInputs
     // Output order: mModelOutputs, mTempsAsSubModelOutputs
@@ -640,11 +643,11 @@ ExecutionPlan::Controller::Controller(
 // indicate the regular execution path should be used. This can occur either
 // because PreparedModel was nullptr (cpu was best choice), or because the
 // IPreparedModel was of insufficient version or failed to configure the burst.
-std::vector<std::unique_ptr<ExecutionBurstController>> ExecutionPlan::makeBursts() const {
+std::vector<std::shared_ptr<ExecutionBurstController>> ExecutionPlan::makeBursts() const {
     switch (mState) {
         // burst object for each partition in the compound case
         case COMPOUND: {
-            std::vector<std::unique_ptr<ExecutionBurstController>> bursts;
+            std::vector<std::shared_ptr<ExecutionBurstController>> bursts;
             bursts.reserve(compound()->mSteps.size());
             for (const auto& step : compound()->mSteps) {
                 if (const auto preparedModel = step->getPreparedSubModel()) {
@@ -657,7 +660,7 @@ std::vector<std::unique_ptr<ExecutionBurstController>> ExecutionPlan::makeBursts
         }
         // single burst object for the simple case
         case SIMPLE: {
-            std::vector<std::unique_ptr<ExecutionBurstController>> burst;
+            std::vector<std::shared_ptr<ExecutionBurstController>> burst;
             auto simpleBody = static_cast<const SimpleBody*>(mBody);
             if (const auto preparedModel = simpleBody->mPreparedModel) {
                 burst.push_back(preparedModel->configureExecutionBurst(/*blocking=*/true));
@@ -709,8 +712,7 @@ std::shared_ptr<ExecutionPlan::Controller> ExecutionPlan::makeController(
                     subModelInputsAndOutputs =
                             std::make_shared<Controller::SubModelInputsAndOutputsType>();
                 }
-                const uint32_t size = step->getDevice()->getSizeOfData(
-                        fromModelOperand, fromModel->getExtensionNameToPrefixMap());
+                const uint32_t size = TypeManager::get()->getSizeOfData(fromModelOperand);
                 totalSizeOfTemporaries += alignBytesNeeded(totalSizeOfTemporaries, size);
                 subModelInputsAndOutputs->insert(std::make_pair(fromModelOperandIndex, totalSizeOfTemporaries));
                 totalSizeOfTemporaries += size;
@@ -754,7 +756,7 @@ int ExecutionPlan::fallback(std::shared_ptr<Controller> controller,
 
 int ExecutionPlan::next(std::shared_ptr<Controller> controller,
                         std::shared_ptr<StepExecutor>* executor,
-                        ExecutionBurstController** burstController) const {
+                        std::shared_ptr<ExecutionBurstController>* burstController) const {
     *executor = nullptr;
     if (burstController != nullptr) {
         *burstController = nullptr;
@@ -1054,33 +1056,21 @@ PerformanceInfo ModelBuilder::getPerformanceInfo(const std::shared_ptr<Device> d
     const uint32_t operandIndex = operation.inputs[0];
     const OperandType operandType = mOperands[operandIndex].type;
     switch(operandType) {
-        case OperandType::FLOAT16:
         case OperandType::FLOAT32:
-        case OperandType::TENSOR_FLOAT16:
+            if (mRelaxComputationFloat32toFloat16) {
+                return device->getRelaxedFloat32toFloat16PerformanceScalar();
+            }
+            break;
         case OperandType::TENSOR_FLOAT32:
             if (mRelaxComputationFloat32toFloat16) {
-                return device->getRelaxedFloat32toFloat16Performance();
-            } else {
-                return device->getFloat32Performance();
+                return device->getRelaxedFloat32toFloat16PerformanceTensor();
             }
-        case OperandType::INT32:
-        case OperandType::UINT32:
-        case OperandType::BOOL:
-        case OperandType::TENSOR_INT32:
-        case OperandType::TENSOR_QUANT8_ASYMM:
-        case OperandType::TENSOR_QUANT8_SYMM:
-        case OperandType::TENSOR_QUANT16_ASYMM:
-        case OperandType::TENSOR_QUANT16_SYMM:
-        case OperandType::TENSOR_BOOL8:
-        case OperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL:
-            // For OEM, the real selection will be made from who can run the operand.
-        case OperandType::OEM:
-        case OperandType::TENSOR_OEM_BYTE:
-            return device->getQuantized8Performance();
+            break;
         default:
-            CHECK(isExtensionOperandType(operandType)) << "Unhandled base operand type";
-            return device->getQuantized8Performance();
+            break;
     }
+
+    return device->getPerformance(operandType);
 }
 
 namespace {
@@ -1147,9 +1137,8 @@ int ModelBuilder::findBestDeviceForEachOperation(
 
         (*bestDeviceForOperation)[operationIndex] = bestChoice;
         VLOG(COMPILATION) << "ModelBuilder::findBestDeviceForEachOperation("
-                          << toString(getOperation(operationIndex).type)
-                          << ") = "
-                          << (*bestDeviceForOperation)[operationIndex];
+                          << toString(getOperation(operationIndex).type) << ") = " << bestChoice
+                          << " (" << devices[bestChoice]->getName() << ")";
     }
     return ANEURALNETWORKS_NO_ERROR;
 }
