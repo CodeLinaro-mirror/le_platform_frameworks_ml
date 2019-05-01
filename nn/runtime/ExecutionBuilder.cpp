@@ -29,6 +29,7 @@
 #include "Utils.h"
 
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -823,30 +824,18 @@ int StepExecutor::startComputeOnDevice(
         Model model;
         mModel->setHidlModel(&model);
 
-        // TODO Dangerous!  In async, the model will outlive it here. Safe for now
-        sp<PreparedModelCallback> preparedModelCallback = new PreparedModelCallback();
         // TODO(butlermichael): Propagate user preference to this point instead of
         // using default value of ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER, or
         // remove this entire block of code since it is a stale path that is only
         // encountered on an #if-removed code.
         ExecutionPreference preference =
                 static_cast<ExecutionPreference>(ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER);
-        ErrorStatus prepareLaunchStatus = mDevice->getInterface()->prepareModel(
-                model, preference, hidl_vec<hidl_handle>(), hidl_vec<hidl_handle>(), HidlToken(),
-                preparedModelCallback);
-        if (prepareLaunchStatus != ErrorStatus::NONE) {
-            return convertErrorStatusToResultCode(prepareLaunchStatus);
-        }
 
-        // Immediately synchronize with callback object for now
-        // TODO: change to asynchronous later
-        preparedModelCallback->wait();
-        ErrorStatus prepareReturnStatus = preparedModelCallback->getStatus();
-        if (auto preparedModel = preparedModelCallback->getPreparedModel()) {
-            mPreparedModel = VersionedIPreparedModel::create(preparedModel);
-        }
-        if (prepareReturnStatus != ErrorStatus::NONE) {
-            return convertErrorStatusToResultCode(prepareReturnStatus);
+        ErrorStatus status = ErrorStatus::GENERAL_FAILURE;
+        std::tie(status, mPreparedModel) =
+                mDevice->getInterface()->prepareModel(model, preference, {}, {}, {});
+        if (status != ErrorStatus::NONE) {
+            return convertErrorStatusToResultCode(status);
         }
         if (mPreparedModel == nullptr) {
             return ANEURALNETWORKS_OP_FAILED;
@@ -1021,12 +1010,13 @@ int StepExecutor::startComputeOnCpu(sp<ExecutionCallback>* synchronizationCallba
 
     std::vector<RunTimePoolInfo> requestPoolInfos;
     requestPoolInfos.reserve(mMemories.size());
-    bool fail = false;
     for (const Memory* mem : mMemories) {
-        requestPoolInfos.emplace_back(mem->getHidlMemory(), &fail);
-    }
-    if (fail) {
-        return ANEURALNETWORKS_UNMAPPABLE;
+        if (std::optional<RunTimePoolInfo> poolInfo =
+                    RunTimePoolInfo::createFromHidlMemory(mem->getHidlMemory())) {
+            requestPoolInfos.emplace_back(*poolInfo);
+        } else {
+            return ANEURALNETWORKS_UNMAPPABLE;
+        }
     }
     // Create as many pools as there are input / output.
     auto fixPointerArguments = [&requestPoolInfos](std::vector<ModelArgumentInfo>& argumentInfos) {
@@ -1035,7 +1025,8 @@ int StepExecutor::startComputeOnCpu(sp<ExecutionCallback>* synchronizationCallba
                 argumentInfo.locationAndLength.poolIndex =
                         static_cast<uint32_t>(requestPoolInfos.size());
                 argumentInfo.locationAndLength.offset = 0;
-                requestPoolInfos.emplace_back(static_cast<uint8_t*>(argumentInfo.buffer));
+                requestPoolInfos.emplace_back(RunTimePoolInfo::createFromExistingBuffer(
+                        static_cast<uint8_t*>(argumentInfo.buffer)));
             }
         }
     };
