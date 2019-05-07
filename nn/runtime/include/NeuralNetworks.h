@@ -1574,6 +1574,11 @@ typedef enum {
      *      shape of the output tensor. The number of elements implied by shape
      *      must be the same as the number of elements in the input tensor.
      *
+     *      If one component of shape is the special value -1, the size of that
+     *      dimension is computed so that the total size remains constant. In
+     *      particular, a shape of [-1] flattens into 1-D. At most one component
+     *      of shape can be -1.
+     *
      * Outputs:
      * * 0: The output tensor, of shape specified by the input shape.
      *
@@ -1978,9 +1983,6 @@ typedef enum {
      * in axis. If keep_dims is true, the reduced dimensions are retained with
      * length 1.
      *
-     * If dimensions to reduce have no entries, all dimensions are reduced, and
-     * a tensor with a single element is returned.
-     *
      * Supported tensor {@link OperandCode}:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT16} (since API level 29)
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
@@ -1991,8 +1993,14 @@ typedef enum {
      * Inputs:
      * * 0: A tensor, specifying the input.
      * * 1: A 1-D Tensor of {@link ANEURALNETWORKS_TENSOR_INT32}. The dimensions
-     *      to reduce. If None (the default), reduces all dimensions. Must be in
-     *      the range [-rank(input_tensor), rank(input_tensor)).
+     *      to reduce. Must be in the range
+     *      [-rank(input_tensor), rank(input_tensor)).
+     *
+     *      NOTE: When the operation was introduced, the documentation
+     *      incorrectly stated that if dimensions were empty, the operation
+     *      would reduce across all dimensions. This behavior was never
+     *      implemented.
+     *
      * * 2: An {@link ANEURALNETWORKS_INT32} scalar, keep_dims. If positive,
      *      retains reduced dimensions with length 1.
      *
@@ -4403,7 +4411,8 @@ typedef enum {
      *
      * Inputs (explicit padding):
      * * 0: A 4-D tensor, of shape [batches, height, width, depth_in],
-     *      specifying the input.
+     *      specifying the input. Since API level 29, zero batches is supported
+     *      for this tensor.
      * * 1: A 4-D tensor, of shape
      *      [depth_out, filter_height, filter_width, depth_in], specifying the
      *      filter. For tensor of type
@@ -4440,7 +4449,8 @@ typedef enum {
      *
      * Inputs (implicit padding):
      * * 0: A 4-D tensor, of shape [batches, height, width, depth_in],
-     *      specifying the input.
+     *      specifying the input. Since API level 29, zero batches is supported
+     *      for this tensor.
      * * 1: A 4-D tensor, of shape
      *      [depth_out, filter_height, filter_width, depth_in], specifying the
      *      filter. For tensor of type
