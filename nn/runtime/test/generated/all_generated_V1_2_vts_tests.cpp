@@ -13947,13 +13947,13 @@ TEST_F(ValidationTest, conv2d_v1_2_3_H3_W2_VALID_dynamic_output_shape_nchw_float
 #endif
 TEST_F(NeuralnetworksHidlTest, conv2d_v1_2_quant_output_multiplier_gt_1) {
   generated_tests::Execute(device,
-                           conv2d_v1_2::createTestModel,
-                           conv2d_v1_2::is_ignored,
+                           conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1,
+                           conv2d_v1_2::is_ignored_quant_output_multiplier_gt_1,
                            conv2d_v1_2::get_examples_quant_output_multiplier_gt_1());
 }
 
 TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1) {
-  const Model model = conv2d_v1_2::createTestModel();
+  const Model model = conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1();
   const std::vector<Request> requests = createRequests(conv2d_v1_2::get_examples_quant_output_multiplier_gt_1());
   validateModel(model);
   validateRequests(model, requests);
@@ -13962,13 +13962,13 @@ TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1) {
 
 TEST_F(NeuralnetworksHidlTest, conv2d_v1_2_quant_output_multiplier_gt_1_relaxed) {
   generated_tests::Execute(device,
-                           conv2d_v1_2::createTestModel_relaxed,
-                           conv2d_v1_2::is_ignored_relaxed,
+                           conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_relaxed,
+                           conv2d_v1_2::is_ignored_quant_output_multiplier_gt_1_relaxed,
                            conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_relaxed());
 }
 
 TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_relaxed) {
-  const Model model = conv2d_v1_2::createTestModel_relaxed();
+  const Model model = conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_relaxed();
   const std::vector<Request> requests = createRequests(conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_relaxed());
   validateModel(model);
   validateRequests(model, requests);
@@ -13977,13 +13977,13 @@ TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_relaxed) {
 
 TEST_F(NeuralnetworksHidlTest, conv2d_v1_2_quant_output_multiplier_gt_1_weight_as_input) {
   generated_tests::Execute(device,
-                           conv2d_v1_2::createTestModel_weight_as_input,
-                           conv2d_v1_2::is_ignored_weight_as_input,
+                           conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_weight_as_input,
+                           conv2d_v1_2::is_ignored_quant_output_multiplier_gt_1_weight_as_input,
                            conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_weight_as_input());
 }
 
 TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_weight_as_input) {
-  const Model model = conv2d_v1_2::createTestModel_weight_as_input();
+  const Model model = conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_weight_as_input();
   const std::vector<Request> requests = createRequests(conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_weight_as_input());
   validateModel(model);
   validateRequests(model, requests);
@@ -13992,13 +13992,13 @@ TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_weight_as_input)
 
 TEST_F(NeuralnetworksHidlTest, conv2d_v1_2_quant_output_multiplier_gt_1_weight_as_input_relaxed) {
   generated_tests::Execute(device,
-                           conv2d_v1_2::createTestModel_weight_as_input_relaxed,
-                           conv2d_v1_2::is_ignored_weight_as_input_relaxed,
+                           conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_weight_as_input_relaxed,
+                           conv2d_v1_2::is_ignored_quant_output_multiplier_gt_1_weight_as_input_relaxed,
                            conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_weight_as_input_relaxed());
 }
 
 TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_weight_as_input_relaxed) {
-  const Model model = conv2d_v1_2::createTestModel_weight_as_input_relaxed();
+  const Model model = conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_weight_as_input_relaxed();
   const std::vector<Request> requests = createRequests(conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_weight_as_input_relaxed());
   validateModel(model);
   validateRequests(model, requests);
@@ -14008,13 +14008,13 @@ TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_weight_as_input_
 #ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
 TEST_F(DynamicOutputShapeTest, conv2d_v1_2_quant_output_multiplier_gt_1_dynamic_output_shape) {
   generated_tests::Execute(device,
-                           conv2d_v1_2::createTestModel_dynamic_output_shape,
-                           conv2d_v1_2::is_ignored_dynamic_output_shape,
+                           conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_dynamic_output_shape,
+                           conv2d_v1_2::is_ignored_quant_output_multiplier_gt_1_dynamic_output_shape,
                            conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_dynamic_output_shape(), true);
 }
 
 TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_dynamic_output_shape) {
-  const Model model = conv2d_v1_2::createTestModel_dynamic_output_shape();
+  const Model model = conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_dynamic_output_shape();
   const std::vector<Request> requests = createRequests(conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_dynamic_output_shape());
   validateModel(model);
   validateRequests(model, requests);
@@ -14025,13 +14025,13 @@ TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_dynamic_output_s
 #ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
 TEST_F(DynamicOutputShapeTest, conv2d_v1_2_quant_output_multiplier_gt_1_dynamic_output_shape_relaxed) {
   generated_tests::Execute(device,
-                           conv2d_v1_2::createTestModel_dynamic_output_shape_relaxed,
-                           conv2d_v1_2::is_ignored_dynamic_output_shape_relaxed,
+                           conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_dynamic_output_shape_relaxed,
+                           conv2d_v1_2::is_ignored_quant_output_multiplier_gt_1_dynamic_output_shape_relaxed,
                            conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_dynamic_output_shape_relaxed(), true);
 }
 
 TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_dynamic_output_shape_relaxed) {
-  const Model model = conv2d_v1_2::createTestModel_dynamic_output_shape_relaxed();
+  const Model model = conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_dynamic_output_shape_relaxed();
   const std::vector<Request> requests = createRequests(conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_dynamic_output_shape_relaxed());
   validateModel(model);
   validateRequests(model, requests);
@@ -14042,13 +14042,13 @@ TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_dynamic_output_s
 #ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
 TEST_F(DynamicOutputShapeTest, conv2d_v1_2_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input) {
   generated_tests::Execute(device,
-                           conv2d_v1_2::createTestModel_dynamic_output_shape_weight_as_input,
-                           conv2d_v1_2::is_ignored_dynamic_output_shape_weight_as_input,
+                           conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input,
+                           conv2d_v1_2::is_ignored_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input,
                            conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input(), true);
 }
 
 TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input) {
-  const Model model = conv2d_v1_2::createTestModel_dynamic_output_shape_weight_as_input();
+  const Model model = conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input();
   const std::vector<Request> requests = createRequests(conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input());
   validateModel(model);
   validateRequests(model, requests);
@@ -14059,13 +14059,13 @@ TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_dynamic_output_s
 #ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
 TEST_F(DynamicOutputShapeTest, conv2d_v1_2_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input_relaxed) {
   generated_tests::Execute(device,
-                           conv2d_v1_2::createTestModel_dynamic_output_shape_weight_as_input_relaxed,
-                           conv2d_v1_2::is_ignored_dynamic_output_shape_weight_as_input_relaxed,
+                           conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input_relaxed,
+                           conv2d_v1_2::is_ignored_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input_relaxed,
                            conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input_relaxed(), true);
 }
 
 TEST_F(ValidationTest, conv2d_v1_2_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input_relaxed) {
-  const Model model = conv2d_v1_2::createTestModel_dynamic_output_shape_weight_as_input_relaxed();
+  const Model model = conv2d_v1_2::createTestModel_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input_relaxed();
   const std::vector<Request> requests = createRequests(conv2d_v1_2::get_examples_quant_output_multiplier_gt_1_dynamic_output_shape_weight_as_input_relaxed());
   validateModel(model);
   validateRequests(model, requests);
@@ -51470,6 +51470,51 @@ TEST_F(ValidationTest, prelu_quant8) {
 }
 
 
+TEST_F(NeuralnetworksHidlTest, prelu_quant8_2) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_quant8_2,
+                           prelu::is_ignored_quant8_2,
+                           prelu::get_examples_quant8_2());
+}
+
+TEST_F(ValidationTest, prelu_quant8_2) {
+  const Model model = prelu::createTestModel_quant8_2();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_quant8_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, prelu_quant8_3) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_quant8_3,
+                           prelu::is_ignored_quant8_3,
+                           prelu::get_examples_quant8_3());
+}
+
+TEST_F(ValidationTest, prelu_quant8_3) {
+  const Model model = prelu::createTestModel_quant8_3();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_quant8_3());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, prelu_quant8_4) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_quant8_4,
+                           prelu::is_ignored_quant8_4,
+                           prelu::get_examples_quant8_4());
+}
+
+TEST_F(ValidationTest, prelu_quant8_4) {
+  const Model model = prelu::createTestModel_quant8_4();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_quant8_4());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
 TEST_F(NeuralnetworksHidlTest, prelu_float16) {
   generated_tests::Execute(device,
                            prelu::createTestModel_float16,
@@ -51525,6 +51570,51 @@ TEST_F(NeuralnetworksHidlTest, prelu_weight_as_input_quant8) {
 TEST_F(ValidationTest, prelu_weight_as_input_quant8) {
   const Model model = prelu::createTestModel_weight_as_input_quant8();
   const std::vector<Request> requests = createRequests(prelu::get_examples_weight_as_input_quant8());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, prelu_weight_as_input_quant8_2) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_weight_as_input_quant8_2,
+                           prelu::is_ignored_weight_as_input_quant8_2,
+                           prelu::get_examples_weight_as_input_quant8_2());
+}
+
+TEST_F(ValidationTest, prelu_weight_as_input_quant8_2) {
+  const Model model = prelu::createTestModel_weight_as_input_quant8_2();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_weight_as_input_quant8_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, prelu_weight_as_input_quant8_3) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_weight_as_input_quant8_3,
+                           prelu::is_ignored_weight_as_input_quant8_3,
+                           prelu::get_examples_weight_as_input_quant8_3());
+}
+
+TEST_F(ValidationTest, prelu_weight_as_input_quant8_3) {
+  const Model model = prelu::createTestModel_weight_as_input_quant8_3();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_weight_as_input_quant8_3());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, prelu_weight_as_input_quant8_4) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_weight_as_input_quant8_4,
+                           prelu::is_ignored_weight_as_input_quant8_4,
+                           prelu::get_examples_weight_as_input_quant8_4());
+}
+
+TEST_F(ValidationTest, prelu_weight_as_input_quant8_4) {
+  const Model model = prelu::createTestModel_weight_as_input_quant8_4();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_weight_as_input_quant8_4());
   validateModel(model);
   validateRequests(model, requests);
 }
@@ -51597,6 +51687,57 @@ TEST_F(ValidationTest, prelu_dynamic_output_shape_quant8) {
 
 #endif
 #ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, prelu_dynamic_output_shape_quant8_2) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_dynamic_output_shape_quant8_2,
+                           prelu::is_ignored_dynamic_output_shape_quant8_2,
+                           prelu::get_examples_dynamic_output_shape_quant8_2(), true);
+}
+
+TEST_F(ValidationTest, prelu_dynamic_output_shape_quant8_2) {
+  const Model model = prelu::createTestModel_dynamic_output_shape_quant8_2();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_dynamic_output_shape_quant8_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, prelu_dynamic_output_shape_quant8_3) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_dynamic_output_shape_quant8_3,
+                           prelu::is_ignored_dynamic_output_shape_quant8_3,
+                           prelu::get_examples_dynamic_output_shape_quant8_3(), true);
+}
+
+TEST_F(ValidationTest, prelu_dynamic_output_shape_quant8_3) {
+  const Model model = prelu::createTestModel_dynamic_output_shape_quant8_3();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_dynamic_output_shape_quant8_3());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, prelu_dynamic_output_shape_quant8_4) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_dynamic_output_shape_quant8_4,
+                           prelu::is_ignored_dynamic_output_shape_quant8_4,
+                           prelu::get_examples_dynamic_output_shape_quant8_4(), true);
+}
+
+TEST_F(ValidationTest, prelu_dynamic_output_shape_quant8_4) {
+  const Model model = prelu::createTestModel_dynamic_output_shape_quant8_4();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_dynamic_output_shape_quant8_4());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
 TEST_F(DynamicOutputShapeTest, prelu_dynamic_output_shape_float16) {
   generated_tests::Execute(device,
                            prelu::createTestModel_dynamic_output_shape_float16,
@@ -51658,6 +51799,57 @@ TEST_F(DynamicOutputShapeTest, prelu_dynamic_output_shape_weight_as_input_quant8
 TEST_F(ValidationTest, prelu_dynamic_output_shape_weight_as_input_quant8) {
   const Model model = prelu::createTestModel_dynamic_output_shape_weight_as_input_quant8();
   const std::vector<Request> requests = createRequests(prelu::get_examples_dynamic_output_shape_weight_as_input_quant8());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, prelu_dynamic_output_shape_weight_as_input_quant8_2) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_dynamic_output_shape_weight_as_input_quant8_2,
+                           prelu::is_ignored_dynamic_output_shape_weight_as_input_quant8_2,
+                           prelu::get_examples_dynamic_output_shape_weight_as_input_quant8_2(), true);
+}
+
+TEST_F(ValidationTest, prelu_dynamic_output_shape_weight_as_input_quant8_2) {
+  const Model model = prelu::createTestModel_dynamic_output_shape_weight_as_input_quant8_2();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_dynamic_output_shape_weight_as_input_quant8_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, prelu_dynamic_output_shape_weight_as_input_quant8_3) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_dynamic_output_shape_weight_as_input_quant8_3,
+                           prelu::is_ignored_dynamic_output_shape_weight_as_input_quant8_3,
+                           prelu::get_examples_dynamic_output_shape_weight_as_input_quant8_3(), true);
+}
+
+TEST_F(ValidationTest, prelu_dynamic_output_shape_weight_as_input_quant8_3) {
+  const Model model = prelu::createTestModel_dynamic_output_shape_weight_as_input_quant8_3();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_dynamic_output_shape_weight_as_input_quant8_3());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, prelu_dynamic_output_shape_weight_as_input_quant8_4) {
+  generated_tests::Execute(device,
+                           prelu::createTestModel_dynamic_output_shape_weight_as_input_quant8_4,
+                           prelu::is_ignored_dynamic_output_shape_weight_as_input_quant8_4,
+                           prelu::get_examples_dynamic_output_shape_weight_as_input_quant8_4(), true);
+}
+
+TEST_F(ValidationTest, prelu_dynamic_output_shape_weight_as_input_quant8_4) {
+  const Model model = prelu::createTestModel_dynamic_output_shape_weight_as_input_quant8_4();
+  const std::vector<Request> requests = createRequests(prelu::get_examples_dynamic_output_shape_weight_as_input_quant8_4());
   validateModel(model);
   validateRequests(model, requests);
 }
@@ -83779,6 +83971,518 @@ TEST_F(DynamicOutputShapeTest, transpose_conv2d_dynamic_output_shape_nchw_float1
 TEST_F(ValidationTest, transpose_conv2d_dynamic_output_shape_nchw_float16_weight_as_input_4) {
   const Model model = transpose_conv2d::createTestModel_dynamic_output_shape_nchw_float16_weight_as_input_4();
   const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_dynamic_output_shape_nchw_float16_weight_as_input_4());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nhwc) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nhwc,
+                           transpose_conv2d::is_ignored_zero_sized_nhwc,
+                           transpose_conv2d::get_examples_zero_sized_nhwc());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nhwc) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nhwc();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nhwc());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nhwc_relaxed) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nhwc_relaxed,
+                           transpose_conv2d::is_ignored_zero_sized_nhwc_relaxed,
+                           transpose_conv2d::get_examples_zero_sized_nhwc_relaxed());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nhwc_relaxed) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nhwc_relaxed();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nhwc_relaxed());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nhwc_quant8) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nhwc_quant8,
+                           transpose_conv2d::is_ignored_zero_sized_nhwc_quant8,
+                           transpose_conv2d::get_examples_zero_sized_nhwc_quant8());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nhwc_quant8) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nhwc_quant8();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nhwc_quant8());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nhwc_float16) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nhwc_float16,
+                           transpose_conv2d::is_ignored_zero_sized_nhwc_float16,
+                           transpose_conv2d::get_examples_zero_sized_nhwc_float16());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nhwc_float16) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nhwc_float16();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nhwc_float16());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nchw) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nchw,
+                           transpose_conv2d::is_ignored_zero_sized_nchw,
+                           transpose_conv2d::get_examples_zero_sized_nchw());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nchw) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nchw();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nchw());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nchw_relaxed) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nchw_relaxed,
+                           transpose_conv2d::is_ignored_zero_sized_nchw_relaxed,
+                           transpose_conv2d::get_examples_zero_sized_nchw_relaxed());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nchw_relaxed) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nchw_relaxed();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nchw_relaxed());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nchw_quant8) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nchw_quant8,
+                           transpose_conv2d::is_ignored_zero_sized_nchw_quant8,
+                           transpose_conv2d::get_examples_zero_sized_nchw_quant8());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nchw_quant8) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nchw_quant8();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nchw_quant8());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nchw_float16) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nchw_float16,
+                           transpose_conv2d::is_ignored_zero_sized_nchw_float16,
+                           transpose_conv2d::get_examples_zero_sized_nchw_float16());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nchw_float16) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nchw_float16();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nchw_float16());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nhwc,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_relaxed) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_relaxed,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nhwc_relaxed,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_relaxed(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_relaxed) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_relaxed();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_relaxed());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_quant8) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_quant8,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nhwc_quant8,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_quant8(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_quant8) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_quant8();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_quant8());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_float16) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_float16,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nhwc_float16,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_float16(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_float16) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_float16();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_float16());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nchw,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_relaxed) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_relaxed,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nchw_relaxed,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_relaxed(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_relaxed) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_relaxed();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_relaxed());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_quant8) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_quant8,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nchw_quant8,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_quant8(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_quant8) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_quant8();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_quant8());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_float16) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_float16,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nchw_float16,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_float16(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_float16) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_float16();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_float16());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nhwc_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nhwc_2,
+                           transpose_conv2d::is_ignored_zero_sized_nhwc_2,
+                           transpose_conv2d::get_examples_zero_sized_nhwc_2());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nhwc_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nhwc_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nhwc_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nhwc_relaxed_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nhwc_relaxed_2,
+                           transpose_conv2d::is_ignored_zero_sized_nhwc_relaxed_2,
+                           transpose_conv2d::get_examples_zero_sized_nhwc_relaxed_2());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nhwc_relaxed_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nhwc_relaxed_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nhwc_relaxed_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nhwc_quant8_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nhwc_quant8_2,
+                           transpose_conv2d::is_ignored_zero_sized_nhwc_quant8_2,
+                           transpose_conv2d::get_examples_zero_sized_nhwc_quant8_2());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nhwc_quant8_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nhwc_quant8_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nhwc_quant8_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nhwc_float16_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nhwc_float16_2,
+                           transpose_conv2d::is_ignored_zero_sized_nhwc_float16_2,
+                           transpose_conv2d::get_examples_zero_sized_nhwc_float16_2());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nhwc_float16_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nhwc_float16_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nhwc_float16_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nchw_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nchw_2,
+                           transpose_conv2d::is_ignored_zero_sized_nchw_2,
+                           transpose_conv2d::get_examples_zero_sized_nchw_2());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nchw_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nchw_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nchw_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nchw_relaxed_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nchw_relaxed_2,
+                           transpose_conv2d::is_ignored_zero_sized_nchw_relaxed_2,
+                           transpose_conv2d::get_examples_zero_sized_nchw_relaxed_2());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nchw_relaxed_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nchw_relaxed_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nchw_relaxed_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nchw_quant8_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nchw_quant8_2,
+                           transpose_conv2d::is_ignored_zero_sized_nchw_quant8_2,
+                           transpose_conv2d::get_examples_zero_sized_nchw_quant8_2());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nchw_quant8_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nchw_quant8_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nchw_quant8_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+TEST_F(NeuralnetworksHidlTest, transpose_conv2d_zero_sized_nchw_float16_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_nchw_float16_2,
+                           transpose_conv2d::is_ignored_zero_sized_nchw_float16_2,
+                           transpose_conv2d::get_examples_zero_sized_nchw_float16_2());
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_nchw_float16_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_nchw_float16_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_nchw_float16_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_2,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nhwc_2,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_2(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_relaxed_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_relaxed_2,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nhwc_relaxed_2,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_relaxed_2(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_relaxed_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_relaxed_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_relaxed_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_quant8_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_quant8_2,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nhwc_quant8_2,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_quant8_2(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_quant8_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_quant8_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_quant8_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_float16_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_float16_2,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nhwc_float16_2,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_float16_2(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nhwc_float16_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nhwc_float16_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nhwc_float16_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_2,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nchw_2,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_2(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_relaxed_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_relaxed_2,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nchw_relaxed_2,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_relaxed_2(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_relaxed_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_relaxed_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_relaxed_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_quant8_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_quant8_2,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nchw_quant8_2,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_quant8_2(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_quant8_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_quant8_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_quant8_2());
+  validateModel(model);
+  validateRequests(model, requests);
+}
+
+
+#endif
+#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE
+TEST_F(DynamicOutputShapeTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_float16_2) {
+  generated_tests::Execute(device,
+                           transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_float16_2,
+                           transpose_conv2d::is_ignored_zero_sized_dynamic_output_shape_nchw_float16_2,
+                           transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_float16_2(), true);
+}
+
+TEST_F(ValidationTest, transpose_conv2d_zero_sized_dynamic_output_shape_nchw_float16_2) {
+  const Model model = transpose_conv2d::createTestModel_zero_sized_dynamic_output_shape_nchw_float16_2();
+  const std::vector<Request> requests = createRequests(transpose_conv2d::get_examples_zero_sized_dynamic_output_shape_nchw_float16_2());
   validateModel(model);
   validateRequests(model, requests);
 }
