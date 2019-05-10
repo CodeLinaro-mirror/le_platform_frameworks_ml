@@ -1031,12 +1031,21 @@ typedef enum {
      *      the input.
      * * 1: An {@link ANEURALNETWORKS_INT32} scalar, specifying the radius of
      *      the normalization window.
-     * * 2: An {@link ANEURALNETWORKS_FLOAT32} scalar, specifying the bias, must
-     *      not be zero.
-     * * 3: An {@link ANEURALNETWORKS_FLOAT32} scalar, specifying the scale
-     *      factor, alpha.
-     * * 4: An {@link ANEURALNETWORKS_FLOAT32} scalar, specifying the exponent,
-     *      beta.
+     * * 2: A scalar, specifying the bias, must not be zero.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT16}, the bias
+     *      value must be of {@link ANEURALNETWORKS_FLOAT16}.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT32}, the bias
+     *      value must be of {@link ANEURALNETWORKS_FLOAT32}.
+     * * 3: A scalar, specifying the scale factor, alpha.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT16}, the
+     *      alpha value must be of {@link ANEURALNETWORKS_FLOAT16}.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT32}, the
+     *      alpha value must be of {@link ANEURALNETWORKS_FLOAT32}.
+     * * 4: A scalar, specifying the exponent, beta.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT16}, the beta
+     *      value must be of {@link ANEURALNETWORKS_FLOAT16}.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT32}, the beta
+     *      value must be of {@link ANEURALNETWORKS_FLOAT32}.
      * * 5: An optional {@link ANEURALNETWORKS_INT32} scalar, default to -1,
      *      specifying the dimension normalization would be performed on.
      *      Negative index is used to specify axis from the end (e.g. -1 for
@@ -1610,9 +1619,9 @@ typedef enum {
      *      the input. Since API level 29, zero batches is supported for this
      *      tensor.
      * * 1: An {@link ANEURALNETWORKS_INT32} scalar, specifying the output
-     *      height of the output tensor.
-     * * 2: An {@link ANEURALNETWORKS_INT32} scalar, specifying the output
      *      width of the output tensor.
+     * * 2: An {@link ANEURALNETWORKS_INT32} scalar, specifying the output
+     *      height of the output tensor.
      * * 3: An optional {@link ANEURALNETWORKS_BOOL} scalar, default to false.
      *      Set to true to specify NCHW data layout for input0 and output0.
      *      Available since API level 29.
@@ -1620,15 +1629,15 @@ typedef enum {
      * Inputs (resizing by scale, since API level 29):
      * * 0: A 4-D tensor, of shape [batches, height, width, depth], specifying
      *      the input. Zero batches is supported for this tensor.
-     * * 1: A scalar, specifying height_scale, the scaling factor of the height
+     * * 1: A scalar, specifying width_scale, the scaling factor of the width
      *      dimension from the input tensor to the output tensor. The output
-     *      height is calculated as new_height = floor(height * height_scale).
+     *      width is calculated as new_width = floor(width * width_scale).
      *      The scalar must be of {@link ANEURALNETWORKS_FLOAT16} if input0 is
      *      of {@link ANEURALNETWORKS_TENSOR_FLOAT16} and of
      *      {@link ANEURALNETWORKS_FLOAT32} otherwise.
-     * * 2: A scalar, specifying width_scale, the scaling factor of the width
+     * * 2: A scalar, specifying height_scale, the scaling factor of the height
      *      dimension from the input tensor to the output tensor. The output
-     *      width is calculated as new_width = floor(width * width_scale).
+     *      height is calculated as new_height = floor(height * height_scale).
      *      The scalar must be of {@link ANEURALNETWORKS_FLOAT16} if input0 is
      *      of {@link ANEURALNETWORKS_TENSOR_FLOAT16} and of
      *      {@link ANEURALNETWORKS_FLOAT32} otherwise.
@@ -2019,7 +2028,8 @@ typedef enum {
      * Supported tensor {@link OperandCode}:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT16} (since API level 29)
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
-     * * {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM}
+     * * {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} (full support since API
+     *   level 29, see the output section)
      *
      * Supported tensor rank: up to 4
      *
@@ -2041,6 +2051,10 @@ typedef enum {
      *      of the padding:
      *          output0.dimension[i] =
      *              padding[i, 0] + input0.dimension[i] + padding[i, 1]
+     *
+     *      NOTE: Before API level 29, the pad value for
+     *      {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} is undefined.
+     *      Since API level 29, the pad value is always the logical zero.
      *
      * Available since API level 28.
      */
@@ -3529,8 +3543,12 @@ typedef enum {
      *
      * Inputs:
      * * 0: A tensor specifying the input logits.
-     * * 1: An {@link ANEURALNETWORKS_FLOAT32} scalar, specifying the positive
-     *      scaling factor for the exponent, beta.
+     * * 1: A scalar, specifying the positive scaling factor for the exponent,
+     *      beta.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT16}, the beta
+     *      value must be of {@link ANEURALNETWORKS_FLOAT16}.
+     *      For input tensor of {@link ANEURALNETWORKS_TENSOR_FLOAT32}, the beta
+     *      value must be of {@link ANEURALNETWORKS_FLOAT32}.
      * * 2: An {@link ANEURALNETWORKS_INT32} scalar specifying the axis to
      *      reduce across. Negative index is used to specify axis from the
      *      end (e.g. -1 for the last axis). Must be in the range [-n, n).
@@ -3552,6 +3570,8 @@ typedef enum {
      * * {@link ANEURALNETWORKS_TENSOR_INT32}
      * * {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM}
      *
+     * Supported tensor rank: from 1.
+     *
      * Inputs:
      * * 0: A tensor.
      * * 1: A tensor of the same {@link OperandCode} and compatible dimensions
@@ -3572,6 +3592,8 @@ typedef enum {
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
      * * {@link ANEURALNETWORKS_TENSOR_INT32}
      * * {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM}
+     *
+     * Supported tensor rank: from 1.
      *
      * Inputs:
      * * 0: A tensor.
@@ -4681,24 +4703,24 @@ typedef enum {
      * * 0: A 4-D tensor, of shape [batches, height, width, depth], specifying
      *      the input. Zero batches is supported for this tensor.
      * * 1: An {@link ANEURALNETWORKS_INT32} scalar, specifying the output
-     *      height of the output tensor.
-     * * 2: An {@link ANEURALNETWORKS_INT32} scalar, specifying the output
      *      width of the output tensor.
+     * * 2: An {@link ANEURALNETWORKS_INT32} scalar, specifying the output
+     *      height of the output tensor.
      * * 3: An {@link ANEURALNETWORKS_BOOL} scalar, default to false.
      *      Set to true to specify NCHW data layout for input0 and output0.
      *
      * Inputs (resizing by scale):
      * * 0: A 4-D tensor, of shape [batches, height, width, depth], specifying
      *      the input. Zero batches is supported for this tensor.
-     * * 1: A scalar, specifying height_scale, the scaling factor of the height
+     * * 1: A scalar, specifying width_scale, the scaling factor of the width
      *      dimension from the input tensor to the output tensor. The output
-     *      height is calculated as new_height = floor(height * height_scale).
+     *      width is calculated as new_width = floor(width * width_scale).
      *      The scalar must be of {@link ANEURALNETWORKS_FLOAT16} if input0 is
      *      of {@link ANEURALNETWORKS_TENSOR_FLOAT16} and of
      *      {@link ANEURALNETWORKS_FLOAT32} otherwise.
-     * * 2: A scalar, specifying width_scale, the scaling factor of the width
+     * * 2: A scalar, specifying height_scale, the scaling factor of the height
      *      dimension from the input tensor to the output tensor. The output
-     *      width is calculated as new_width = floor(width * width_scale).
+     *      height is calculated as new_height = floor(height * height_scale).
      *      The scalar must be of {@link ANEURALNETWORKS_FLOAT16} if input0 is
      *      of {@link ANEURALNETWORKS_TENSOR_FLOAT16} and of
      *      {@link ANEURALNETWORKS_FLOAT32} otherwise.
