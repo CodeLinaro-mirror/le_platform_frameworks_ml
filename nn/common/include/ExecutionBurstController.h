@@ -110,11 +110,12 @@ class ResultChannelReceiver {
      */
     void invalidate();
 
+    // prefer calling ResultChannelReceiver::getBlocking
+    std::optional<std::vector<FmqResultDatum>> getPacketBlocking();
+
     ResultChannelReceiver(std::unique_ptr<FmqResultChannel> fmqResultChannel, bool blocking);
 
    private:
-    std::optional<std::vector<FmqResultDatum>> getPacketBlocking();
-
     const std::unique_ptr<FmqResultChannel> mFmqResultChannel;
     std::atomic<bool> mTeardown{false};
     const bool mBlocking;
@@ -192,9 +193,29 @@ class ExecutionBurstController {
      * buffer, they must use the same key.
      */
     class ExecutionBurstCallback : public IBurstCallback {
+        DISALLOW_COPY_AND_ASSIGN(ExecutionBurstCallback);
+
        public:
+        ExecutionBurstCallback() = default;
+
         Return<void> getMemories(const hidl_vec<int32_t>& slots, getMemories_cb cb) override;
 
+        /**
+         * This function performs one of two different actions:
+         * 1) If a key corresponding to a memory resource is unrecognized by the
+         *    ExecutionBurstCallback object, the ExecutionBurstCallback object
+         *    will allocate a slot, bind the memory to the slot, and return the
+         *    slot identifier.
+         * 2) If a key corresponding to a memory resource is recognized by the
+         *    ExecutionBurstCallback object, the ExecutionBurstCallback object
+         *    will return the existing slot identifier.
+         *
+         * @param memories Memory resources used in an inference.
+         * @param keys Unique identifiers where each element corresponds to a
+         *     memory resource element in "memories".
+         * @return Unique slot identifiers where each returned slot element
+         *     corresponds to a memory resource element in "memories".
+         */
         std::vector<int32_t> getSlots(const hidl_vec<hidl_memory>& memories,
                                       const std::vector<intptr_t>& keys);
 
