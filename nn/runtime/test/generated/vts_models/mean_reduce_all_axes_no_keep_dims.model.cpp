@@ -1,11 +1,11 @@
 // clang-format off
-// Generated file (from: pad_v2_1_float_relaxed.mod.py). Do not edit
+// Generated file (from: mean_reduce_all_axes_no_keep_dims.mod.py). Do not edit
 // Create the model
 Model createTestModel() {
     const std::vector<Operand> operands = {
         {
             .type = OperandType::TENSOR_FLOAT32,
-            .dimensions = {1, 2, 3, 1},
+            .dimensions = {1, 2, 2, 1},
             .numberOfConsumers = 1,
             .scale = 0.0f,
             .zeroPoint = 0,
@@ -14,25 +14,25 @@ Model createTestModel() {
         },
         {
             .type = OperandType::TENSOR_INT32,
-            .dimensions = {4, 2},
+            .dimensions = {4},
             .numberOfConsumers = 1,
             .scale = 0.0f,
             .zeroPoint = 0,
             .lifetime = OperandLifeTime::CONSTANT_COPY,
-            .location = {.poolIndex = 0, .offset = 0, .length = 32},
+            .location = {.poolIndex = 0, .offset = 0, .length = 16},
         },
         {
-            .type = OperandType::FLOAT32,
+            .type = OperandType::INT32,
             .dimensions = {},
             .numberOfConsumers = 1,
             .scale = 0.0f,
             .zeroPoint = 0,
             .lifetime = OperandLifeTime::CONSTANT_COPY,
-            .location = {.poolIndex = 0, .offset = 32, .length = 4},
+            .location = {.poolIndex = 0, .offset = 16, .length = 4},
         },
         {
             .type = OperandType::TENSOR_FLOAT32,
-            .dimensions = {1, 4, 7, 1},
+            .dimensions = {},
             .numberOfConsumers = 0,
             .scale = 0.0f,
             .zeroPoint = 0,
@@ -43,7 +43,7 @@ Model createTestModel() {
 
     const std::vector<Operation> operations = {
         {
-            .type = OperationType::PAD_V2,
+            .type = OperationType::MEAN,
             .inputs = {0, 1, 2},
             .outputs = {3},
         }
@@ -52,7 +52,7 @@ Model createTestModel() {
     const std::vector<uint32_t> inputIndexes = {0};
     const std::vector<uint32_t> outputIndexes = {3};
     std::vector<uint8_t> operandValues = {
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 205, 204, 20, 65
+      0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0
     };
     const std::vector<hidl_memory> pools = {};
 
@@ -63,7 +63,6 @@ Model createTestModel() {
         .outputIndexes = outputIndexes,
         .operandValues = operandValues,
         .pools = pools,
-        .relaxComputationFloat32toFloat16 = true,
     };
 }
 
@@ -77,7 +76,7 @@ Model createTestModel_dynamic_output_shape() {
     const std::vector<Operand> operands = {
         {
             .type = OperandType::TENSOR_FLOAT32,
-            .dimensions = {1, 2, 3, 1},
+            .dimensions = {1, 2, 2, 1},
             .numberOfConsumers = 1,
             .scale = 0.0f,
             .zeroPoint = 0,
@@ -86,25 +85,25 @@ Model createTestModel_dynamic_output_shape() {
         },
         {
             .type = OperandType::TENSOR_INT32,
-            .dimensions = {4, 2},
+            .dimensions = {4},
             .numberOfConsumers = 1,
             .scale = 0.0f,
             .zeroPoint = 0,
             .lifetime = OperandLifeTime::CONSTANT_COPY,
-            .location = {.poolIndex = 0, .offset = 0, .length = 32},
+            .location = {.poolIndex = 0, .offset = 0, .length = 16},
         },
         {
-            .type = OperandType::FLOAT32,
+            .type = OperandType::INT32,
             .dimensions = {},
             .numberOfConsumers = 1,
             .scale = 0.0f,
             .zeroPoint = 0,
             .lifetime = OperandLifeTime::CONSTANT_COPY,
-            .location = {.poolIndex = 0, .offset = 32, .length = 4},
+            .location = {.poolIndex = 0, .offset = 16, .length = 4},
         },
         {
             .type = OperandType::TENSOR_FLOAT32,
-            .dimensions = {0, 0, 0, 0},
+            .dimensions = {},
             .numberOfConsumers = 0,
             .scale = 0.0f,
             .zeroPoint = 0,
@@ -115,7 +114,7 @@ Model createTestModel_dynamic_output_shape() {
 
     const std::vector<Operation> operations = {
         {
-            .type = OperationType::PAD_V2,
+            .type = OperationType::MEAN,
             .inputs = {0, 1, 2},
             .outputs = {3},
         }
@@ -124,7 +123,7 @@ Model createTestModel_dynamic_output_shape() {
     const std::vector<uint32_t> inputIndexes = {0};
     const std::vector<uint32_t> outputIndexes = {3};
     std::vector<uint8_t> operandValues = {
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 205, 204, 20, 65
+      0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0
     };
     const std::vector<hidl_memory> pools = {};
 
@@ -135,7 +134,6 @@ Model createTestModel_dynamic_output_shape() {
         .outputIndexes = outputIndexes,
         .operandValues = operandValues,
         .pools = pools,
-        .relaxComputationFloat32toFloat16 = true,
     };
 }
 
