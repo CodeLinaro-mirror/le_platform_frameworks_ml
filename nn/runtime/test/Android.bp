@@ -60,12 +60,13 @@ cc_defaults {
         // Changes to this list must be reflected in cts/tests/tests/neuralnetworks/Android.mk
         // to ensure CTS tests coverage.
         "generated/tests/*.cpp",
-        "GeneratedUtils.cpp",
+        "TestGenerated.cpp",
         "TestMemory.cpp",
         "TestOperandExtraParams.cpp",
         "TestTrivialModel.cpp",
         "TestUnknownDimensions.cpp",
         "TestUnspecifiedDimensions.cpp",
+        "TestValidateModel.cpp",
         "TestValidateOperations.cpp",
         "TestValidation.cpp",
         "TestWrapper.cpp",
@@ -136,6 +137,25 @@ cc_test {
 }
 
 cc_test {
+    name: "NeuralNetworksTest_static_fuzzing",
+    defaults: ["NeuralNetworksTest_default_libs"],
+    srcs: [
+        "TestNeuralNetworksWrapper.cpp",
+        "fuzzing/operation_signatures/*.cpp",
+        "fuzzing/OperationManager.cpp",
+        "fuzzing/RandomGraphGenerator.cpp",
+        "fuzzing/RandomGraphGeneratorUtils.cpp",
+        "fuzzing/RandomVariable.cpp",
+        "fuzzing/TestRandomGraph.cpp",
+    ],
+    static_libs: [
+        "libgmock",
+        "libneuralnetworks",
+        "libneuralnetworks_common",
+    ],
+}
+
+cc_test {
     name: "NeuralNetworksTest_static_asan",
     defaults: ["NeuralNetworksTest_static_defaults"],
     sanitize: {
@@ -185,7 +205,7 @@ cc_defaults {
         "TestNeuralNetworksWrapper.cpp",
         "TestMain.cpp",
         "generated/tests/*.cpp",
-        "GeneratedUtils.cpp",
+        "TestGenerated.cpp",
     ],
     cflags: [
         "-DNNTEST_MULTITHREADED"
