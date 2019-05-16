@@ -129,3 +129,39 @@ TEST_F(DynamicOutputShapeTest, greater_quantized_different_zero_point_dynamic_ou
             greater::get_examples_quantized_different_zero_point_dynamic_output_shape());
 }
 
+TEST_F(GeneratedTests, greater_quantized_overflow_second_input_if_requantized) {
+    execute(greater::CreateModel_5,
+            greater::is_ignored_5,
+            greater::get_examples_quantized_overflow_second_input_if_requantized());
+}
+
+TEST_F(DynamicOutputShapeTest, greater_quantized_overflow_second_input_if_requantized_dynamic_output_shape) {
+    execute(greater::CreateModel_dynamic_output_shape_5,
+            greater::is_ignored_dynamic_output_shape_5,
+            greater::get_examples_quantized_overflow_second_input_if_requantized_dynamic_output_shape());
+}
+
+TEST_F(GeneratedTests, greater_quantized_overflow_first_input_if_requantized) {
+    execute(greater::CreateModel_6,
+            greater::is_ignored_6,
+            greater::get_examples_quantized_overflow_first_input_if_requantized());
+}
+
+TEST_F(DynamicOutputShapeTest, greater_quantized_overflow_first_input_if_requantized_dynamic_output_shape) {
+    execute(greater::CreateModel_dynamic_output_shape_6,
+            greater::is_ignored_dynamic_output_shape_6,
+            greater::get_examples_quantized_overflow_first_input_if_requantized_dynamic_output_shape());
+}
+
+TEST_F(GeneratedTests, greater_boolean) {
+    execute(greater::CreateModel_7,
+            greater::is_ignored_7,
+            greater::get_examples_boolean());
+}
+
+TEST_F(DynamicOutputShapeTest, greater_boolean_dynamic_output_shape) {
+    execute(greater::CreateModel_dynamic_output_shape_7,
+            greater::is_ignored_dynamic_output_shape_7,
+            greater::get_examples_boolean_dynamic_output_shape());
+}
+

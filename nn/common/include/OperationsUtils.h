@@ -160,20 +160,19 @@ inline bool handleNegativeAxis(const Shape& shape, int32_t* axis) {
     return handleNegativeAxis(getNumberOfDimensions(shape), axis);
 }
 
-inline uint32_t computeOutSize(uint32_t imageSize, uint32_t filterSize, uint32_t stride,
-                               uint32_t paddingHead, uint32_t paddingTail) {
+inline int32_t computeOutSize(int32_t imageSize, int32_t filterSize, int32_t stride,
+                              int32_t paddingHead, int32_t paddingTail) {
     return (imageSize - filterSize + stride + paddingHead + paddingTail) / stride;
 }
 
-inline uint32_t computeOutSize(uint32_t imageSize, uint32_t filterSize, uint32_t stride,
-                               uint32_t dilationRate, uint32_t paddingHead, uint32_t paddingTail) {
-    uint32_t effectiveFilterSize = ((filterSize - 1) * dilationRate + 1);
+inline int32_t computeOutSize(int32_t imageSize, int32_t filterSize, int32_t stride,
+                              int32_t dilationRate, int32_t paddingHead, int32_t paddingTail) {
+    int32_t effectiveFilterSize = ((filterSize - 1) * dilationRate + 1);
     return (imageSize - effectiveFilterSize + stride + paddingHead + paddingTail) / stride;
 }
 
-inline uint32_t computeOutSizeTransposeConv(uint32_t imageSize, uint32_t filterSize,
-                                            uint32_t stride, uint32_t paddingHead,
-                                            uint32_t paddingTail) {
+inline int32_t computeOutSizeTransposeConv(int32_t imageSize, int32_t filterSize, int32_t stride,
+                                           int32_t paddingHead, int32_t paddingTail) {
     return imageSize * stride + filterSize - stride - paddingHead - paddingTail;
 }
 
@@ -207,22 +206,16 @@ void CalculateActivationRangeFloat(int32_t activation,
 
 int32_t CalculateInputRadius(int input_integer_bits, int input_left_shift);
 
+void calculateExplicitPaddingImpl(int32_t in_size, int32_t stride, int32_t dilation_factor,
+                                  int32_t filter_size, int32_t padding_implicit,
+                                  bool isTransposeConv, int32_t* padding_head,
+                                  int32_t* padding_tail);
+
 inline void calculateExplicitPadding(int32_t in_size, int32_t stride, int32_t dilation_factor,
                                      int32_t filter_size, int32_t padding_implicit,
                                      int32_t* padding_head, int32_t* padding_tail) {
-    *padding_head = 0;
-    *padding_tail = 0;
-
-    int32_t effective_filter_size = (filter_size - 1) * dilation_factor + 1;
-
-    if (padding_implicit == kPaddingSame) {
-        int32_t out_size = (in_size + stride - 1) / stride;
-        int32_t tmp = (out_size - 1) * stride + effective_filter_size;
-        if (tmp > in_size) {
-            *padding_head = (tmp - in_size) / 2;
-            *padding_tail = (tmp - in_size) - *padding_head;
-        }
-    }
+    calculateExplicitPaddingImpl(in_size, stride, dilation_factor, filter_size, padding_implicit,
+                                 /*isTransposeConv=*/false, padding_head, padding_tail);
 }
 
 inline void calculateExplicitPadding(int32_t in_size, int32_t stride, int32_t filter_size,
@@ -230,6 +223,14 @@ inline void calculateExplicitPadding(int32_t in_size, int32_t stride, int32_t fi
                                      int32_t* padding_tail) {
     calculateExplicitPadding(in_size, stride, 1, filter_size, padding_implicit, padding_head,
                              padding_tail);
+}
+
+inline void calculateExplicitPaddingTransposeConv(int32_t in_size, int32_t stride,
+                                                  int32_t filter_size, int32_t padding_implicit,
+                                                  int32_t* padding_head, int32_t* padding_tail) {
+    calculateExplicitPaddingImpl(in_size, stride, /*dilation_factor=*/1, filter_size,
+                                 padding_implicit, /*isTransposeConv=*/true, padding_head,
+                                 padding_tail);
 }
 
 inline PaddingScheme getPaddingScheme(int32_t inWidth, int32_t inHeight,
@@ -400,6 +401,33 @@ inline bool transposeFirstTwoDimensions(const Shape& shape, Shape* transposedSha
     *transposedShape = shape;
     transposedShape->dimensions[0] = shape.dimensions[1];
     transposedShape->dimensions[1] = shape.dimensions[0];
+    return true;
+}
+
+// Given two 3-dimensional tensors, merge them into one 3-dimensional tensor
+// at the third dimension. The merged tensor's third dimension size will be
+// sum of that of the two inputs.
+template <typename T>
+inline bool mergeThirdDimension(const T* bufferA, const std::vector<uint32_t>& dimsA,
+                                const T* bufferB, const std::vector<uint32_t>& dimsB, T* merged) {
+    NN_RET_CHECK_EQ(dimsA.size(), 3u);
+    NN_RET_CHECK_EQ(dimsB.size(), 3u);
+
+    NN_RET_CHECK_EQ(dimsA[0], dimsB[0]);
+    NN_RET_CHECK_EQ(dimsA[1], dimsB[1]);
+
+    for (unsigned int i = 0; i < dimsA[0]; ++i) {
+        for (unsigned int j = 0; j < dimsA[1]; ++j) {
+            for (unsigned int k = 0; k < dimsA[2]; ++k) {
+                merged[(i * dimsA[1] + j) * (dimsA[2] + dimsB[2]) + k] =
+                        bufferA[(i * dimsA[1] + j) * dimsA[2] + k];
+            }
+            for (unsigned int k = 0; k < dimsB[2]; ++k) {
+                merged[(i * dimsA[1] + j) * (dimsA[2] + dimsB[2]) + dimsA[2] + k] =
+                        bufferB[(i * dimsB[1] + j) * dimsB[2] + k];
+            }
+        }
+    }
     return true;
 }
 
