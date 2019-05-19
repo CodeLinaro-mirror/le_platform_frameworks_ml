@@ -23,9 +23,17 @@
 
 #include <android-base/logging.h>
 #include <gtest/gtest.h>
+#include <cctype>
 #include <iostream>
+#include <string>
 
 using namespace android::nn::test_wrapper;
+
+// We run through the test suite several times, by invoking test() several
+// times.  Each run is a "pass".
+
+// Bitmask of passes we're allowed to run.
+static uint64_t allowedPasses = ~uint64_t(0);
 
 // DeviceManager::setUseCpuOnly() and Execution::setComputeUsesSynchronousAPI()
 // according to arguments, and return RUN_ALL_TESTS().  It is unspecified what
@@ -40,8 +48,10 @@ using namespace android::nn::test_wrapper;
 // non-public DeviceManager::setSyncExecHal(); we assume the setting is always
 // true, and if we are asked to set it to false, we return 0 ("success") without
 // running tests.
-static int test(bool useCpuOnly, bool computeUsesSynchronousAPI, bool allowSyncExecHal = true,
-                bool computeUsesBurstAPI = false) {
+static int test(bool useCpuOnly, Execution::ComputeMode computeMode, bool allowSyncExecHal = true) {
+    uint32_t passIndex =
+            (useCpuOnly << 0) + (static_cast<uint32_t>(computeMode) << 1) + (allowSyncExecHal << 3);
+
 #ifdef NNTEST_ONLY_PUBLIC_API
     if (useCpuOnly || !allowSyncExecHal) {
         return 0;
@@ -51,41 +61,76 @@ static int test(bool useCpuOnly, bool computeUsesSynchronousAPI, bool allowSyncE
     android::nn::DeviceManager::get()->setSyncExecHal(allowSyncExecHal);
 #endif
 
-    Execution::setComputeUsesSynchronousAPI(computeUsesSynchronousAPI);
-    Execution::setComputeUsesBurstAPI(computeUsesBurstAPI);
+    Execution::setComputeMode(computeMode);
 
-    LOG(INFO) << "test(useCpuOnly = " << useCpuOnly
-              << ", computeUsesSynchronousAPI = " << computeUsesSynchronousAPI
-              << ", allowSyncExecHal = " << allowSyncExecHal << ")";
+    auto computeModeText = [computeMode] {
+        switch (computeMode) {
+            case Execution::ComputeMode::SYNC:
+                return "ComputeMode::SYNC";
+            case Execution::ComputeMode::ASYNC:
+                return "ComputeMode::ASYNC";
+            case Execution::ComputeMode::BURST:
+                return "ComputeMode::BURST";
+        }
+        return "<unknown ComputeMode>";
+    };
+
+    LOG(INFO) << "test(useCpuOnly = " << useCpuOnly << ", computeMode = " << computeModeText()
+              << ", allowSyncExecHal = " << allowSyncExecHal << ")  // pass " << passIndex;
     std::cout << "[**********] useCpuOnly = " << useCpuOnly
-              << ", computeUsesSynchronousAPI = " << computeUsesSynchronousAPI
-              << ", allowSyncExecHal = " << allowSyncExecHal << std::endl;
+              << ", computeMode = " << computeModeText()
+              << ", allowSyncExecHal = " << allowSyncExecHal << "  // pass " << passIndex
+              << std::endl;
+
+    if (!((uint64_t(1) << passIndex) & allowedPasses)) {
+        LOG(INFO) << "SKIPPED PASS";
+        std::cout << "SKIPPED PASS" << std::endl;
+        return 0;
+    }
+
     return RUN_ALL_TESTS();
+}
+
+void checkArgs(int argc, char** argv, int nextArg) {
+    if (nextArg != argc) {
+        std::cerr << "Unexpected argument: " << argv[nextArg] << std::endl;
+        exit(1);
+    }
 }
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
+    if ((argc > 1) && std::isdigit(argv[1][0])) {
+        allowedPasses = std::stoull(argv[1]);
+        checkArgs(argc, argv, 2);
+    } else {
+        checkArgs(argc, argv, 1);
+    }
+
 #ifndef NNTEST_ONLY_PUBLIC_API
     android::nn::initVLogMask();
 #endif
 
-    int n = test(false, false) | test(false, true) | test(true, false) | test(true, true);
+    int n = test(/*useCpuOnly=*/false, Execution::ComputeMode::ASYNC) |
+            test(/*useCpuOnly=*/false, Execution::ComputeMode::SYNC) |
+            test(/*useCpuOnly=*/true, Execution::ComputeMode::ASYNC) |
+            test(/*useCpuOnly=*/true, Execution::ComputeMode::SYNC);
 
     // Now try disabling use of synchronous execution HAL.
     //
     // Whether or not the use of synchronous execution HAL is enabled should make no
     // difference when useCpuOnly = true; we already ran test(true, *, true) above,
     // so there's no reason to run test(true, *, false) now.
-    n |= test(false, false, false) | test(false, true, false);
+    n |= test(/*useCpuOnly=*/false, Execution::ComputeMode::ASYNC, /*allowSyncExecHal=*/false) |
+         test(/*useCpuOnly=*/false, Execution::ComputeMode::SYNC, /*allowSyncExecHal=*/false);
 
     // Now try execution using a burst.
     //
     // The burst path is off by default in these tests. This is the first case
-    // where it is turned on. Both "computeUsesSynchronousAPI" and
-    // "allowSyncExecHal" are irrelevant here because the burst path is separate
-    // from both.
-    n |= test(false, false, false, true);
+    // where it is turned on. Both "useCpuOnly" and "allowSyncExecHal" are
+    // irrelevant here because the burst path is separate from both.
+    n |= test(/*useCpuOnly=*/false, Execution::ComputeMode::BURST);
 
     return n;
 }

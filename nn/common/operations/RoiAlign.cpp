@@ -122,8 +122,11 @@ inline bool roiAlignNhwc(const T_Input* inputData, const Shape& inputShape, cons
                 for (uint32_t k = 0; k < inDepth; k++) outPtr[k] = 0;
 
                 // calculate the sum of the sampling points
-                for (T_Roi y = hStart + hBinSize / 2; y < hEnd; y += hBinSize) {
-                    for (T_Roi x = wStart + wBinSize / 2; x < wEnd; x += wBinSize) {
+                for (uint32_t yInd = 0; yInd < hSamplingRatio; yInd++) {
+                    for (uint32_t xInd = 0; xInd < wSamplingRatio; xInd++) {
+                        T_Roi y = hStart + hBinSize / 2 + hBinSize * yInd;
+                        T_Roi x = wStart + wBinSize / 2 + wBinSize * xInd;
+
                         // bilinear interpolation of point (x,y)
                         // w.r.t box [(x1,y1), (x1,y2), (x2,y1), (x2,y2)]
                         uint32_t x1 = std::floor(static_cast<float>(x));
@@ -247,8 +250,11 @@ inline bool roiAlignNhwc<uint8_t, uint16_t>(const uint8_t* inputData, const Shap
 
                 std::vector<int32_t> outTemp(inDepth, 0);
                 // calculate the sum of the sampling points
-                for (float y = hStart + hBinSize / 2; y < hEnd; y += hBinSize) {
-                    for (float x = wStart + wBinSize / 2; x < wEnd; x += wBinSize) {
+                for (uint32_t yInd = 0; yInd < hSamplingRatio; yInd++) {
+                    for (uint32_t xInd = 0; xInd < wSamplingRatio; xInd++) {
+                        float y = hStart + hBinSize / 2 + hBinSize * yInd;
+                        float x = wStart + wBinSize / 2 + wBinSize * xInd;
+
                         // bilinear interpolation of point (x,y)
                         // w.r.t box [(x1,y1), (x1,y2), (x2,y1), (x2,y2)]
                         uint32_t x1 = std::floor(x), y1 = std::floor(y);
@@ -371,6 +377,11 @@ bool prepare(IOperationExecutionContext* context) {
     uint32_t inWidth = getSizeOfDimension(input, useNchw ? 3 : 2);
     uint32_t inDepth = getSizeOfDimension(input, useNchw ? 1 : 3);
     uint32_t numRois = getSizeOfDimension(roiShape, 0);
+    // Every dimension must be positive except for numRois.
+    NN_RET_CHECK_GT(numBatches, 0);
+    NN_RET_CHECK_GT(inHeight, 0);
+    NN_RET_CHECK_GT(inWidth, 0);
+    NN_RET_CHECK_GT(inDepth, 0);
     NN_RET_CHECK_EQ(getSizeOfDimension(roiShape, 1), 4);
     NN_RET_CHECK_EQ(getSizeOfDimension(batchSplitShape, 0), numRois);
 
@@ -412,6 +423,8 @@ bool prepare(IOperationExecutionContext* context) {
 }
 
 bool execute(IOperationExecutionContext* context) {
+    // Bypass execution in the case of zero-sized input.
+    if (getNumberOfElements(context->getInputShape(kRoiTensor)) == 0) return true;
     switch (context->getInputType(kInputTensor)) {
         case OperandType::TENSOR_FLOAT16:
             return roiAlign(context->getInputBuffer<_Float16>(kInputTensor),
@@ -463,7 +476,7 @@ bool execute(IOperationExecutionContext* context) {
 }  // namespace roi_align
 
 NN_REGISTER_OPERATION(ROI_ALIGN, roi_align::kOperationName, roi_align::validate, roi_align::prepare,
-                      roi_align::execute);
+                      roi_align::execute, .allowZeroSizedInput = true);
 
 }  // namespace nn
 }  // namespace android

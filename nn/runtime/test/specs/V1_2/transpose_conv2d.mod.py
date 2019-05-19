@@ -33,12 +33,26 @@ quant8 = DataTypeConverter().Identify({
     o1: ("TENSOR_QUANT8_ASYMM", 0.5, 0)
 })
 
+quant8_mult_gt_1 = DataTypeConverter().Identify({
+    i1: ("TENSOR_QUANT8_ASYMM", 0.5, 100),
+    w1: ("TENSOR_QUANT8_ASYMM", 0.5, 128),
+    b1: ("TENSOR_INT32", 0.25, 0),
+    o1: ("TENSOR_QUANT8_ASYMM", 0.1, 80)
+})
+
 # Per-channel quantization
 channelQuant8 = DataTypeConverter().Identify({
     i1: ("TENSOR_QUANT8_ASYMM", 0.25, 100),
     w1: ("TENSOR_QUANT8_SYMM_PER_CHANNEL", 0, 0, SymmPerChannelQuantParams(channelDim=0, scales=[0.25, 0.5])),
     b1: ("TENSOR_INT32", 0.0, 0, SymmPerChannelQuantParams(channelDim=0, scales=[0.0625, 0.125], hide=True)),
     o1: ("TENSOR_QUANT8_ASYMM", 0.5, 80)
+})
+
+channelQuant8_mult_gt_1 = DataTypeConverter().Identify({
+    i1: ("TENSOR_QUANT8_ASYMM", 0.25, 100),
+    w1: ("TENSOR_QUANT8_SYMM_PER_CHANNEL", 0, 0, SymmPerChannelQuantParams(channelDim=0, scales=[0.25, 0.5])),
+    b1: ("TENSOR_INT32", 0.0, 0, SymmPerChannelQuantParams(channelDim=0, scales=[0.0625, 0.125], hide=True)),
+    o1: ("TENSOR_QUANT8_ASYMM", 0.1, 80)
 })
 
 Example({
@@ -48,7 +62,7 @@ Example({
          14.5, 18, 22.5, 26,  60.5,  70, 40.5, 46, 52.5, 58,
          19.5, 22, 25.5, 28,  59.5,  66, 34.5, 38, 42.5, 46,
          37.5, 40, 43.5, 46, 101.5, 108, 58.5, 62, 66.5, 70]
-}).AddNchw(i1, o1, s1, layout).AddAllActivations(o1, act).AddVariations("relaxed", quant8, channelQuant8, "float16").AddInput(w1, b1)
+}).AddNchw(i1, o1, s1, layout).AddAllActivations(o1, act).AddVariations("relaxed", quant8, quant8_mult_gt_1, channelQuant8, channelQuant8_mult_gt_1, "float16").AddInput(w1, b1)
 
 
 # TEST 2: TRANSPOSE_CONV2D_LARGE, pad = same, stride = 3, act = relu
@@ -159,3 +173,112 @@ Example({
          1494, 2715, 3057,
          1968, 3352, 3652]
 }).AddNchw(i5, o5, layout).AddVariations("relaxed", quant8, "float16").AddInput(w5, b5)
+
+
+# TEST 6: zero-sized input, implicit padding
+
+# Use BOX_WITH_NMS_LIMIT op to generate a zero-sized internal tensor for box cooridnates.
+p1 = Parameter("scores", "TENSOR_FLOAT32", "{1, 2}", [0.90, 0.10]) # scores
+p2 = Parameter("roi", "TENSOR_FLOAT32", "{1, 8}", [1, 1, 10, 10, 0, 0, 10, 10]) # roi
+o1 = Output("scoresOut", "TENSOR_FLOAT32", "{0}") # scores out
+o2 = Output("classesOut", "TENSOR_INT32", "{0}") # classes out
+tmp1 = Internal("roiOut", "TENSOR_FLOAT32", "{0, 4}") # roi out
+tmp2 = Internal("batchSplitOut", "TENSOR_INT32", "{0}") # batch split out
+model = Model("zero_sized").Operation("BOX_WITH_NMS_LIMIT", p1, p2, [0], 0.3, -1, 0, 0.4, 1.0, 0.3).To(o1, tmp1, o2, tmp2)
+
+# Use ROI_ALIGN op to convert into zero-sized feature map.
+i1 = Input("in", "TENSOR_FLOAT32", "{1, 1, 1, 1}")
+zero_sized = Internal("featureMap", "TENSOR_FLOAT32", "{0, 2, 2, 1}")
+model = model.Operation("ROI_ALIGN", i1, tmp1, tmp2, 2, 2, 2.0, 2.0, 4, 4, layout).To(zero_sized)
+
+# TRANSPOSE_CONV_2D op with numBatches = 0.
+w = Parameter("weights", "TENSOR_FLOAT32", "{2, 3, 3, 1}", [1, 3, 5, 7, 9, 11, 9, 7, 5, 2, 4, 6, 8, 10, 12, 10, 8, 6]) # weight
+b = Parameter("bias", "TENSOR_FLOAT32", "{2}", [-1.5, -2]) # bias
+s = Int32Vector("shape", [0, 5, 5, 2]) # output shape
+o3 = Output("out", "TENSOR_FLOAT32", "{0, 5, 5, 2}") # out
+model = model.Operation("TRANSPOSE_CONV_2D", zero_sized, w, b, s, 2, 2, 2, 0, layout).To(o3)
+
+quant8 = DataTypeConverter().Identify({
+    p1: ("TENSOR_QUANT8_ASYMM", 0.1, 128),
+    p2: ("TENSOR_QUANT16_ASYMM", 0.125, 0),
+    o1: ("TENSOR_QUANT8_ASYMM", 0.1, 128),
+    tmp1: ("TENSOR_QUANT16_ASYMM", 0.125, 0),
+    i1: ("TENSOR_QUANT8_ASYMM", 0.1, 128),
+    zero_sized: ("TENSOR_QUANT8_ASYMM", 0.1, 128),
+    w: ("TENSOR_QUANT8_ASYMM", 0.1, 128),
+    b: ("TENSOR_INT32", 0.01, 0),
+    o3: ("TENSOR_QUANT8_ASYMM", 0.1, 128)
+})
+
+# Create test case with dummy values.
+Example({
+    i1: [1],
+    o1: [0],
+    o2: [0],
+    o3: [0],
+}).AddNchw(i1, zero_sized, o3, s, layout).AddVariations("relaxed", quant8, "float16")
+
+
+# TEST 7: zero-sized input, explicit padding
+
+# Use BOX_WITH_NMS_LIMIT op to generate a zero-sized internal tensor for box cooridnates.
+p1 = Parameter("scores", "TENSOR_FLOAT32", "{1, 2}", [0.90, 0.10]) # scores
+p2 = Parameter("roi", "TENSOR_FLOAT32", "{1, 8}", [1, 1, 10, 10, 0, 0, 10, 10]) # roi
+o1 = Output("scoresOut", "TENSOR_FLOAT32", "{0}") # scores out
+o2 = Output("classesOut", "TENSOR_INT32", "{0}") # classes out
+tmp1 = Internal("roiOut", "TENSOR_FLOAT32", "{0, 4}") # roi out
+tmp2 = Internal("batchSplitOut", "TENSOR_INT32", "{0}") # batch split out
+model = Model("zero_sized").Operation("BOX_WITH_NMS_LIMIT", p1, p2, [0], 0.3, -1, 0, 0.4, 1.0, 0.3).To(o1, tmp1, o2, tmp2)
+
+# Use ROI_ALIGN op to convert into zero-sized feature map.
+i1 = Input("in", "TENSOR_FLOAT32", "{1, 1, 1, 1}")
+zero_sized = Internal("featureMap", "TENSOR_FLOAT32", "{0, 4, 4, 1}")
+model = model.Operation("ROI_ALIGN", i1, tmp1, tmp2, 4, 4, 2.0, 2.0, 4, 4, layout).To(zero_sized)
+
+# TRANSPOSE_CONV_2D op with numBatches = 0.
+w = Parameter("weights", "TENSOR_FLOAT32", "{1, 3, 3, 1}", [1, 3, 5, 7, 9, 11, 9, 7, 5]) # weight
+b = Parameter("bias", "TENSOR_FLOAT32", "{1}", [-1.5]) # bias
+o3 = Output("out", "TENSOR_FLOAT32", "{0, 3, 3, 1}") # out
+model = model.Operation("TRANSPOSE_CONV_2D", zero_sized, w, b, 1, 2, 2, 1, 1, 1, 0, layout).To(o3)
+
+quant8 = DataTypeConverter().Identify({
+    p1: ("TENSOR_QUANT8_ASYMM", 0.1, 128),
+    p2: ("TENSOR_QUANT16_ASYMM", 0.125, 0),
+    o1: ("TENSOR_QUANT8_ASYMM", 0.1, 128),
+    tmp1: ("TENSOR_QUANT16_ASYMM", 0.125, 0),
+    i1: ("TENSOR_QUANT8_ASYMM", 0.1, 128),
+    zero_sized: ("TENSOR_QUANT8_ASYMM", 0.1, 128),
+    w: ("TENSOR_QUANT8_ASYMM", 0.1, 128),
+    b: ("TENSOR_INT32", 0.01, 0),
+    o3: ("TENSOR_QUANT8_ASYMM", 0.1, 128)
+})
+
+# Create test case with dummy values.
+Example({
+    i1: [1],
+    o1: [0],
+    o2: [0],
+    o3: [0],
+}).AddNchw(i1, zero_sized, o3, layout).AddVariations("relaxed", quant8, "float16")
+
+
+# TEST 8: TRANSPOSE_CONV2D_SAME, outputShape = [1, 4, 4, 1], pad = same, stride = 2, act = none
+i8 = Input("op1", "TENSOR_FLOAT32", "{1, 2, 2, 1}") # input 0
+w8 = Parameter("op2", "TENSOR_FLOAT32", "{1, 1, 1, 1}", [2]) # weight
+b8 = Parameter("op3", "TENSOR_FLOAT32", "{1}", [0]) # bias
+s8 = Int32Vector("shape", [1, 4, 4, 1]) # output shape
+o8 = Output("op4", "TENSOR_FLOAT32", "{1, 4, 4, 1}") # output
+Model().Operation("TRANSPOSE_CONV_2D", i8, w8, b8, s8, 1, 2, 2, 0, layout).To(o8)
+
+# Additional data type
+quant8 = DataTypeConverter().Identify({
+    i8: ("TENSOR_QUANT8_ASYMM", 0.5, 100),
+    w8: ("TENSOR_QUANT8_ASYMM", 0.5, 128),
+    b8: ("TENSOR_INT32", 0.25, 0),
+    o8: ("TENSOR_QUANT8_ASYMM", 16.0, 0)
+})
+
+Example({
+    i8: [1,  2,  3,  4],
+    o8: [2, 0, 4, 0, 0, 0, 0, 0, 6, 0, 8, 0, 0, 0, 0, 0]
+}).AddNchw(i8, o8, s8, layout).AddVariations("relaxed", quant8, "float16").AddInput(w8, b8)

@@ -19,6 +19,7 @@
 #include "CpuExecutor.h"
 #include "CpuOperationUtils.h"
 #include "HalInterfaces.h"
+#include "OperationsUtils.h"
 
 #include "Tracing.h"
 
@@ -126,6 +127,15 @@ BidirectionalSequenceLSTM::BidirectionalSequenceLSTM(const Operation& operation,
     bw_aux_input_to_output_weights_ =
             GetInput(operation, operands, kBwAuxInputToOutputWeightsTensor);
 
+    fw_input_layer_norm_weights_ = GetInput(operation, operands, kFwInputLayerNormWeightsTensor);
+    fw_forget_layer_norm_weights_ = GetInput(operation, operands, kFwForgetLayerNormWeightsTensor);
+    fw_cell_layer_norm_weights_ = GetInput(operation, operands, kFwCellLayerNormWeightsTensor);
+    fw_output_layer_norm_weights_ = GetInput(operation, operands, kFwOutputLayerNormWeightsTensor);
+    bw_input_layer_norm_weights_ = GetInput(operation, operands, kBwInputLayerNormWeightsTensor);
+    bw_forget_layer_norm_weights_ = GetInput(operation, operands, kBwForgetLayerNormWeightsTensor);
+    bw_cell_layer_norm_weights_ = GetInput(operation, operands, kBwCellLayerNormWeightsTensor);
+    bw_output_layer_norm_weights_ = GetInput(operation, operands, kBwOutputLayerNormWeightsTensor);
+
     params_.activation = static_cast<TfLiteFusedActivation>(
             getScalarData<int32_t>(*GetInput(operation, operands, kActivationParam)));
     if (input_->type == OperandType::TENSOR_FLOAT32) {
@@ -139,10 +149,12 @@ BidirectionalSequenceLSTM::BidirectionalSequenceLSTM(const Operation& operation,
     }
     params_.merge_outputs = getScalarData<bool>(*GetInput(operation, operands, kMergeOutputsParam));
     params_.time_major = getScalarData<bool>(*GetInput(operation, operands, kTimeMajorParam));
-    params_.use_layer_norm = false;
+    params_.use_layer_norm = !IsNullInput(fw_input_layer_norm_weights_);
 
     fw_output_ = GetOutput(operation, operands, kFwOutputTensor);
-    bw_output_ = GetOutput(operation, operands, kBwOutputTensor);
+    if (!params_.merge_outputs) {
+        bw_output_ = GetOutput(operation, operands, kBwOutputTensor);
+    }
 }
 
 bool BidirectionalSequenceLSTM::Prepare(const Operation& operation,
@@ -163,8 +175,6 @@ bool BidirectionalSequenceLSTM::Prepare(const Operation& operation,
     NN_CHECK_EQ(SizeOfDimension(fw_recurrent_to_output_weights_, 0), n_fw_cell);
     const uint32_t n_fw_output = SizeOfDimension(fw_recurrent_to_output_weights_, 1);
 
-    RunTimeOperandInfo nullOpInfo;
-    nullOpInfo.lifetime = OperandLifeTime::NO_VALUE;
     // Check that input tensor dimensions matches with each other.
     if (!LSTMCell::CheckInputTensorDimensions(
                 input_, fw_input_to_input_weights_, fw_input_to_forget_weights_,
@@ -173,11 +183,9 @@ bool BidirectionalSequenceLSTM::Prepare(const Operation& operation,
                 fw_recurrent_to_cell_weights_, fw_recurrent_to_output_weights_,
                 fw_cell_to_input_weights_, fw_cell_to_forget_weights_, fw_cell_to_output_weights_,
                 fw_input_gate_bias_, fw_forget_gate_bias_, fw_cell_bias_, fw_output_gate_bias_,
-                fw_projection_weights_, fw_projection_bias_,
-                /*input_layer_norm_weights=*/&nullOpInfo,
-                /*forget_layer_norm_weights=*/&nullOpInfo, /*cell_layer_norm_weights=*/&nullOpInfo,
-                /*output_layer_norm_weights=*/&nullOpInfo, n_input, n_fw_output, n_fw_cell,
-                &params_)) {
+                fw_projection_weights_, fw_projection_bias_, fw_input_layer_norm_weights_,
+                fw_forget_layer_norm_weights_, fw_cell_layer_norm_weights_,
+                fw_output_layer_norm_weights_, n_input, n_fw_output, n_fw_cell, &params_)) {
         return false;
     }
 
@@ -226,11 +234,9 @@ bool BidirectionalSequenceLSTM::Prepare(const Operation& operation,
                 bw_recurrent_to_cell_weights_, bw_recurrent_to_output_weights_,
                 bw_cell_to_input_weights_, bw_cell_to_forget_weights_, bw_cell_to_output_weights_,
                 bw_input_gate_bias_, bw_forget_gate_bias_, bw_cell_bias_, bw_output_gate_bias_,
-                bw_projection_weights_, bw_projection_bias_,
-                /*input_layer_norm_weights=*/&nullOpInfo,
-                /*forget_layer_norm_weights=*/&nullOpInfo, /*cell_layer_norm_weights=*/&nullOpInfo,
-                /*output_layer_norm_weights=*/&nullOpInfo, n_input, n_bw_output, n_bw_cell,
-                &params_)) {
+                bw_projection_weights_, bw_projection_bias_, bw_input_layer_norm_weights_,
+                bw_forget_layer_norm_weights_, bw_cell_layer_norm_weights_,
+                bw_output_layer_norm_weights_, n_input, n_bw_output, n_bw_cell, &params_)) {
         return false;
     }
 
@@ -260,6 +266,15 @@ bool BidirectionalSequenceLSTM::Prepare(const Operation& operation,
 
 bool BidirectionalSequenceLSTM::Eval() {
     const uint32_t n_fw_output = SizeOfDimension(fw_recurrent_to_output_weights_, 1);
+    const uint32_t n_bw_output = SizeOfDimension(bw_recurrent_to_output_weights_, 1);
+    std::vector<uint32_t> fw_output_dims = input_->shape().dimensions;
+    fw_output_dims[2] = n_fw_output;
+    std::vector<uint32_t> bw_output_dims = fw_output_dims;
+    bw_output_dims[2] = n_bw_output;
+    const uint32_t n_fw_output_elements = fw_output_dims[0] * fw_output_dims[1] * fw_output_dims[2];
+    const uint32_t n_output_elements =
+            fw_output_dims[0] * fw_output_dims[1] * (fw_output_dims[2] + bw_output_dims[2]);
+
     switch (input_->type) {
         case OperandType::TENSOR_FLOAT32: {
             std::vector<float> fw_scratch_buffer(getNumberOfElements(fw_scratch_shape_));
@@ -292,12 +307,13 @@ bool BidirectionalSequenceLSTM::Eval() {
                     GetBuffer<const float>(fw_projection_bias_),
                     GetBuffer<const float>(fw_activation_state_),
                     GetBuffer<const float>(fw_cell_state_),
-                    /*input_layer_norm_weights=*/nullptr,
-                    /*forget_layer_norm_weights=*/nullptr,
-                    /*cell_layer_norm_weights=*/nullptr,
-                    /*output_layer_norm_weights=*/nullptr, GetBuffer<float>(fw_activation_state_),
-                    GetBuffer<float>(fw_cell_state_), GetBuffer<float>(fw_output_),
-                    fw_scratch_buffer.data(), params_.time_major, kForwardSequence);
+                    GetOptionalBuffer<const float>(fw_input_layer_norm_weights_),
+                    GetOptionalBuffer<const float>(fw_forget_layer_norm_weights_),
+                    GetOptionalBuffer<const float>(fw_cell_layer_norm_weights_),
+                    GetOptionalBuffer<const float>(fw_output_layer_norm_weights_),
+                    GetBuffer<float>(fw_activation_state_), GetBuffer<float>(fw_cell_state_),
+                    GetBuffer<float>(fw_output_), fw_scratch_buffer.data(), params_.time_major,
+                    kForwardSequence);
 
             std::vector<float> bw_scratch_buffer(getNumberOfElements(bw_scratch_shape_));
             const bool kBackwardSequence = false;
@@ -329,14 +345,22 @@ bool BidirectionalSequenceLSTM::Eval() {
                     GetBuffer<const float>(bw_projection_bias_),
                     GetBuffer<const float>(bw_activation_state_),
                     GetBuffer<const float>(bw_cell_state_),
-                    /*input_layer_norm_weights=*/nullptr,
-                    /*forget_layer_norm_weights=*/nullptr,
-                    /*cell_layer_norm_weights=*/nullptr,
-                    /*output_layer_norm_weights=*/nullptr, GetBuffer<float>(bw_activation_state_),
-                    GetBuffer<float>(bw_cell_state_),
-                    params_.merge_outputs ? GetBuffer<float>(fw_output_) + n_fw_output
+                    GetOptionalBuffer<const float>(bw_input_layer_norm_weights_),
+                    GetOptionalBuffer<const float>(bw_forget_layer_norm_weights_),
+                    GetOptionalBuffer<const float>(bw_cell_layer_norm_weights_),
+                    GetOptionalBuffer<const float>(bw_output_layer_norm_weights_),
+                    GetBuffer<float>(bw_activation_state_), GetBuffer<float>(bw_cell_state_),
+                    params_.merge_outputs ? GetBuffer<float>(fw_output_) + n_fw_output_elements
                                           : GetBuffer<float>(bw_output_),
                     bw_scratch_buffer.data(), params_.time_major, kBackwardSequence);
+            if (params_.merge_outputs) {
+                std::vector<float> temp(n_output_elements);
+                mergeThirdDimension(GetBuffer<float>(fw_output_), fw_output_dims,
+                                    GetBuffer<float>(fw_output_) + n_fw_output_elements,
+                                    bw_output_dims, temp.data());
+                std::copy(temp.data(), temp.data() + n_output_elements,
+                          GetBuffer<float>(fw_output_));
+            }
         } break;
         case OperandType::TENSOR_FLOAT16: {
             std::vector<_Float16> fw_scratch_buffer(getNumberOfElements(fw_scratch_shape_));
@@ -369,10 +393,10 @@ bool BidirectionalSequenceLSTM::Eval() {
                     GetOptionalBuffer<const _Float16>(fw_projection_bias_),
                     GetBuffer<const _Float16>(fw_activation_state_),
                     GetBuffer<const _Float16>(fw_cell_state_),
-                    /*input_layer_norm_weights=*/nullptr,
-                    /*forget_layer_norm_weights=*/nullptr,
-                    /*cell_layer_norm_weights=*/nullptr,
-                    /*output_layer_norm_weights=*/nullptr,
+                    GetOptionalBuffer<const _Float16>(fw_input_layer_norm_weights_),
+                    GetOptionalBuffer<const _Float16>(fw_forget_layer_norm_weights_),
+                    GetOptionalBuffer<const _Float16>(fw_cell_layer_norm_weights_),
+                    GetOptionalBuffer<const _Float16>(fw_output_layer_norm_weights_),
                     GetBuffer<_Float16>(fw_activation_state_), GetBuffer<_Float16>(fw_cell_state_),
                     GetBuffer<_Float16>(fw_output_), fw_scratch_buffer.data(), params_.time_major,
                     kForwardSequence);
@@ -407,14 +431,22 @@ bool BidirectionalSequenceLSTM::Eval() {
                     GetOptionalBuffer<const _Float16>(bw_projection_bias_),
                     GetBuffer<const _Float16>(bw_activation_state_),
                     GetBuffer<const _Float16>(bw_cell_state_),
-                    /*input_layer_norm_weights=*/nullptr,
-                    /*forget_layer_norm_weights=*/nullptr,
-                    /*cell_layer_norm_weights=*/nullptr,
-                    /*output_layer_norm_weights=*/nullptr,
+                    GetOptionalBuffer<const _Float16>(bw_input_layer_norm_weights_),
+                    GetOptionalBuffer<const _Float16>(bw_forget_layer_norm_weights_),
+                    GetOptionalBuffer<const _Float16>(bw_cell_layer_norm_weights_),
+                    GetOptionalBuffer<const _Float16>(bw_output_layer_norm_weights_),
                     GetBuffer<_Float16>(bw_activation_state_), GetBuffer<_Float16>(bw_cell_state_),
-                    params_.merge_outputs ? GetBuffer<_Float16>(fw_output_) + n_fw_output
+                    params_.merge_outputs ? GetBuffer<_Float16>(fw_output_) + n_fw_output_elements
                                           : GetBuffer<_Float16>(bw_output_),
                     bw_scratch_buffer.data(), params_.time_major, kBackwardSequence);
+            if (params_.merge_outputs) {
+                std::vector<_Float16> temp(n_output_elements);
+                mergeThirdDimension(GetBuffer<_Float16>(fw_output_), fw_output_dims,
+                                    GetBuffer<_Float16>(fw_output_) + n_fw_output_elements,
+                                    bw_output_dims, temp.data());
+                std::copy(temp.data(), temp.data() + n_output_elements,
+                          GetBuffer<_Float16>(fw_output_));
+            }
         } break;
         default: {
             LOG(ERROR) << "Unsupported data type: " << static_cast<int>(input_->type);

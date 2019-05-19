@@ -22,6 +22,7 @@
 #include "OperationsUtils.h"
 
 #include "Tracing.h"
+#include "Utils.h"
 
 namespace android {
 namespace nn {
@@ -92,10 +93,14 @@ LSTMCell::LSTMCell(const Operation& operation, std::vector<RunTimeOperandInfo>& 
     // We check the version of LSTM by checking the number of the inputs to the
     // op. For LSTM version 1.0 there were 23 inputs and for 1.2 there are 27.
     if (operation.inputs.size() == 27) {
-        input_layer_norm_weights_ = GetInput(operation, operands, kInputLayerNormWeightsTensor);
-        forget_layer_norm_weights_ = GetInput(operation, operands, kForgetLayerNormWeightsTensor);
-        cell_layer_norm_weights_ = GetInput(operation, operands, kCellLayerNormWeightsTensor);
-        output_layer_norm_weights_ = GetInput(operation, operands, kOutputLayerNormWeightsTensor);
+        input_layer_norm_weights_ =
+                GetInput(operation, operands, kInputLayerNormWeightsTensor);  // optional
+        forget_layer_norm_weights_ =
+                GetInput(operation, operands, kForgetLayerNormWeightsTensor);  // optional
+        cell_layer_norm_weights_ =
+                GetInput(operation, operands, kCellLayerNormWeightsTensor);  // optional
+        output_layer_norm_weights_ =
+                GetInput(operation, operands, kOutputLayerNormWeightsTensor);  // optional
     } else {
         // For LSTM from HAL v1.0 assign operands with no values
         static RunTimeOperandInfo no_value;
@@ -203,7 +208,9 @@ bool LSTMCell::CheckInputTensorDimensions(
     // Since we have already checked that weights are all there or none, we can
     // check the existence of only one to the get the condition.
     params->use_peephole = !IsNullInput(cell_to_output_weights);
-    params->use_layer_norm = !IsNullInput(input_layer_norm_weights);
+    // Checking output instead of input layer norm weights because input can be
+    // omitted ones can be omited in case CIFG LSTM is used.
+    params->use_layer_norm = !IsNullInput(output_layer_norm_weights);
 
     params->use_projection_weight = (projection_weights->lifetime != OperandLifeTime::NO_VALUE);
     params->use_projection_bias = (projection_bias->lifetime != OperandLifeTime::NO_VALUE);
@@ -262,12 +269,24 @@ bool LSTMCell::CheckInputTensorDimensions(
         NN_CHECK_EQ(SizeOfDimension(output_layer_norm_weights, 0), n_cell);
     }
 
-    const bool layer_norm_weights_all_or_none =
-            (IsNullInput(input_layer_norm_weights) && IsNullInput(forget_layer_norm_weights) &&
-             IsNullInput(cell_layer_norm_weights) && IsNullInput(input_layer_norm_weights)) ||
-            (!IsNullInput(input_layer_norm_weights) && !IsNullInput(forget_layer_norm_weights) &&
-             !IsNullInput(cell_layer_norm_weights) && !IsNullInput(input_layer_norm_weights));
-    NN_CHECK(layer_norm_weights_all_or_none);
+    if (params->use_cifg) {
+        NN_RET_CHECK(IsNullInput(input_layer_norm_weights))
+                << "input_layer_norm_weights are provided while CIFG is used";
+        const bool layer_norm_weights_all_or_none_cifg =
+                (IsNullInput(forget_layer_norm_weights) && IsNullInput(cell_layer_norm_weights) &&
+                 IsNullInput(output_layer_norm_weights)) ||
+                (!IsNullInput(forget_layer_norm_weights) && !IsNullInput(cell_layer_norm_weights) &&
+                 !IsNullInput(output_layer_norm_weights));
+        NN_RET_CHECK(layer_norm_weights_all_or_none_cifg);
+    } else {
+        const bool layer_norm_weights_all_or_none =
+                (IsNullInput(input_layer_norm_weights) && IsNullInput(forget_layer_norm_weights) &&
+                 IsNullInput(cell_layer_norm_weights) && IsNullInput(output_layer_norm_weights)) ||
+                (!IsNullInput(input_layer_norm_weights) &&
+                 !IsNullInput(forget_layer_norm_weights) && !IsNullInput(cell_layer_norm_weights) &&
+                 !IsNullInput(output_layer_norm_weights));
+        NN_RET_CHECK(layer_norm_weights_all_or_none);
+    }
 
     return true;
 }
@@ -381,18 +400,27 @@ bool LSTMCell::LSTMEvalFloat32(
     const uint32_t batchOutputSize = batchSize * outputSize;
 
     std::vector<float> transposedInput;
+    const bool hasAuxInput = (aux_input_buffer != nullptr);
+    std::vector<float> transposedAuxInput;
     std::vector<float> transposedOutput;
     Shape transposedInputShape;
     Shape transposedOutputShape;
     if (!timeMajor) {
         transposedInput.resize(maxTime * batchInputSize);
-        transposedOutput.resize(maxTime * batchOutputSize);
         transposeFirstTwoDimensions<float>(input_buffer, input_shape, transposedInput.data());
+        if (hasAuxInput) {
+            transposedAuxInput.resize(maxTime * batchInputSize);
+            transposeFirstTwoDimensions<float>(aux_input_buffer, input_shape,
+                                               transposedAuxInput.data());
+        }
         transposeFirstTwoDimensions(input_shape, &transposedInputShape);
+        transposedOutput.resize(maxTime * batchOutputSize);
         transposedOutputShape = transposedInputShape;
         transposedOutputShape.dimensions[2] = outputSize;
     }
     const float* inputData = timeMajor ? input_buffer : transposedInput.data();
+    const float* auxInputData =
+            hasAuxInput ? (timeMajor ? aux_input_buffer : transposedAuxInput.data()) : nullptr;
     float* outputData = timeMajor ? output_buffer : transposedOutput.data();
 
     std::vector<float> outputStateInCurrentTimeStep(
@@ -401,6 +429,9 @@ bool LSTMCell::LSTMEvalFloat32(
                                                   cell_state_in_buffer + batchSize * numCells);
     const float* inputCurrentTimeStep =
             inputData + (forwardSequence ? 0 : batchInputSize * (maxTime - 1));
+    const float* auxInputCurrentTimeStep =
+            hasAuxInput ? (auxInputData + (forwardSequence ? 0 : batchInputSize * (maxTime - 1)))
+                        : nullptr;
     float* outputCurrentTimeStep =
             outputData + (forwardSequence ? 0 : batchOutputSize * (maxTime - 1));
     const int batchInputDelta = forwardSequence ? batchInputSize : -batchInputSize;
@@ -413,17 +444,21 @@ bool LSTMCell::LSTMEvalFloat32(
                  recurrent_to_input_weights_buffer, recurrent_to_forget_weights_buffer,
                  recurrent_to_cell_weights_buffer, recurrent_to_output_weights_buffer,
                  recurrent_to_output_weights_shape, cell_to_input_weights_buffer,
-                 cell_to_forget_weights_buffer, cell_to_output_weights_buffer, aux_input_buffer,
-                 aux_input_to_input_weights_buffer, aux_input_to_forget_weights_buffer,
-                 aux_input_to_cell_weights_buffer, aux_input_to_output_weights_buffer,
-                 input_gate_bias_buffer, forget_gate_bias_buffer, cell_bias_buffer,
-                 output_gate_bias_buffer, projection_weights_buffer, projection_bias_buffer,
+                 cell_to_forget_weights_buffer, cell_to_output_weights_buffer,
+                 auxInputCurrentTimeStep, aux_input_to_input_weights_buffer,
+                 aux_input_to_forget_weights_buffer, aux_input_to_cell_weights_buffer,
+                 aux_input_to_output_weights_buffer, input_gate_bias_buffer,
+                 forget_gate_bias_buffer, cell_bias_buffer, output_gate_bias_buffer,
+                 projection_weights_buffer, projection_bias_buffer,
                  outputStateInCurrentTimeStep.data(), cellStateInCurrentTimeStep.data(),
                  input_layer_norm_weights_buffer, forget_layer_norm_weights_buffer,
                  cell_layer_norm_weights_buffer, output_layer_norm_weights_buffer,
                  output_state_out_buffer, cell_state_out_buffer, outputCurrentTimeStep,
                  scratch_buffer_buffer);
         inputCurrentTimeStep += batchInputDelta;
+        if (hasAuxInput) {
+            auxInputCurrentTimeStep += batchInputDelta;
+        }
         outputCurrentTimeStep += batchOutputDelta;
         outputStateInCurrentTimeStep.assign(output_state_out_buffer,
                                             output_state_out_buffer + batchSize * outputSize);
@@ -600,19 +635,29 @@ bool LSTMCell::LSTMEvalFloat16(
     convertFloat16ToFloat32(scratch_buffer_buffer, &scratch_buffer_float32);
 
     std::vector<float> transposedInput;
+    const bool hasAuxInput = (aux_input_buffer != nullptr);
+    std::vector<float> transposedAuxInput;
     std::vector<float> transposedOutput;
     Shape transposedInputShape;
     Shape transposedOutputShape;
     if (!timeMajor) {
         transposedInput.resize(maxTime * batchInputSize);
-        transposedOutput.resize(maxTime * batchOutputSize);
         transposeFirstTwoDimensions<float>(input_float32.data(), input_shape,
                                            transposedInput.data());
+        if (hasAuxInput) {
+            transposedAuxInput.resize(maxTime * batchInputSize);
+            transposeFirstTwoDimensions<float>(aux_input_float32.data(), input_shape,
+                                               transposedAuxInput.data());
+        }
         transposeFirstTwoDimensions(input_shape, &transposedInputShape);
+        transposedOutput.resize(maxTime * batchOutputSize);
         transposedOutputShape = transposedInputShape;
         transposedOutputShape.dimensions[2] = outputSize;
     }
     const float* inputData = timeMajor ? input_float32.data() : transposedInput.data();
+    const float* auxInputData =
+            hasAuxInput ? (timeMajor ? aux_input_float32.data() : transposedAuxInput.data())
+                        : nullptr;
     float* outputData = timeMajor ? output_float32.data() : transposedOutput.data();
 
     std::vector<float> outputStateInCurrentTimeStep(batchSize * outputSize);
@@ -622,6 +667,9 @@ bool LSTMCell::LSTMEvalFloat16(
 
     const float* inputCurrentTimeStep =
             inputData + (forwardSequence ? 0 : batchInputSize * (maxTime - 1));
+    const float* auxInputCurrentTimeStep =
+            hasAuxInput ? (auxInputData + (forwardSequence ? 0 : batchInputSize * (maxTime - 1)))
+                        : nullptr;
     float* outputCurrentTimeStep =
             outputData + (forwardSequence ? 0 : batchOutputSize * (maxTime - 1));
     const int batchInputDelta = forwardSequence ? batchInputSize : -batchInputSize;
@@ -636,8 +684,7 @@ bool LSTMCell::LSTMEvalFloat16(
                  recurrent_to_cell_weights_float32.data(),
                  recurrent_to_output_weights_float32.data(), recurrent_to_output_weights_shape,
                  cell_to_input_weights_float32.data(), cell_to_forget_weights_float32.data(),
-                 cell_to_output_weights_float32.data(),
-                 aux_input_buffer != nullptr ? aux_input_float32.data() : nullptr,
+                 cell_to_output_weights_float32.data(), auxInputCurrentTimeStep,
                  aux_input_to_input_weights_float32.data(),
                  aux_input_to_forget_weights_float32.data(),
                  aux_input_to_cell_weights_float32.data(),
@@ -651,6 +698,9 @@ bool LSTMCell::LSTMEvalFloat16(
                  cell_state_out_float32.data(), outputCurrentTimeStep,
                  scratch_buffer_float32.data());
         inputCurrentTimeStep += batchInputDelta;
+        if (hasAuxInput) {
+            auxInputCurrentTimeStep += batchInputDelta;
+        }
         outputCurrentTimeStep += batchOutputDelta;
         outputStateInCurrentTimeStep = output_state_out_float32;
         cellStateInCurrentTimeStep = cell_state_out_float32;
