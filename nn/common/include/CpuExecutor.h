@@ -25,6 +25,7 @@
 #include <android-base/macros.h>
 #include <ui/GraphicBuffer.h>
 #include <algorithm>
+#include <optional>
 #include <vector>
 
 namespace android {
@@ -39,6 +40,17 @@ struct RunTimeOperandInfo {
     // change at runtime.  We include the type because it's useful
     // to pass together with the dimension to the functions implementing
     // the operators.
+    //
+    // A dimension being zero has different meanings for different operands at different stages:
+    // - Model inputs:
+    //   * Specified in model: implies "dynamic", and must be fully-specified in request.
+    //   * Specified in request: illegal.
+    // - Constant operands: illegal.
+    // - Model outputs and internal operands:
+    //   * Before evaluation: implies unknown and to be deduced from execution.
+    //   * After evaluation:
+    //     - If isSufficient reports true: the tensor is zero-sized.
+    //     - Otherwise: implies unknown.
     std::vector<uint32_t> dimensions;
 
     float scale;
@@ -74,46 +86,35 @@ struct RunTimeOperandInfo {
             // We don't know sizes of extension types.
             return true;
         }
-        return length >= sizeOfData(type, dimensions);
+        return length >= nonExtensionOperandSizeOfData(type, dimensions);
     }
 };
 
 // Used to keep a pointer to each of the memory pools.
 //
-// In the case of an "mmap_fd" pool, owns the mmap region
-// returned by getBuffer() -- i.e., that region goes away
-// when the RunTimePoolInfo is destroyed or is assigned to.
+// RunTimePoolInfo references a region of memory. Other RunTimePoolInfo objects
+// may reference the same region of memory by either:
+// (1) copying an existing RunTimePoolInfo object, or
+// (2) creating multiple RunTimePoolInfo objects from the same memory resource
+//     (e.g., "createFromHidlMemory" or "createFromExistingBuffer")
+//
+// If the underlying region of memory is mapped by "createFromHidlMemory", the
+// mapping will be sustained until it is no longer referenced by any
+// RunTimePoolInfo objects.
 class RunTimePoolInfo {
-public:
-    // If "fail" is not nullptr, and construction fails, then set *fail = true.
-    // If construction succeeds, leave *fail unchanged.
-    // getBuffer() == nullptr IFF construction fails.
-    explicit RunTimePoolInfo(const hidl_memory& hidlMemory, bool* fail);
+   public:
+    static std::optional<RunTimePoolInfo> createFromHidlMemory(const hidl_memory& hidlMemory);
+    static RunTimePoolInfo createFromExistingBuffer(uint8_t* buffer);
 
-    explicit RunTimePoolInfo(uint8_t* buffer);
-
-    // Implement move
-    RunTimePoolInfo(RunTimePoolInfo&& other) noexcept;
-    RunTimePoolInfo& operator=(RunTimePoolInfo&& other) noexcept;
-
-    // Forbid copy
-    RunTimePoolInfo(const RunTimePoolInfo&) = delete;
-    RunTimePoolInfo& operator=(const RunTimePoolInfo&) = delete;
-
-    ~RunTimePoolInfo() { release(); }
-
-    uint8_t* getBuffer() const { return mBuffer; }
-
+    uint8_t* getBuffer() const;
     bool update() const;
+    hidl_memory getHidlMemory() const;
 
-private:
-    void release();
-    void moveFrom(RunTimePoolInfo&& other);
+   private:
+    class RunTimePoolInfoImpl;
+    RunTimePoolInfo(const std::shared_ptr<const RunTimePoolInfoImpl>& impl);
 
-    hidl_memory mHidlMemory;           // always used
-    uint8_t* mBuffer = nullptr;        // always used
-    sp<IMemory> mMemory;               // only used when hidlMemory.name() == "ashmem"
-    sp<GraphicBuffer> mGraphicBuffer;  // only used when hidlMemory.name() == "hardware_buffer_blob"
+    std::shared_ptr<const RunTimePoolInfoImpl> mImpl;
 };
 
 bool setRunTimePoolInfosFromHidlMemories(std::vector<RunTimePoolInfo>* poolInfos,

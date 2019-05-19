@@ -35,7 +35,7 @@ class Memory;
 
 class ModelBuilder {
    public:
-    ModelBuilder();
+    ModelBuilder() {}
     // Returns an operand/operation type corresponding to a given extension operand/operation type.
     int getExtensionType(const char* extensionName, uint16_t typeWithinExtension, int32_t* type);
     // Adds an operand to the model.
@@ -54,9 +54,6 @@ class ModelBuilder {
     int relaxComputationFloat32toFloat16(bool allow);
     bool isComputationFloat32RelaxedToFloat16() const { return mRelaxComputationFloat32toFloat16; }
 
-    void setExtensionNameToPrefixMap(const std::map<std::string, uint16_t>&);
-    const std::map<std::string, uint16_t>& getExtensionNameToPrefixMap() const;
-
     int finish();
     bool isFinished() const { return mCompletedModel; }
     bool isValid() const { return !mInvalidModel; }
@@ -64,9 +61,12 @@ class ModelBuilder {
     bool hasOEMOperation() const { return mHasOEMOperation; }
     bool hasExtensionOperation() const { return mHasExtensionOperation; }
 
+    // explicitDeviceList is true if the list of devices was provided explicitly
+    // via the ANeuralNetworksModel_createForDevices API (which has certain
+    // special semantics) and false otherwise.
     int createCompilation(CompilationBuilder** compilation,
                           const std::vector<std::shared_ptr<Device>>& devices,
-                          bool forceNoFallback = false);
+                          bool explicitDeviceList = false);
 
     void setHidlModel(Model* model) const;
 
@@ -120,6 +120,12 @@ class ModelBuilder {
     // Copies the large values to a shared memory, if we have any.
     int copyLargeValuesToSharedMemory();
 
+    // Returns the list of extension names and corresponding numeric "prefixes"
+    // of operand and operation type values used in the model.
+    //
+    // Devices rely on this mapping to interpret extension types.
+    std::vector<Model::ExtensionNameAndPrefix> getExtensionNameToPrefixMap() const;
+
     // The operations of the graph.
     std::vector<Operation> mOperations;
     // The mapping from sorted index to the original index of operations in mOperations.
@@ -160,20 +166,12 @@ class ModelBuilder {
     // No further modifications are allowed to the model.
     bool mInvalidModel = false;
 
-    // True if Extensions can be used in the model.
-    bool mExtensionsAllowed = false;
 
     // 'true' indicates TENSOR_FLOAT32 may be calculated with range and/or
     // precision as low as that of the IEEE 754 16-bit floating-point format.
     // 'false' indicates TENSOR_FLOAT32 must be calculated using at least the
     // range and precision of the IEEE 754 32-bit floating-point format.
     bool mRelaxComputationFloat32toFloat16 = false;
-
-    // Maps extension names to numeric "prefixes" of operand and operation
-    // type values. Devices rely on these prefixes to interpret extension types.
-    // TODO(b/123523457): Have a global name-to-prefix mapping instead of
-    // storing it here.
-    std::map<std::string, uint16_t> mExtensionNameToPrefix;
 };
 
 }  // namespace nn
