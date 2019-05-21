@@ -97,10 +97,11 @@ struct Conv2dParam {
             int32_t input_height = getSizeOfDimension(inputShape, useNchw ? 2 : 1);
             int32_t filter_width = getSizeOfDimension(filterShape, 2);
             int32_t filter_height = getSizeOfDimension(filterShape, 1);
-            calculateExplicitPadding(input_width, stride_width, filter_width, padding_implicit,
-                                     &padding_left, &padding_right);
-            calculateExplicitPadding(input_height, stride_height, filter_height, padding_implicit,
-                                     &padding_top, &padding_bottom);
+            calculateExplicitPadding(input_width, stride_width, dilation_width_factor, filter_width,
+                                     padding_implicit, &padding_left, &padding_right);
+            calculateExplicitPadding(input_height, stride_height, dilation_height_factor,
+                                     filter_height, padding_implicit, &padding_top,
+                                     &padding_bottom);
         }
         NN_RET_CHECK_GE(padding_left, 0);
         NN_RET_CHECK_GE(padding_right, 0);
@@ -437,6 +438,19 @@ bool validate(const IOperationValidationContext* context) {
         NN_RET_CHECK_FAIL() << "Unsupported input tensor type for operation " << kOperationName;
     }
 
+    // NeuralNetworks.h specifies that ANEURALNETWORKS_CONV_2D's output must
+    // meet "outputScale > inputScale * filterScale" for the operand type
+    // ANEURALNETWORKS_TENSOR_QUANT8_ASYMM before API level 29. For other
+    // operand types (e.g., ANEURALNETWORKS_TENSOR_FLOAT32), this constraint
+    // does not apply, so by default the constraint is met.
+    bool meetsQuantizedScaleConstraintBeforeV1_2 = true;
+    if (inputType == OperandType::TENSOR_QUANT8_ASYMM) {
+        const float inputScale = context->getInputShape(kInputTensor).scale;
+        const float filterScale = context->getInputShape(kFilterTensor).scale;
+        const float outputScale = context->getInputShape(kOutputTensor).scale;
+        meetsQuantizedScaleConstraintBeforeV1_2 = (outputScale > inputScale * filterScale);
+    }
+
     bool withExplicitPadding = false;
     bool withLayout = false;
     bool withDilation = false;
@@ -462,7 +476,8 @@ bool validate(const IOperationValidationContext* context) {
         }
     }
 
-    if (filterType == OperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL || withLayout || withDilation) {
+    if (filterType == OperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL || withLayout || withDilation ||
+        !meetsQuantizedScaleConstraintBeforeV1_2) {
         NN_RET_CHECK(validateHalVersion(context, HalVersion::V1_2));
     } else {
         NN_RET_CHECK(validateHalVersion(context, HalVersion::V1_0));
@@ -507,10 +522,13 @@ bool prepare(IOperationExecutionContext* context) {
     NN_RET_CHECK_GT(width, 0);
     NN_RET_CHECK_GT(channels_in, 0);
     NN_RET_CHECK_GT(channels_out, 0);
-    NN_RET_CHECK_GT(filterWidth, param.padding_left);
-    NN_RET_CHECK_GT(filterWidth, param.padding_right);
-    NN_RET_CHECK_GT(filterHeight, param.padding_top);
-    NN_RET_CHECK_GT(filterHeight, param.padding_bottom);
+
+    int32_t effectiveFilterWidth = (filterWidth - 1) * param.dilation_width_factor + 1;
+    int32_t effectiveFilterHeight = (filterHeight - 1) * param.dilation_height_factor + 1;
+    NN_RET_CHECK_GT(effectiveFilterWidth, param.padding_left);
+    NN_RET_CHECK_GT(effectiveFilterWidth, param.padding_right);
+    NN_RET_CHECK_GT(effectiveFilterHeight, param.padding_top);
+    NN_RET_CHECK_GT(effectiveFilterHeight, param.padding_bottom);
 
     uint32_t outWidth =
             computeOutSize(width, filterWidth, param.stride_width, param.dilation_width_factor,
