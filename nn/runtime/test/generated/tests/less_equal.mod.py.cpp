@@ -129,3 +129,39 @@ TEST_F(DynamicOutputShapeTest, less_equal_quantized_different_zero_point_dynamic
             less_equal::get_examples_quantized_different_zero_point_dynamic_output_shape());
 }
 
+TEST_F(GeneratedTests, less_equal_quantized_overflow_second_input_if_requantized) {
+    execute(less_equal::CreateModel_5,
+            less_equal::is_ignored_5,
+            less_equal::get_examples_quantized_overflow_second_input_if_requantized());
+}
+
+TEST_F(DynamicOutputShapeTest, less_equal_quantized_overflow_second_input_if_requantized_dynamic_output_shape) {
+    execute(less_equal::CreateModel_dynamic_output_shape_5,
+            less_equal::is_ignored_dynamic_output_shape_5,
+            less_equal::get_examples_quantized_overflow_second_input_if_requantized_dynamic_output_shape());
+}
+
+TEST_F(GeneratedTests, less_equal_quantized_overflow_first_input_if_requantized) {
+    execute(less_equal::CreateModel_6,
+            less_equal::is_ignored_6,
+            less_equal::get_examples_quantized_overflow_first_input_if_requantized());
+}
+
+TEST_F(DynamicOutputShapeTest, less_equal_quantized_overflow_first_input_if_requantized_dynamic_output_shape) {
+    execute(less_equal::CreateModel_dynamic_output_shape_6,
+            less_equal::is_ignored_dynamic_output_shape_6,
+            less_equal::get_examples_quantized_overflow_first_input_if_requantized_dynamic_output_shape());
+}
+
+TEST_F(GeneratedTests, less_equal_boolean) {
+    execute(less_equal::CreateModel_7,
+            less_equal::is_ignored_7,
+            less_equal::get_examples_boolean());
+}
+
+TEST_F(DynamicOutputShapeTest, less_equal_boolean_dynamic_output_shape) {
+    execute(less_equal::CreateModel_dynamic_output_shape_7,
+            less_equal::is_ignored_dynamic_output_shape_7,
+            less_equal::get_examples_boolean_dynamic_output_shape());
+}
+

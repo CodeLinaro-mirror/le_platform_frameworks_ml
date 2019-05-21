@@ -244,26 +244,103 @@ bool OperationExecutionContext::checkNoZeroSizedInput() const {
 
 }  // namespace
 
+// Used to keep a pointer to a memory pool.
+//
+// In the case of an "mmap_fd" pool, owns the mmap region
+// returned by getBuffer() -- i.e., that region goes away
+// when the RunTimePoolInfo is destroyed or is assigned to.
+class RunTimePoolInfo::RunTimePoolInfoImpl {
+   public:
+    RunTimePoolInfoImpl(const hidl_memory& hidlMemory, uint8_t* buffer, const sp<IMemory>& memory,
+                        const sp<GraphicBuffer>& graphicBuffer);
+
+    // rule of five...
+    ~RunTimePoolInfoImpl();
+    RunTimePoolInfoImpl(const RunTimePoolInfoImpl&) = delete;
+    RunTimePoolInfoImpl(RunTimePoolInfoImpl&&) noexcept = delete;
+    RunTimePoolInfoImpl& operator=(const RunTimePoolInfoImpl&) = delete;
+    RunTimePoolInfoImpl& operator=(RunTimePoolInfoImpl&&) noexcept = delete;
+
+    uint8_t* getBuffer() const { return mBuffer; }
+
+    bool update() const;
+
+    hidl_memory getHidlMemory() const { return mHidlMemory; }
+
+   private:
+    const hidl_memory mHidlMemory;     // always used
+    uint8_t* const mBuffer = nullptr;  // always used
+    const sp<IMemory> mMemory;         // only used when hidlMemory.name() == "ashmem"
+    const sp<GraphicBuffer>
+            mGraphicBuffer;  // only used when hidlMemory.name() == "hardware_buffer_blob"
+};
+
+RunTimePoolInfo::RunTimePoolInfoImpl::RunTimePoolInfoImpl(const hidl_memory& hidlMemory,
+                                                          uint8_t* buffer,
+                                                          const sp<IMemory>& memory,
+                                                          const sp<GraphicBuffer>& graphicBuffer)
+    : mHidlMemory(hidlMemory), mBuffer(buffer), mMemory(memory), mGraphicBuffer(graphicBuffer) {}
+
+RunTimePoolInfo::RunTimePoolInfoImpl::~RunTimePoolInfoImpl() {
+    if (mBuffer == nullptr) {
+        return;
+    }
+
+    const std::string memType = mHidlMemory.name();
+    if (memType == "ashmem") {
+        // nothing to do
+    } else if (memType == "mmap_fd") {
+        const size_t size = mHidlMemory.size();
+        if (munmap(mBuffer, size)) {
+            LOG(ERROR) << "RunTimePoolInfoImpl::~RunTimePoolInfo(): Can't munmap";
+        }
+    } else if (memType == "hardware_buffer_blob") {
+        mGraphicBuffer->unlock();
+    } else if (memType == "") {
+        // Represents a POINTER argument; nothing to do
+    } else {
+        LOG(ERROR) << "RunTimePoolInfoImpl::~RunTimePoolInfoImpl(): unsupported hidl_memory type";
+    }
+}
+
+// Making sure the output data are correctly updated after execution.
+bool RunTimePoolInfo::RunTimePoolInfoImpl::update() const {
+    const std::string memType = mHidlMemory.name();
+    if (memType == "ashmem") {
+        mMemory->commit();
+        return true;
+    }
+    if (memType == "mmap_fd") {
+        int prot = mHidlMemory.handle()->data[1];
+        if (prot & PROT_WRITE) {
+            const size_t size = mHidlMemory.size();
+            return msync(mBuffer, size, MS_SYNC) == 0;
+        }
+    }
+    // No-op for other types of memory.
+    return true;
+}
+
 // TODO: short term, make share memory mapping and updating a utility function.
 // TODO: long term, implement mmap_fd as a hidl IMemory service.
-RunTimePoolInfo::RunTimePoolInfo(const hidl_memory& hidlMemory, bool* fail) {
-    sp<IMemory> memory;
+std::optional<RunTimePoolInfo> RunTimePoolInfo::createFromHidlMemory(
+        const hidl_memory& hidlMemory) {
     uint8_t* buffer = nullptr;
+    sp<IMemory> memory;
+    sp<GraphicBuffer> graphicBuffer;
 
     const auto& memType = hidlMemory.name();
     if (memType == "ashmem") {
         memory = mapMemory(hidlMemory);
         if (memory == nullptr) {
             LOG(ERROR) << "Can't map shared memory.";
-            if (fail) *fail = true;
-            return;
+            return std::nullopt;
         }
         memory->update();
         buffer = reinterpret_cast<uint8_t*>(static_cast<void*>(memory->getPointer()));
         if (buffer == nullptr) {
             LOG(ERROR) << "Can't access shared memory.";
-            if (fail) *fail = true;
-            return;
+            return std::nullopt;
         }
     } else if (memType == "mmap_fd") {
         size_t size = hidlMemory.size();
@@ -273,8 +350,7 @@ RunTimePoolInfo::RunTimePoolInfo(const hidl_memory& hidlMemory, bool* fail) {
         buffer = static_cast<uint8_t*>(mmap(nullptr, size, prot, MAP_SHARED, fd, offset));
         if (buffer == MAP_FAILED) {
             LOG(ERROR) << "RunTimePoolInfo::set(): Can't mmap the file descriptor.";
-            if (fail) *fail = true;
-            return;
+            return std::nullopt;
         }
     } else if (memType == "hardware_buffer_blob") {
         auto handle = hidlMemory.handle();
@@ -284,109 +360,61 @@ RunTimePoolInfo::RunTimePoolInfo(const hidl_memory& hidlMemory, bool* fail) {
         const uint32_t height = 1;  // height is always 1 for BLOB mode AHardwareBuffer.
         const uint32_t layers = 1;  // layers is always 1 for BLOB mode AHardwareBuffer.
         const uint32_t stride = hidlMemory.size();
-        mGraphicBuffer = new GraphicBuffer(handle, GraphicBuffer::HandleWrapMethod::CLONE_HANDLE,
-                                           width, height, format, layers, usage, stride);
+        graphicBuffer = new GraphicBuffer(handle, GraphicBuffer::HandleWrapMethod::CLONE_HANDLE,
+                                          width, height, format, layers, usage, stride);
         void* gBuffer = nullptr;
         int32_t outBytesPerPixel, outBytesPerStride;
         status_t status =
-                mGraphicBuffer->lock(usage, &gBuffer, &outBytesPerPixel, &outBytesPerStride);
+                graphicBuffer->lock(usage, &gBuffer, &outBytesPerPixel, &outBytesPerStride);
         if (status != NO_ERROR) {
             LOG(ERROR) << "RunTimePoolInfo Can't lock the AHardwareBuffer.";
-            if (fail) *fail = true;
-            return;
+            return std::nullopt;
         }
         buffer = static_cast<uint8_t*>(gBuffer);
     } else {
         LOG(ERROR) << "RunTimePoolInfo::set(): unsupported hidl_memory type";
-        if (fail) *fail = true;
-        return;
+        return std::nullopt;
     }
 
-    mHidlMemory = hidlMemory;
-    mBuffer = buffer;
-    mMemory = memory;
+    const auto impl =
+            std::make_shared<const RunTimePoolInfoImpl>(hidlMemory, buffer, memory, graphicBuffer);
+    return {RunTimePoolInfo(impl)};
 }
 
-RunTimePoolInfo::RunTimePoolInfo(uint8_t* buffer) {
-    mBuffer = buffer;
+RunTimePoolInfo RunTimePoolInfo::createFromExistingBuffer(uint8_t* buffer) {
+    const auto impl =
+            std::make_shared<const RunTimePoolInfoImpl>(hidl_memory{}, buffer, nullptr, nullptr);
+    return {impl};
 }
 
-RunTimePoolInfo::RunTimePoolInfo(RunTimePoolInfo&& other) noexcept {
-    moveFrom(std::move(other));
-    other.mBuffer = nullptr;
+RunTimePoolInfo::RunTimePoolInfo(const std::shared_ptr<const RunTimePoolInfoImpl>& impl)
+    : mImpl(impl) {}
+
+uint8_t* RunTimePoolInfo::getBuffer() const {
+    return mImpl->getBuffer();
 }
 
-RunTimePoolInfo& RunTimePoolInfo::operator=(RunTimePoolInfo&& other) noexcept {
-    if (this != &other) {
-        release();
-        moveFrom(std::move(other));
-        other.mBuffer = nullptr;
-    }
-    return *this;
-}
-
-void RunTimePoolInfo::moveFrom(RunTimePoolInfo&& other) {
-    mHidlMemory = std::move(other.mHidlMemory);
-    mBuffer = std::move(other.mBuffer);
-    mMemory = std::move(other.mMemory);
-}
-
-void RunTimePoolInfo::release() {
-    if (mBuffer == nullptr) {
-        return;
-    }
-
-    auto memType = mHidlMemory.name();
-    if (memType == "ashmem") {
-        // nothing to do
-    } else if (memType == "mmap_fd") {
-        size_t size = mHidlMemory.size();
-        if (munmap(mBuffer, size)) {
-            LOG(ERROR) << "RunTimePoolInfo::release(): Can't munmap";
-        }
-    } else if (memType == "hardware_buffer_blob") {
-        mGraphicBuffer->unlock();
-        mGraphicBuffer = nullptr;
-    } else if (memType == "") {
-        // Represents a POINTER argument; nothing to do
-    } else {
-        LOG(ERROR) << "RunTimePoolInfo::release(): unsupported hidl_memory type";
-    }
-
-    mHidlMemory = hidl_memory();
-    mMemory = nullptr;
-    mBuffer = nullptr;
-}
-
-// Making sure the output data are correctly updated after execution.
 bool RunTimePoolInfo::update() const {
-    auto memType = mHidlMemory.name();
-    if (memType == "ashmem") {
-        mMemory->commit();
-        return true;
-    } else if (memType == "mmap_fd") {
-        int prot = mHidlMemory.handle()->data[1];
-        if (prot & PROT_WRITE) {
-            size_t size = mHidlMemory.size();
-            return msync(mBuffer, size, MS_SYNC) == 0;
-        }
-    }
-    // No-op for other types of memory.
-    return true;
+    return mImpl->update();
+}
+
+hidl_memory RunTimePoolInfo::getHidlMemory() const {
+    return mImpl->getHidlMemory();
 }
 
 bool setRunTimePoolInfosFromHidlMemories(std::vector<RunTimePoolInfo>* poolInfos,
                                          const hidl_vec<hidl_memory>& pools) {
+    CHECK(poolInfos != nullptr);
     poolInfos->clear();
     poolInfos->reserve(pools.size());
-    bool fail = false;
     for (const auto& pool : pools) {
-        poolInfos->emplace_back(pool, &fail);
-    }
-    if (fail) {
-        LOG(ERROR) << "Could not map pools";
-        poolInfos->clear();
-        return false;
+        if (std::optional<RunTimePoolInfo> poolInfo = RunTimePoolInfo::createFromHidlMemory(pool)) {
+            poolInfos->push_back(*poolInfo);
+        } else {
+            LOG(ERROR) << "Could not map pools";
+            poolInfos->clear();
+            return false;
+        }
     }
     return true;
 }
@@ -1070,16 +1098,21 @@ int CpuExecutor::executeOperation(const Operation& operation) {
             }
         } break;
         case OperationType::BIDIRECTIONAL_SEQUENCE_LSTM: {
+            const auto merge_outputs = getScalarData<bool>(
+                    mOperands[ins[BidirectionalSequenceLSTM::kMergeOutputsParam]]);
             RunTimeOperandInfo& fwOutput =
                     mOperands[outs[BidirectionalSequenceLSTM::kFwOutputTensor]];
-            RunTimeOperandInfo& bwOutput =
-                    mOperands[outs[BidirectionalSequenceLSTM::kBwOutputTensor]];
             Shape fwOutputShape, bwOutputShape;
 
             BidirectionalSequenceLSTM lstm(operation, mOperands);
             success = lstm.Prepare(operation, mOperands, &fwOutputShape, &bwOutputShape) &&
-                      setInfoAndAllocateIfNeeded(&fwOutput, fwOutputShape, &result) &&
-                      setInfoAndAllocateIfNeeded(&bwOutput, bwOutputShape, &result) && lstm.Eval();
+                      setInfoAndAllocateIfNeeded(&fwOutput, fwOutputShape, &result);
+            if (!merge_outputs) {
+                RunTimeOperandInfo& bwOutput =
+                        mOperands[outs[BidirectionalSequenceLSTM::kBwOutputTensor]];
+                success = success && setInfoAndAllocateIfNeeded(&bwOutput, bwOutputShape, &result);
+            }
+            success = success && lstm.Eval();
         } break;
         case OperationType::LSTM: {
             RunTimeOperandInfo& scratch = mOperands[outs[LSTMCell::kScratchBufferTensor]];
@@ -1614,120 +1647,6 @@ int CpuExecutor::executeOperation(const Operation& operation) {
                             stride_height, numGroups, activation,
                             reinterpret_cast<uint8_t*>(output_tmp.buffer), outShape);
                 }
-            }
-
-            if (data_layout) {
-                output_tmp_guard.reset(output_tmp.buffer);
-            }
-            if (!success || !convertFromNhwc(output, output_tmp, data_layout, &result)) {
-                success = false;
-                break;
-            }
-        } break;
-        case OperationType::TRANSPOSE_CONV_2D: {
-            const size_t inCount = ins.size();
-            if ((inCount != 11 && inCount != 9) || !allParametersPresent(inCount, 1)) {
-                return ANEURALNETWORKS_BAD_DATA;
-            }
-            const RunTimeOperandInfo& input = mOperands[ins[0]];
-            const RunTimeOperandInfo& filter = mOperands[ins[1]];
-            const RunTimeOperandInfo& bias = mOperands[ins[2]];
-
-            int32_t padding_left, padding_right;
-            int32_t padding_top, padding_bottom;
-            int32_t padding_implicit = 0;
-            int32_t stride_width, stride_height;
-            int32_t activation;
-            bool data_layout = false;
-
-            if (inCount == 11) {
-                padding_left = getScalarData<int32_t>(mOperands[ins[3]]);
-                padding_right = getScalarData<int32_t>(mOperands[ins[4]]);
-                padding_top = getScalarData<int32_t>(mOperands[ins[5]]);
-                padding_bottom = getScalarData<int32_t>(mOperands[ins[6]]);
-                stride_width = getScalarData<int32_t>(mOperands[ins[7]]);
-                stride_height = getScalarData<int32_t>(mOperands[ins[8]]);
-                activation = getScalarData<int32_t>(mOperands[ins[9]]);
-                data_layout = getScalarData<bool>(mOperands[ins[10]]);
-            } else {
-                padding_implicit = getScalarData<int32_t>(mOperands[ins[4]]);
-                stride_width = getScalarData<int32_t>(mOperands[ins[5]]);
-                stride_height = getScalarData<int32_t>(mOperands[ins[6]]);
-                activation = getScalarData<int32_t>(mOperands[ins[7]]);
-                data_layout = getScalarData<bool>(mOperands[ins[8]]);
-            }
-
-            RunTimeOperandInfo& output = mOperands[outs[0]];
-            Shape outShape = output.shape();
-
-            RunTimeOperandInfo input_tmp, output_tmp;
-            std::unique_ptr<uint8_t[]> input_tmp_guard, output_tmp_guard;
-            if (!convertToNhwc(input_tmp, input, input_tmp_guard, data_layout)) {
-                success = false;
-                break;
-            }
-            output_tmp.lifetime = OperandLifeTime::TEMPORARY_VARIABLE;
-            output_tmp.buffer = data_layout ? nullptr : output.buffer;
-            output_tmp.length = data_layout ? 0 : output.length;
-
-            if (inCount == 9) {
-                const RunTimeOperandInfo& outShape = mOperands[ins[3]];
-                const int32_t* outShapeData = reinterpret_cast<const int32_t*>(outShape.buffer);
-                NN_OPS_CHECK(getNumberOfDimensions(outShape.shape()) == 1);
-                NN_OPS_CHECK(getSizeOfDimension(outShape.shape(), 0) == 4);
-                Shape filterShape = filter.shape();
-                int32_t width = data_layout ? outShapeData[3] : outShapeData[2];
-                int32_t height = data_layout ? outShapeData[2] : outShapeData[1];
-                int32_t filter_width = getSizeOfDimension(filterShape, 2);
-                int32_t filter_height = getSizeOfDimension(filterShape, 1);
-                calculateExplicitPadding(width, stride_width, filter_width, padding_implicit,
-                                         &padding_left, &padding_right);
-                calculateExplicitPadding(height, stride_height, filter_height, padding_implicit,
-                                         &padding_top, &padding_bottom);
-            }
-
-            if (!transposeConvPrepare(input_tmp.shape(), filter.shape(), bias.shape(), padding_left,
-                                      padding_right, padding_top, padding_bottom, stride_width,
-                                      stride_height, &outShape) ||
-                !setInfoAndAllocateIfNeeded(&output_tmp, outShape, &result)) {
-                if (!data_layout) output.dimensions = output_tmp.dimensions;
-                success = false;
-                break;
-            }
-
-            if (input_tmp.type == OperandType::TENSOR_FLOAT32) {
-                success = transposeConvFloat32(
-                        reinterpret_cast<const float*>(input_tmp.buffer), input_tmp.shape(),
-                        reinterpret_cast<const float*>(filter.buffer), filter.shape(),
-                        reinterpret_cast<const float*>(bias.buffer), bias.shape(), padding_left,
-                        padding_right, padding_top, padding_bottom, stride_width, stride_height,
-                        activation, reinterpret_cast<float*>(output_tmp.buffer), outShape);
-            } else if (input_tmp.type == OperandType::TENSOR_QUANT8_ASYMM) {
-                if (filter.type == OperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL) {
-                    success = transposeConvQuant8PerChannel(
-                            reinterpret_cast<const uint8_t*>(input_tmp.buffer), input_tmp.shape(),
-                            reinterpret_cast<const uint8_t*>(filter.buffer), filter.shape(),
-                            filter.extraParams.channelQuant().scales.data(),
-                            reinterpret_cast<const int32_t*>(bias.buffer), bias.shape(),
-                            padding_left, padding_right, padding_top, padding_bottom, stride_width,
-                            stride_height, activation,
-                            reinterpret_cast<uint8_t*>(output_tmp.buffer), outShape);
-                } else if (filter.type == OperandType::TENSOR_QUANT8_ASYMM) {
-                    success = transposeConvQuant8(
-                            reinterpret_cast<const uint8_t*>(input_tmp.buffer), input_tmp.shape(),
-                            reinterpret_cast<const uint8_t*>(filter.buffer), filter.shape(),
-                            reinterpret_cast<const int32_t*>(bias.buffer), bias.shape(),
-                            padding_left, padding_right, padding_top, padding_bottom, stride_width,
-                            stride_height, activation,
-                            reinterpret_cast<uint8_t*>(output_tmp.buffer), outShape);
-                }
-            } else if (input_tmp.type == OperandType::TENSOR_FLOAT16) {
-                success = transposeConvFloat16(
-                        reinterpret_cast<const _Float16*>(input_tmp.buffer), input_tmp.shape(),
-                        reinterpret_cast<const _Float16*>(filter.buffer), filter.shape(),
-                        reinterpret_cast<const _Float16*>(bias.buffer), bias.shape(), padding_left,
-                        padding_right, padding_top, padding_bottom, stride_width, stride_height,
-                        activation, reinterpret_cast<_Float16*>(output_tmp.buffer), outShape);
             }
 
             if (data_layout) {
