@@ -1203,20 +1203,21 @@ typedef enum {
      * https://arxiv.org/pdf/1607.06450.pdf
      *
      * The operation has the following independently optional inputs:
+     * * The cell-to-input weights (\f$W_{ci}\f$), cell-to-forget weights
+     *   (\f$W_{cf}\f$) and cell-to-output weights (\f$W_{co}\f$) either all
+     *   have values or neither of them have values (i.e., all set to null). If
+     *   they have values, the peephole optimization is used.
      * * The input-to-input weights (\f$W_{xi}\f$), recurrent-to-input weights
-     *   (\f$W_{hi}\f$), cell-to-input (\f$W_{ci}\f$) weights, and input gate
-     *   bias (\f$b_i\f$) either all have values, or none of them have values
-     *   (i.e., all set to null). If they have no values, coupling of input and
-     *   forget gates (CIFG) is used, in which case the input gate (\f$i_t\f$)
-     *   is calculated using the following equation instead.
+     *   (\f$W_{hi}\f$) and input gate bias (\f$b_i\f$) either all have values,
+     *   or none of them have values. If they have no values, coupling of input
+     *   and forget gates (CIFG) is used, in which case the input gate
+     *   (\f$i_t\f$) is calculated using the following equation instead.
      *   \f{eqnarray*}{
      *   i_t = 1 - f_t
      *   \f}
-     * * The cell-to-forget weights (\f$W_{cf}\f$) and cell-to-output weights
-     *   (\f$W_{co}\f$) either both have values or neither of them have values.
-     *   If they have values, the peephole optimization is used. Additionally,
-     *   if CIFG is not used, cell-to-input weights (\f$W_{ci}\f$) is also
-     *   required to have values for peephole optimization.
+     *   In case peephole optimization is used and CIFG is not used
+     *   cell-to-input (\f$W_{ci}\f$) weights must be present. Otherwise, the
+     *   cell-to-input weights must have no value.
      * * The projection weights (\f$W_{proj}\f$) is required only for the
      *   recurrent projection layer, and should otherwise have no value.
      * * The projection bias (\f$b_{proj}\f$) may (but not required to) have a
@@ -2075,7 +2076,8 @@ typedef enum {
      * Supported tensor {@link OperandCode}:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT16} (since API level 29)
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT32}
-     * * {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM}
+     * * {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} (full support since API
+     *   level 29, see the output section)
      *
      * Supported tensor rank: 4, with "NHWC" or "NCHW" data layout.
      * With the default data layout NHWC, the data is stored in the order of:
@@ -2101,6 +2103,10 @@ typedef enum {
      *
      * Outputs:
      * * 0: A tensor of the same {@link OperandCode} as input0.
+     *
+     *      NOTE: Before API level 29, the pad value for
+     *      {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM} is undefined.
+     *      Since API level 29, the pad value is always the logical zero.
      *
      * Available since API level 28.
      */
