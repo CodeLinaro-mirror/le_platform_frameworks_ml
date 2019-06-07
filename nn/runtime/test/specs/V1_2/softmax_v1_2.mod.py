@@ -25,9 +25,13 @@ quant8 = DataTypeConverter().Identify({
 })
 
 example1 = {
-    i: [1., 2., 3., 4., 5., -1., -2., -3., -4., -5.] * 4,
-    o: [0.011656231, 0.031684921, 0.086128544, 0.234121657, 0.636408647,
-         0.636408647, 0.234121657, 0.086128544, 0.031684921, 0.011656231] * 4
+    i: [17., 16., 15., 14.,  1.,
+        -1., -2., -3., -4., -17.] * 4,
+    o: [0.643914213228014,
+        0.236882800924671,
+        0.087144312427294,
+        0.032058600957022,
+        7.246299848982885e-08] * 8
 }
 example2 = {
     i: [1., 2., 3., 4., 5., -1., -2., -3., -4., -5.] * 4,
@@ -49,6 +53,10 @@ Example(example1).AddVariations("relaxed", "float16", quant8).AddAllDimsAndAxis(
 # beta = 0.000001
 Model("axis").Operation("SOFTMAX", i, 0.000001, axis).To(o)
 Example(example2).AddVariations("relaxed", "float16", quant8).AddAllDimsAndAxis(i, o, axis)
+
+# SOFTMAX of rank 4 and TENSOR_FLOAT32 and TENSOR_QUANT8_ASYMM data type is introduced in V1_0.
+Example.SetVersion("V1_0", "softmax_v1_2", "softmax_v1_2_quant8", \
+                           "softmax_v1_2_2", "softmax_v1_2_quant8_2")
 
 
 # TEST 3: zero-sized input
