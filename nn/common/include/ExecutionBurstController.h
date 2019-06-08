@@ -110,13 +110,14 @@ class ResultChannelReceiver {
      */
     void invalidate();
 
+    // prefer calling ResultChannelReceiver::getBlocking
+    std::optional<std::vector<FmqResultDatum>> getPacketBlocking();
+
     ResultChannelReceiver(std::unique_ptr<FmqResultChannel> fmqResultChannel, bool blocking);
 
    private:
-    std::optional<std::vector<FmqResultDatum>> getPacketBlocking();
-
     const std::unique_ptr<FmqResultChannel> mFmqResultChannel;
-    std::atomic<bool> mTeardown{false};
+    std::atomic<bool> mValid{true};
     const bool mBlocking;
 };
 
@@ -156,6 +157,13 @@ class RequestChannelSender {
      */
     bool send(const Request& request, MeasureTiming measure, const std::vector<int32_t>& slots);
 
+    /**
+     * Method to mark the channel as invalid, causing all future calls to
+     * RequestChannelSender::send to immediately return false without attempting
+     * to send a message across the FMQ.
+     */
+    void invalidate();
+
     // prefer calling RequestChannelSender::send
     bool sendPacket(const std::vector<FmqRequestDatum>& packet);
 
@@ -163,6 +171,7 @@ class RequestChannelSender {
 
    private:
     const std::unique_ptr<FmqRequestChannel> mFmqRequestChannel;
+    std::atomic<bool> mValid{true};
     const bool mBlocking;
 };
 
@@ -192,9 +201,29 @@ class ExecutionBurstController {
      * buffer, they must use the same key.
      */
     class ExecutionBurstCallback : public IBurstCallback {
+        DISALLOW_COPY_AND_ASSIGN(ExecutionBurstCallback);
+
        public:
+        ExecutionBurstCallback() = default;
+
         Return<void> getMemories(const hidl_vec<int32_t>& slots, getMemories_cb cb) override;
 
+        /**
+         * This function performs one of two different actions:
+         * 1) If a key corresponding to a memory resource is unrecognized by the
+         *    ExecutionBurstCallback object, the ExecutionBurstCallback object
+         *    will allocate a slot, bind the memory to the slot, and return the
+         *    slot identifier.
+         * 2) If a key corresponding to a memory resource is recognized by the
+         *    ExecutionBurstCallback object, the ExecutionBurstCallback object
+         *    will return the existing slot identifier.
+         *
+         * @param memories Memory resources used in an inference.
+         * @param keys Unique identifiers where each element corresponds to a
+         *     memory resource element in "memories".
+         * @return Unique slot identifiers where each returned slot element
+         *     corresponds to a memory resource element in "memories".
+         */
         std::vector<int32_t> getSlots(const hidl_vec<hidl_memory>& memories,
                                       const std::vector<intptr_t>& keys);
 
@@ -238,10 +267,15 @@ class ExecutionBurstController {
     static std::unique_ptr<ExecutionBurstController> create(const sp<IPreparedModel>& preparedModel,
                                                             bool blocking);
 
-    ExecutionBurstController(std::unique_ptr<RequestChannelSender> requestChannelSender,
-                             std::unique_ptr<ResultChannelReceiver> resultChannelReceiver,
+    // prefer calling ExecutionBurstController::create
+    ExecutionBurstController(const std::shared_ptr<RequestChannelSender>& requestChannelSender,
+                             const std::shared_ptr<ResultChannelReceiver>& resultChannelReceiver,
                              const sp<IBurstContext>& burstContext,
-                             const sp<ExecutionBurstCallback>& callback);
+                             const sp<ExecutionBurstCallback>& callback,
+                             const sp<hardware::hidl_death_recipient>& deathHandler = nullptr);
+
+    // explicit destructor to unregister the death recipient
+    ~ExecutionBurstController();
 
     /**
      * Execute a request on a model.
@@ -250,10 +284,34 @@ class ExecutionBurstController {
      * @param measure Whether to collect timing measurements, either YES or NO
      * @param memoryIds Identifiers corresponding to each memory object in the
      *     request's pools.
-     * @return status and output shape of the execution and any execution time
-     *     measurements.
+     * @return A tuple of:
+     *     - status of the execution
+     *     - dynamic output shapes from the execution
+     *     - any execution time measurements of the execution
      */
     std::tuple<ErrorStatus, std::vector<OutputShape>, Timing> compute(
+            const Request& request, MeasureTiming measure, const std::vector<intptr_t>& memoryIds);
+
+    // TODO: combine "compute" and "tryCompute" back into a single function.
+    // "tryCompute" was created later to return the "fallback" boolean. This
+    // could not be done directly in "compute" because the VTS test cases (which
+    // test burst using "compute") had already been locked down and could not be
+    // changed.
+    /**
+     * Execute a request on a model.
+     *
+     * @param request Arguments to be executed on a model.
+     * @param measure Whether to collect timing measurements, either YES or NO
+     * @param memoryIds Identifiers corresponding to each memory object in the
+     *     request's pools.
+     * @return A tuple of:
+     *     - status of the execution
+     *     - dynamic output shapes from the execution
+     *     - any execution time measurements of the execution
+     *     - whether or not a failed burst execution should be re-run using a
+     *       different path (e.g., IPreparedModel::executeSynchronously)
+     */
+    std::tuple<ErrorStatus, std::vector<OutputShape>, Timing, bool> tryCompute(
             const Request& request, MeasureTiming measure, const std::vector<intptr_t>& memoryIds);
 
     /**
@@ -265,10 +323,11 @@ class ExecutionBurstController {
 
    private:
     std::mutex mMutex;
-    const std::unique_ptr<RequestChannelSender> mRequestChannelSender;
-    const std::unique_ptr<ResultChannelReceiver> mResultChannelReceiver;
+    const std::shared_ptr<RequestChannelSender> mRequestChannelSender;
+    const std::shared_ptr<ResultChannelReceiver> mResultChannelReceiver;
     const sp<IBurstContext> mBurstContext;
     const sp<ExecutionBurstCallback> mMemoryCache;
+    const sp<hardware::hidl_death_recipient> mDeathHandler;
 };
 
 }  // namespace android::nn
