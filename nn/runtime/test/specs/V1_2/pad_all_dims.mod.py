@@ -26,8 +26,8 @@ output0 = Output("output0", "TENSOR_FLOAT32", "{4, 8, 8, 6}")
 model = Model().Operation("PAD", input0, paddings).To(output0)
 
 quant8 = DataTypeConverter().Identify({
-    input0: ("TENSOR_QUANT8_ASYMM", 2.3, 9),
-    output0: ("TENSOR_QUANT8_ASYMM", 2.3, 9),
+    input0: ("TENSOR_QUANT8_ASYMM", 2.3, 0),
+    output0: ("TENSOR_QUANT8_ASYMM", 2.3, 0),
 })
 
 Example({
@@ -41,3 +41,6 @@ Example({
                      [2, 1]],
                     "constant").flatten().tolist(),
 }).AddVariations("float16", "relaxed", quant8)
+
+# PAD of TENSOR_FLOAT32 and TENSOR_QUANT8_ASYMM data type is introduced in V1_1.
+Example.SetVersion("V1_1", "pad_all_dims", "pad_all_dims_quant8")
