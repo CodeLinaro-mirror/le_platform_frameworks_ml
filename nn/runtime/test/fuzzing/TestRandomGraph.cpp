@@ -188,8 +188,30 @@ class RandomGraphTest : public ::testing::TestWithParam<uint32_t> {
         NN_FUZZER_LOG_CLOSE;
     }
 
+    bool shouldSkipTest(int64_t featureLevel) {
+        static const std::set<std::string> kDisabledTests = {
+                // In this test, the RGG produces a non-sensible graph with extreme large output
+                // gain and highly clamped output range.
+                // TODO: Currently quantized buffer values are uniformly distributed within
+                //       [0, 255]. We should investigate on a better buffer value generation
+                //       algorithm that represents the real-world cases.
+                "TestRandomGraph_SingleOperationTest_CONV_2D_V1_2_12",
+        };
+        if (kDisabledTests.find(mTestName) != kDisabledTests.end()) return true;
+        if (featureLevel >= __ANDROID_API_Q__) return false;
+        const auto& operations = mGraph.getOperations();
+        for (const auto& op : operations) {
+            // Skip if testing BATCH_TO_SPACE_ND with batch dimension == 1.
+            if (op.opType == ANEURALNETWORKS_BATCH_TO_SPACE_ND &&
+                op.inputs[0]->dimensions[0].getValue() == 1)
+                return true;
+        }
+        return false;
+    }
+
     // Compile and execute the generated graph on a device selected by name.
-    void compute(const test_wrapper::Model* model, uint32_t numOps, const std::string& name) {
+    void computeAndVerifyResultsForDevice(const test_wrapper::Model* model, uint32_t numOps,
+                                          const std::string& name) {
         SCOPED_TRACE("Device: " + name);
         ASSERT_TRUE(mDevices.find(name) != mDevices.end());
         const auto device = mDevices[name];
@@ -215,6 +237,7 @@ class RandomGraphTest : public ::testing::TestWithParam<uint32_t> {
         int64_t featureLevel;
         ASSERT_EQ(ANeuralNetworksDevice_getFeatureLevel(device, &featureLevel),
                   ANEURALNETWORKS_NO_ERROR);
+        if (shouldSkipTest(featureLevel)) return;
 
         // Create compilation for device.
         CompilationForDevice compilation;
@@ -257,7 +280,7 @@ class RandomGraphTest : public ::testing::TestWithParam<uint32_t> {
 
     // Compile and execute the generated graph normally (i.e., allow runtime to
     // distribute across devices).
-    void compute(const test_wrapper::Model* model, bool checkResults) {
+    void computeAndVerifyResults(const test_wrapper::Model* model, bool checkResults) {
         // Because we're not using the introspection/control API, the CpuDevice
         // is available as a fallback, and hence we assume that compilation and
         // execution will succeed.
@@ -290,21 +313,21 @@ class RandomGraphTest : public ::testing::TestWithParam<uint32_t> {
         ASSERT_EQ(model.finish(), Result::NO_ERROR);
 
         // Compute reference result.
-        compute(&model, numOperations, kRefDeviceName);
+        computeAndVerifyResultsForDevice(&model, numOperations, kRefDeviceName);
 
         // Compute on each available device.
         for (auto& pair : mDevices) {
             // Skip the nnapi reference device.
             if (pair.first.compare(kRefDeviceName) == 0) continue;
-            compute(&model, numOperations, pair.first);
+            computeAndVerifyResultsForDevice(&model, numOperations, pair.first);
         }
 
         if (numOperations > 1) {
-            {
+            if (!shouldSkipTest(mStandardDevicesFeatureLevel)) {
                 // Compute normally (i.e., allow runtime to distribute across
                 // devices).
                 SCOPED_TRACE("Compute normally");
-                compute(&model, mStandardDevicesFeatureLevel >= __ANDROID_API_Q__);
+                computeAndVerifyResults(&model, mStandardDevicesFeatureLevel >= __ANDROID_API_Q__);
             }
 
 #ifndef NNTEST_CTS
@@ -317,7 +340,7 @@ class RandomGraphTest : public ::testing::TestWithParam<uint32_t> {
                 // reliability, as we do with real devices.
                 SCOPED_TRACE("Compute across synthetic devices");
                 DeviceManager::get()->forTest_setDevices(mSyntheticDevices);
-                compute(&model, true);
+                computeAndVerifyResults(&model, true);
                 DeviceManager::get()->forTest_setDevices(mStandardDevices);
             }
 #endif
@@ -399,10 +422,10 @@ const AccuracyCriteria kRelaxedCriteria = {
         .float32 = {.atol = 1e-3f, .rtol = 1e-3f, .bias = 2e-5f, .mse = 1e-7f},
         .float16 = {.atol = 1.0f, .rtol = 1.0f, .bias = 5e-3f, .mse = 1e-4f},
         .int32 = {.atol = 1},
-        .quant8Asymm = {.atol = 8, .bias = 1, .mse = 1},
-        .quant8Symm = {.atol = 8, .bias = 1, .mse = 1},
-        .quant16Asymm = {.atol = 8, .bias = 1, .mse = 1},
-        .quant16Symm = {.atol = 8, .bias = 1, .mse = 1}};
+        .quant8Asymm = {.atol = 10, .bias = 1.5, .mse = 1.5},
+        .quant8Symm = {.atol = 10, .bias = 1.5, .mse = 1.5},
+        .quant16Asymm = {.atol = 10, .bias = 1.5, .mse = 1.5},
+        .quant16Symm = {.atol = 10, .bias = 1.5, .mse = 1.5}};
 
 /*-- NNAPI 1.0 Operations ---------------------------------------------------*/
 
@@ -551,19 +574,19 @@ const AccuracyCriteria kSmallGraphCriteria = {
         .float32 = {.atol = 1e-2f, .rtol = 1e-2f, .bias = 2e-5f, .mse = 1e-7f},
         .float16 = {.atol = 1.0f, .rtol = 1.0f, .bias = 5e-3f, .mse = 1e-4f},
         .int32 = {.atol = 1},
-        .quant8Asymm = {.atol = 8, .bias = 1, .mse = 1},
-        .quant8Symm = {.atol = 8, .bias = 1, .mse = 1},
-        .quant16Asymm = {.atol = 8, .bias = 1, .mse = 1},
-        .quant16Symm = {.atol = 8, .bias = 1, .mse = 1}};
+        .quant8Asymm = {.atol = 12, .bias = 2, .mse = 2},
+        .quant8Symm = {.atol = 12, .bias = 2, .mse = 2},
+        .quant16Asymm = {.atol = 12, .bias = 2, .mse = 2},
+        .quant16Symm = {.atol = 12, .bias = 2, .mse = 2}};
 
 const AccuracyCriteria kLargeGraphCriteria = {
         .float32 = {.atol = 1e-1f, .rtol = 1e-1f, .bias = 1e-2f, .mse = 1e-4f},
         .float16 = {.atol = 1.0f, .rtol = 1.0f, .bias = 1e-1f, .mse = 5e-2f},
         .int32 = {.atol = 1},
-        .quant8Asymm = {.atol = 10, .bias = 2, .mse = 2},
-        .quant8Symm = {.atol = 10, .bias = 2, .mse = 2},
-        .quant16Asymm = {.atol = 10, .bias = 2, .mse = 2},
-        .quant16Symm = {.atol = 10, .bias = 2, .mse = 2}};
+        .quant8Asymm = {.atol = 12, .bias = 2, .mse = 2},
+        .quant8Symm = {.atol = 12, .bias = 2, .mse = 2},
+        .quant16Asymm = {.atol = 12, .bias = 2, .mse = 2},
+        .quant16Symm = {.atol = 12, .bias = 2, .mse = 2}};
 
 // Due to the limitation of the random graph generator, graphs generated with mixed-type or
 // mixed-rank operations are likely to result in a disconnected network. Thus, we filter the
