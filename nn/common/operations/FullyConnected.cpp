@@ -14,11 +14,14 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "Operations"
+
 #include "CpuOperationUtils.h"
+#include "HalInterfaces.h"
 #include "OperationResolver.h"
 
-#include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
-#include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
+#include <tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h>
+#include <tensorflow/lite/kernels/internal/reference/reference_ops.h>
 
 #include "Tracing.h"
 
@@ -38,6 +41,8 @@ constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
 namespace {
+
+using namespace hal;
 
 // executionMutex is used to protect concurrent access of non-threadsafe resources
 // like gemmlowp::GemmContext.

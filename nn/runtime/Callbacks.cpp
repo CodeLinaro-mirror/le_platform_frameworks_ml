@@ -14,13 +14,16 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "Callbacks"
+
 #include "Callbacks.h"
 
 #include <android-base/logging.h>
-
 #include <limits>
 
-namespace android::hardware::neuralnetworks::V1_2::implementation {
+namespace android::nn {
+
+using namespace hal;
 
 constexpr Timing kNoTiming = {.timeOnDevice = std::numeric_limits<uint64_t>::max(),
                               .timeInDriver = std::numeric_limits<uint64_t>::max()};
@@ -204,4 +207,4 @@ void ExecutionCallback::notifyInternal(ErrorStatus errorStatus,
     mCondition.notify_all();
 }
 
-}  // namespace android::hardware::neuralnetworks::V1_2::implementation
+}  // namespace android::nn

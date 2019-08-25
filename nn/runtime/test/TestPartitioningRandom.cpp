@@ -17,6 +17,7 @@
 #undef NDEBUG
 
 #include "CompilationBuilder.h"
+#include "HalInterfaces.h"
 #include "Manager.h"
 #include "ModelBuilder.h"
 #include "NeuralNetworks.h"
@@ -29,6 +30,7 @@
 #include <cassert>
 #include <cstdio>
 #include <iterator>
+#include <memory>
 #include <random>
 #include <set>
 #include <tuple>
@@ -38,7 +40,6 @@
 #include <unistd.h>
 
 #include <android-base/logging.h>
-#include <android/sharedmem.h>
 #include <gtest/gtest.h>
 
 // Uncomment the following line to generate some debugging output that
@@ -89,15 +90,14 @@
 
 namespace android {
 
+using namespace nn::hal;
 using CompilationBuilder = nn::CompilationBuilder;
 using Device = nn::Device;
 using DeviceManager = nn::DeviceManager;
 using ExecutionPlan = nn::ExecutionPlan;
 using HalVersion = nn::HalVersion;
-using HidlModel = hardware::neuralnetworks::V1_2::Model;
-using HidlToken =
-        ::android::hardware::hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
-using MemoryBuilder = nn::Memory;
+using HidlModel = V1_2::Model;
+using HidlToken = hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
 using ModelBuilder = nn::ModelBuilder;
 using Result = nn::test_wrapper::Result;
 using SampleDriver = nn::sample_driver::SampleDriver;
@@ -146,8 +146,7 @@ typedef std::pair<ANeuralNetworksOperationType, int> Signature;
 // it provides access to certain features from ModelBuilder that are not exposed
 // by the base class (such as inputCount() and operation index).
 class TestModel : public WrapperModel {
-public:
-
+   public:
     uint32_t addOperation(ANeuralNetworksOperationType type, const std::vector<uint32_t>& inputs,
                           const std::vector<uint32_t>& outputs) {
         const uint32_t operationIndex = operationCount();
@@ -156,16 +155,10 @@ public:
         return operationIndex;
     }
 
-    uint32_t operationCount() const {
-        return mOperations.size();
-    }
+    uint32_t operationCount() const { return mOperations.size(); }
 
-    uint32_t inputCount() const {
-        return builder()->inputCount();
-    }
-    uint32_t outputCount() const {
-        return builder()->outputCount();
-    }
+    uint32_t inputCount() const { return builder()->inputCount(); }
+    uint32_t outputCount() const { return builder()->outputCount(); }
 
     const std::vector<uint32_t>& getOperationOutputs(uint32_t index) const {
         CHECK(index < mOperations.size());
@@ -197,8 +190,7 @@ public:
         WrapperModel::setOperandValue(index, &value, sizeof(value));
     }
 
-private:
-
+   private:
     const ModelBuilder* builder() const {
         return reinterpret_cast<const ModelBuilder*>(getHandle());
     }
@@ -216,7 +208,7 @@ private:
 // to provide access to certain features from CompilationBuilder that are not
 // exposed by the base class.
 class TestCompilation : public WrapperCompilation {
-public:
+   public:
     TestCompilation(const WrapperModel* model) : WrapperCompilation(model) {}
 
     TestCompilation(const WrapperModel* model, std::vector<std::shared_ptr<Device>> devices) {
@@ -233,17 +225,13 @@ public:
         return static_cast<Result>(builder()->setPartitioning(partitioning));
     }
 
-    const ExecutionPlan& getExecutionPlan() const {
-        return builder()->forTest_getExecutionPlan();
-    }
+    const ExecutionPlan& getExecutionPlan() const { return builder()->forTest_getExecutionPlan(); }
 
-private:
+   private:
     const CompilationBuilder* builder() const {
         return reinterpret_cast<const CompilationBuilder*>(getHandle());
     }
-    CompilationBuilder* builder() {
-        return reinterpret_cast<CompilationBuilder*>(getHandle());
-    }
+    CompilationBuilder* builder() { return reinterpret_cast<CompilationBuilder*>(getHandle()); }
 };
 
 // This class is used to manage a collection of memory regions,
@@ -261,9 +249,8 @@ private:
 // TestMemories instance, and are destroyed when the TestMemories
 // instance is destroyed.
 class TestMemories {
-public:
+   public:
     TestMemories() = default;
-    ~TestMemories();
 
     TestMemories(const TestMemories&) = delete;
     TestMemories& operator=(const TestMemories&) = delete;
@@ -273,9 +260,7 @@ public:
         mMemorySizes.push_back(0);
         return memoryCount() - 1;
     }
-    unsigned memoryCount() const {
-        return mMemorySizes.size();
-    }
+    unsigned memoryCount() const { return mMemorySizes.size(); }
 
     unsigned addRegion(unsigned memoryIndex, uint32_t length) {
         CHECK(!mLayoutDone);
@@ -286,26 +271,21 @@ public:
         memorySize += length;
         return regionCount() - 1;
     }
-    unsigned regionCount() const {
-        return mRegions.size();
-    }
+    unsigned regionCount() const { return mRegions.size(); }
 
     void layout();
 
-    void* getRegion(unsigned regionIndex,
-                    const WrapperMemory** pMemory, uint32_t* pOffset, uint32_t* pLength) {
+    void* getRegion(unsigned regionIndex, const WrapperMemory** pMemory, uint32_t* pOffset,
+                    uint32_t* pLength) {
         CHECK(mLayoutDone);
         CHECK(regionIndex < regionCount());
         const auto& regionDescriptor = mRegions[regionIndex];
-        const WrapperMemory* memory = &mMemorys[std::get<0>(regionDescriptor)];
+        const WrapperMemory* memory = &mMemories[std::get<0>(regionDescriptor)];
         uint32_t offset = std::get<1>(regionDescriptor);
         uint32_t length = std::get<2>(regionDescriptor);
 
-        uint8_t* buffer;
-        if (reinterpret_cast<MemoryBuilder*>(memory->get())->getPointer(&buffer) !=
-            ANEURALNETWORKS_NO_ERROR) {
-            CHECK(0);
-        }
+        uint8_t* buffer = reinterpret_cast<nn::MemoryAshmem*>(memory->get())->getPointer();
+        CHECK(buffer != nullptr);
 
         if (pMemory) *pMemory = memory;
         if (pOffset) *pOffset = offset;
@@ -318,14 +298,13 @@ public:
         return getRegion(regionIndex, nullptr, nullptr, nullptr);
     }
 
-private:
+   private:
     // Index is the memory index; value is the size of the memory
     // (aggregate size of all regions in the memory).
     std::vector<uint32_t> mMemorySizes;
 
     // Index is the memory index.
-    std::vector<WrapperMemory> mMemorys;
-    std::vector<int> mFDs;
+    std::vector<WrapperMemory> mMemories;
 
     // Index is the region index; tuple represents memory index,
     // region offset within memory, region length.
@@ -338,38 +317,34 @@ private:
 void TestMemories::layout() {
     CHECK(!mLayoutDone);
     for (uint32_t memorySize : mMemorySizes) {
-        const int fd = ASharedMemory_create(nullptr, memorySize);
-        CHECK(fd >= 0);
-        mMemorys.emplace_back(memorySize, PROT_READ | PROT_WRITE, fd, 0);
-        mFDs.push_back(fd);
+        auto [n, ashmem] = nn::MemoryAshmem::create(memorySize);
+        CHECK_EQ(n, ANEURALNETWORKS_NO_ERROR);
+        CHECK(ashmem != nullptr);
+
+        ANeuralNetworksMemory* memory = reinterpret_cast<ANeuralNetworksMemory*>(ashmem.release());
+        mMemories.emplace_back(memory);
     }
     mLayoutDone = true;
 }
 
-TestMemories::~TestMemories() {
-    for (int fd : mFDs) {
-        close(fd);
-    }
-}
-
 class RandomPartitioningTest : public ::testing::TestWithParam<unsigned> {
-public:
+   public:
     RandomPartitioningTest() : mRandNumEng(GetParam() /* seed */), mRandNumUnitDist(0.0, 1.0) {}
 
     static Signature getSignature(const HidlModel& model, const Operation& operation);
 
-protected:
- static V1_0::IDevice* makeTestDriver(HalVersion version, const char* name,
-                                      std::set<Signature> signatures);
+   protected:
+    static V1_0::IDevice* makeTestDriver(HalVersion version, const char* name,
+                                         std::set<Signature> signatures);
 
- static HalVersion getMinHalVersion(ANeuralNetworksOperationType type);
+    static HalVersion getMinHalVersion(ANeuralNetworksOperationType type);
 
- static std::string to_string(HalVersion version);
+    static std::string to_string(HalVersion version);
 
- bool randBool() { return randUInt(2) == 1; }
+    bool randBool() { return randUInt(2) == 1; }
 
- double randFrac() {  // [0.0, 1.0)
-     return mRandNumUnitDist(mRandNumEng);
+    double randFrac() {  // [0.0, 1.0)
+        return mRandNumUnitDist(mRandNumEng);
     }
 
     unsigned randUInt(unsigned limit) {  // [0, limit)
@@ -411,11 +386,10 @@ protected:
         }
 
         // input operand 3 is bias, a 1-D tensor
-        const WrapperOperandType biasType(WrapperType::TENSOR_FLOAT32, { problemSize });
+        const WrapperOperandType biasType(WrapperType::TENSOR_FLOAT32, {problemSize});
         const uint32_t operandIndex = model->addOperand(&biasType);
         std::vector<float> biasValue(problemSize);
-        std::generate(biasValue.begin(), biasValue.end(),
-                      [this]{ return randFrac(); });
+        std::generate(biasValue.begin(), biasValue.end(), [this] { return randFrac(); });
         model->setOperandValue(operandIndex, biasValue);
         return int(operandIndex);
     }
@@ -439,24 +413,23 @@ protected:
 
 #ifdef VERBOSE
     class ModelStats {
-    public:
-        ModelStats(const ModelBuilder* model) :
-                mBuilder(model) { }
-        ModelStats(const WrapperModel* model) :
-                mBuilder(reinterpret_cast<const ModelBuilder*>(model->getHandle())) { }
+       public:
+        ModelStats(const ModelBuilder* model) : mBuilder(model) {}
+        ModelStats(const WrapperModel* model)
+            : mBuilder(reinterpret_cast<const ModelBuilder*>(model->getHandle())) {}
         friend std::ostream& operator<<(std::ostream& out, const ModelStats& stats) {
             const uint32_t operandCount = stats.mBuilder->operandCount();
             const uint32_t inputCount = stats.mBuilder->inputCount();
             const uint32_t outputCount = stats.mBuilder->outputCount();
             out << "operationCount = " << stats.mBuilder->operationCount()
-                << ", operandCount = " << operandCount
-                << ", inputCount = " << inputCount
-                << " (" << (double(inputCount) / operandCount) << ")"
-                << ", outputCount = " << outputCount
-                << " (" << (double(outputCount) / operandCount) << ")";
+                << ", operandCount = " << operandCount << ", inputCount = " << inputCount << " ("
+                << (double(inputCount) / operandCount) << ")"
+                << ", outputCount = " << outputCount << " (" << (double(outputCount) / operandCount)
+                << ")";
             return out;
         }
-    private:
+
+       private:
         const ModelBuilder* mBuilder;
     };
 
@@ -525,9 +498,7 @@ Signature RandomPartitioningTest::getSignature(const HidlModel& model, const Ope
     CHECK(operand.lifetime == OperandLifeTime::CONSTANT_COPY);
     CHECK(operand.type == OperandType::INT32);
     int32_t value;
-    memcpy(&value,
-           &model.operandValues[operand.location.offset],
-           operand.location.length);
+    memcpy(&value, &model.operandValues[operand.location.offset], operand.location.length);
     return Signature(operationType, value);
 }
 
@@ -545,11 +516,11 @@ std::string RandomPartitioningTest::to_string(HalVersion version) {
 };
 
 class TestDriver : public SampleDriver {
-public:
+   public:
     // Behaves like SampleDriver, except that it only supports
     // operations with the specified signatures.
-    TestDriver(const char* name, std::set<Signature> signatures) :
-            SampleDriver(name), mSignatures(std::move(signatures)) { }
+    TestDriver(const char* name, std::set<Signature> signatures)
+        : SampleDriver(name), mSignatures(std::move(signatures)) {}
 
     Return<void> getCapabilities_1_2(getCapabilities_1_2_cb _hidl_cb) override {
         android::nn::initVLogMask();
@@ -568,11 +539,8 @@ public:
             const size_t count = model.operations.size();
             std::vector<bool> supported(count);
             for (size_t i = 0; i < count; i++) {
-                supported[i] =
-                    (mSignatures.count(
-                        RandomPartitioningTest::getSignature(
-                            model,
-                            model.operations[i])) != 0);
+                supported[i] = (mSignatures.count(RandomPartitioningTest::getSignature(
+                                        model, model.operations[i])) != 0);
             }
             cb(ErrorStatus::NONE, supported);
         } else {
@@ -590,15 +558,15 @@ public:
         // NOTE: We verify that all operations in the model are supported.
         ErrorStatus outStatus = ErrorStatus::INVALID_ARGUMENT;
         auto ret = getSupportedOperations_1_2(
-            model,
-            [&outStatus](ErrorStatus inStatus, const hidl_vec<bool>& supportedOperations) {
-                if (inStatus == ErrorStatus::NONE) {
-                    if (std::all_of(supportedOperations.begin(), supportedOperations.end(),
-                                    [](bool v){ return v; })) {
-                        outStatus = ErrorStatus::NONE;
+                model,
+                [&outStatus](ErrorStatus inStatus, const hidl_vec<bool>& supportedOperations) {
+                    if (inStatus == ErrorStatus::NONE) {
+                        if (std::all_of(supportedOperations.begin(), supportedOperations.end(),
+                                        [](bool v) { return v; })) {
+                            outStatus = ErrorStatus::NONE;
+                        }
                     }
-                }
-            });
+                });
         if (ret.isOk() && (outStatus == ErrorStatus::NONE)) {
             return SampleDriver::prepareModel_1_2(model, preference, modelCache, dataCache, token,
                                                   callback);
@@ -608,7 +576,7 @@ public:
         }
     }
 
-private:
+   private:
     const std::set<Signature> mSignatures;
 };
 
@@ -695,13 +663,13 @@ TEST_P(RandomPartitioningTest, Test) {
     std::cout << std::setprecision(2) << std::fixed << std::setw(4);
 #endif
 
-    const unsigned problemSize = 1+randUInt(kMaxProblemSize);
-    const WrapperOperandType problemType(WrapperType::TENSOR_FLOAT32, { problemSize, problemSize });
-    const WrapperOperandType unknownDimensionsType(WrapperType::TENSOR_FLOAT32, { 0, 0 });
+    const unsigned problemSize = 1 + randUInt(kMaxProblemSize);
+    const WrapperOperandType problemType(WrapperType::TENSOR_FLOAT32, {problemSize, problemSize});
+    const WrapperOperandType unknownDimensionsType(WrapperType::TENSOR_FLOAT32, {0, 0});
 
-    static const WrapperOperandType activationFunctionType(WrapperType::INT32, { });
+    static const WrapperOperandType activationFunctionType(WrapperType::INT32, {});
 
-    const unsigned numOperations = 2+randUInt(kMaxNumOperations-1);
+    const unsigned numOperations = 2 + randUInt(kMaxNumOperations - 1);
     const bool allowDeadOperations = (randFrac() < 0.2);
     const bool allowUnknownDimensions = (randFrac() < 0.25);
 
@@ -782,7 +750,7 @@ TEST_P(RandomPartitioningTest, Test) {
             }
             if (operationPattern.mMakeSpecialInput != nullptr) {
                 const int operandIndex = (this->*(operationPattern.mMakeSpecialInput))(
-                    problemSize, &model, operationInputIndex);
+                        problemSize, &model, operationInputIndex);
                 if (operandIndex >= 0) {
                     operationInputs[operationInputIndex] = operandIndex;
                     continue;
@@ -810,48 +778,46 @@ TEST_P(RandomPartitioningTest, Test) {
         // decision later.
         enum InputKind { IK_MODEL_INPUT, IK_OPERATION_OUTPUT, IK_VALUE };
         std::vector<InputKind> normalOperationInputKinds(normalOperationInputCount);
-        std::generate(normalOperationInputKinds.begin(), normalOperationInputKinds.end(),
-                      [this, &model,
-                       numOperations,
-                       normalOperationInputCount,
-                       &normalOperationInputConstantCount,
-                       &normalOperationInputModelInputCount]() -> InputKind {
-                          // Constant?  Becomes less likely the more
-                          // constants we already have as inputs to
-                          // this operation.
-                          if (randFrac() < 0.3 * (1 - double(normalOperationInputConstantCount) /
-                                                   normalOperationInputCount)) {
-                              normalOperationInputConstantCount++;
-                              return IK_VALUE;
-                          }
+        std::generate(
+                normalOperationInputKinds.begin(), normalOperationInputKinds.end(),
+                [this, &model, numOperations, normalOperationInputCount,
+                 &normalOperationInputConstantCount,
+                 &normalOperationInputModelInputCount]() -> InputKind {
+                    // Constant?  Becomes less likely the more
+                    // constants we already have as inputs to
+                    // this operation.
+                    if (randFrac() < 0.3 * (1 - double(normalOperationInputConstantCount) /
+                                                        normalOperationInputCount)) {
+                        normalOperationInputConstantCount++;
+                        return IK_VALUE;
+                    }
 
-                          // Model input?  Becomes less likely the
-                          // more model inputs we already have as
-                          // inputs to this operation, and the further
-                          // along we are in generating this model
-                          // (i.e., the more operations we have
-                          // generated).
-                          if ((model.operationCount() == 0) ||
-                              (randFrac() < 0.5 *
-                               (1 - double(normalOperationInputModelInputCount) /
-                                normalOperationInputCount) *
-                               std::min(0.3, (1 - double(model.operationCount()) /
-                                              numOperations)))) {
-                              normalOperationInputModelInputCount++;
-                              return IK_MODEL_INPUT;
-                          }
+                    // Model input?  Becomes less likely the
+                    // more model inputs we already have as
+                    // inputs to this operation, and the further
+                    // along we are in generating this model
+                    // (i.e., the more operations we have
+                    // generated).
+                    if ((model.operationCount() == 0) ||
+                        (randFrac() < 0.5 *
+                                              (1 - double(normalOperationInputModelInputCount) /
+                                                           normalOperationInputCount) *
+                                              std::min(0.3, (1 - double(model.operationCount()) /
+                                                                         numOperations)))) {
+                        normalOperationInputModelInputCount++;
+                        return IK_MODEL_INPUT;
+                    }
 
-                          // Else output of an existing operation.
-                          return IK_OPERATION_OUTPUT;
-                      });
+                    // Else output of an existing operation.
+                    return IK_OPERATION_OUTPUT;
+                });
 
         // Now force common root or model input, if necessary.  (A
         // model must have at least one input.)
-        auto force =
-                [this, &normalOperationInputKinds, normalOperationInputCount](InputKind forceKind){
-            if (std::none_of(normalOperationInputKinds.begin(),
-                             normalOperationInputKinds.end(),
-                             [forceKind](InputKind kind){ return kind == forceKind; })) {
+        auto force = [this, &normalOperationInputKinds,
+                      normalOperationInputCount](InputKind forceKind) {
+            if (std::none_of(normalOperationInputKinds.begin(), normalOperationInputKinds.end(),
+                             [forceKind](InputKind kind) { return kind == forceKind; })) {
                 normalOperationInputKinds[randUInt(normalOperationInputCount)] = forceKind;
             }
         };
@@ -888,7 +854,7 @@ TEST_P(RandomPartitioningTest, Test) {
                         const auto& existingOperationOutputs =
                                 model.getOperationOutputs(existingOperationIndex);
                         operandIndex =
-                            existingOperationOutputs[randUInt(existingOperationOutputs.size())];
+                                existingOperationOutputs[randUInt(existingOperationOutputs.size())];
                         deadOperandI = deadOperands.find(operandIndex);
                         CHECK(deadOperandI == deadOperands.end() ||
                               deadOperandI->second == existingOperationIndex);
@@ -912,7 +878,8 @@ TEST_P(RandomPartitioningTest, Test) {
                         operandIndex = model.addOperand(&problemType);
                         if (randFrac() < 0.5) {
                             std::vector<float> value(problemSize * problemSize);
-                            std::generate(value.begin(), value.end(), [this]{ return randFrac(); });
+                            std::generate(value.begin(), value.end(),
+                                          [this] { return randFrac(); });
                             model.setOperandValue(operandIndex, value);
                             valueOperands.push_back(std::make_pair(operandIndex, ~0U));
                         } else {
@@ -944,7 +911,7 @@ TEST_P(RandomPartitioningTest, Test) {
         std::vector<uint32_t> operationOutputs(operationPattern.mNumOutputs);
         std::generate(operationOutputs.begin(), operationOutputs.end(),
                       [&model, &problemType, &unknownDimensionsType, &hasUnknownDimensions,
-                       allowUnknownDimensions, this]{
+                       allowUnknownDimensions, this] {
                           // 3% unknowns causes ~35% of partitionings to fail
                           // (determined by commenting out the fallback code,
                           // running tests and noting number of failures).
@@ -958,9 +925,8 @@ TEST_P(RandomPartitioningTest, Test) {
 
         // OPERATION ///////////////////////////////////////////////////////////////////////////////
 
-        const uint32_t operationIndex =
-                model.addOperation(operationPattern.mOperationType,
-                                   operationInputs, operationOutputs);
+        const uint32_t operationIndex = model.addOperation(operationPattern.mOperationType,
+                                                           operationInputs, operationOutputs);
         deadOperations.insert(operationIndex);
         std::for_each(operationOutputs.begin(), operationOutputs.end(),
                       [&deadOperands, operationIndex](uint32_t operandIndex) {
@@ -983,7 +949,7 @@ TEST_P(RandomPartitioningTest, Test) {
         float* region =
                 static_cast<float*>(weights.getRegion(regionIndex, &memory, &offset, &length));
         CHECK(length == problemSize * problemSize * sizeof(float));
-        std::generate(region, region + problemSize * problemSize, [this]{ return randFrac(); });
+        std::generate(region, region + problemSize * problemSize, [this] { return randFrac(); });
         model.setOperandValueFromMemory(operandIndex, memory, offset, length);
     }
 
@@ -1004,7 +970,7 @@ TEST_P(RandomPartitioningTest, Test) {
                 // more likely we are to classify this operation
                 // output as a model output.
                 const double probabilityOfModelOutput =
-                        0.50 * [](double x){ return x*x; }((operationIdx + 1) / operationCount);
+                        0.50 * [](double x) { return x * x; }((operationIdx + 1) / operationCount);
                 modelOutput = (randFrac() < probabilityOfModelOutput);
             } else {
                 // This is consumed within the model, so we'll rarely
@@ -1043,8 +1009,7 @@ TEST_P(RandomPartitioningTest, Test) {
 #ifdef VERBOSE
     {
         std::cout << "Original model: " << ModelStats(&model) << std::endl;
-        std::cout << "rootOperationCount = " << rootOperationCount
-                  << ", deadOperations = ";
+        std::cout << "rootOperationCount = " << rootOperationCount << ", deadOperations = ";
         if (allowDeadOperations) {
             std::cout << deadOperations.size();
         } else {
@@ -1071,8 +1036,8 @@ TEST_P(RandomPartitioningTest, Test) {
     }
     //     Now remove each entry that has no signatures.
     auto firstExtra =
-        std::remove_if(signaturesForDriver.begin(), signaturesForDriver.end(),
-                       [](const std::set<Signature>& sigSet) { return sigSet.empty(); });
+            std::remove_if(signaturesForDriver.begin(), signaturesForDriver.end(),
+                           [](const std::set<Signature>& sigSet) { return sigSet.empty(); });
     if (firstExtra != signaturesForDriver.end()) {
         signaturesForDriver.erase(firstExtra, signaturesForDriver.end());
     }
@@ -1113,7 +1078,7 @@ TEST_P(RandomPartitioningTest, Test) {
     // the fallback to succeed.
     TestCompilation cNoFallback(&model, devices);
     TestCompilation cWithFallback(&model, devices);
-    TestCompilation *c2 = nullptr;
+    TestCompilation* c2 = nullptr;
     ASSERT_EQ(cNoFallback.setPartitioning(DeviceManager::kPartitioningWithoutFallback),
               Result::NO_ERROR);
     auto compilationResult = cNoFallback.finish();
@@ -1133,8 +1098,8 @@ TEST_P(RandomPartitioningTest, Test) {
 
 #ifdef VERBOSE
     {
-        std::cout << "signatures = " << signatures.size()
-                  << ", devices = " << devices.size() << std::endl;
+        std::cout << "signatures = " << signatures.size() << ", devices = " << devices.size()
+                  << std::endl;
         const ExecutionPlan& plan = c2->getExecutionPlan();
         switch (plan.forTest_getKind()) {
             case ExecutionPlan::Kind::SIMPLE:
@@ -1156,7 +1121,7 @@ TEST_P(RandomPartitioningTest, Test) {
             }
             default:
                 std::cout << "Unexpected plan kind: "
-                    << static_cast<unsigned>(plan.forTest_getKind());
+                          << static_cast<unsigned>(plan.forTest_getKind());
                 break;
         }
     }
@@ -1186,7 +1151,7 @@ TEST_P(RandomPartitioningTest, Test) {
     // should not be dependent on the outputs; but we'll initialize the
     // outputs anyway.
     std::vector<float> masterInputs(problemSize * problemSize * model.inputCount());
-    std::generate(masterInputs.begin(), masterInputs.end(), [this]{ return randFrac(); });
+    std::generate(masterInputs.begin(), masterInputs.end(), [this] { return randFrac(); });
 #ifdef VERBOSE
     {
         std::cout << "flat inputs = ";
@@ -1212,9 +1177,8 @@ TEST_P(RandomPartitioningTest, Test) {
     };
     std::vector<InputOutputDescriptor> ioDescriptors(model.inputCount() + model.outputCount());
     for (unsigned i = 0; i < ioDescriptors.size(); i++) {
-        ioDescriptors[i].mKind = (i < model.inputCount()
-                                  ? InputOutputDescriptor::INPUT
-                                  : InputOutputDescriptor::OUTPUT);
+        ioDescriptors[i].mKind = (i < model.inputCount() ? InputOutputDescriptor::INPUT
+                                                         : InputOutputDescriptor::OUTPUT);
     }
     //     We randomly interleave inputs and outputs in creation
     //     order, because when we we create memory regions in a
@@ -1225,7 +1189,7 @@ TEST_P(RandomPartitioningTest, Test) {
     //     they'll be interleaved.
     std::shuffle(ioDescriptors.begin(), ioDescriptors.end(), mRandNumEng);
     TestMemories ioMemories;
-    for (auto &desc : ioDescriptors) {
+    for (auto& desc : ioDescriptors) {
         if (randFrac() < 0.5) {
             desc.mVector.resize(problemSize * problemSize);
         } else {
@@ -1244,11 +1208,10 @@ TEST_P(RandomPartitioningTest, Test) {
 
     // Function to set up actual inputs and outputs (initializing them
     // and telling the WrapperExecution about them).
-    auto prepareForExecution =
-            [&model, &ioDescriptors, &ioMemories,
-             &masterInputs, &masterOutput, problemSize, &problemType](WrapperExecution *e) {
+    auto prepareForExecution = [&model, &ioDescriptors, &ioMemories, &masterInputs, &masterOutput,
+                                problemSize, &problemType](WrapperExecution* e) {
         uint32_t inputIndex = 0, outputIndex = 0;
-        for (auto &desc : ioDescriptors) {
+        for (auto& desc : ioDescriptors) {
             if (desc.getLocation() == InputOutputDescriptor::VECTOR) {
                 if (desc.mKind == InputOutputDescriptor::INPUT) {
                     const size_t inputOffset = inputIndex * problemSize * problemSize;
@@ -1259,18 +1222,15 @@ TEST_P(RandomPartitioningTest, Test) {
                                 desc.mVector.size() * sizeof(float));
                 } else {
                     std::fill(desc.mVector.begin(),
-                              desc.mVector.begin() + problemSize * problemSize,
-                              masterOutput);
+                              desc.mVector.begin() + problemSize * problemSize, masterOutput);
                     e->setOutput(outputIndex++, desc.mVector.data(),
-                                 desc.mVector.size() * sizeof(float),
-                                 &problemType.operandType);
+                                 desc.mVector.size() * sizeof(float), &problemType.operandType);
                 }
             } else {
                 const WrapperMemory* memory;
                 uint32_t offset, length;
-                float* region =
-                        static_cast<float*>(ioMemories.getRegion(desc.mMemoryRegion,
-                                                                 &memory, &offset, &length));
+                float* region = static_cast<float*>(
+                        ioMemories.getRegion(desc.mMemoryRegion, &memory, &offset, &length));
                 CHECK(length == problemSize * problemSize * sizeof(float));
                 if (desc.mKind == InputOutputDescriptor::INPUT) {
                     const size_t inputOffset = inputIndex * problemSize * problemSize;
@@ -1279,9 +1239,7 @@ TEST_P(RandomPartitioningTest, Test) {
                               region);
                     e->setInputFromMemory(inputIndex++, memory, offset, length);
                 } else {
-                    std::fill(region,
-                              region + problemSize * problemSize,
-                              masterOutput);
+                    std::fill(region, region + problemSize * problemSize, masterOutput);
                     e->setOutputFromMemory(outputIndex++, memory, offset, length,
                                            &problemType.operandType);
                 }
@@ -1306,13 +1264,11 @@ TEST_P(RandomPartitioningTest, Test) {
             }
             const size_t outputOffset = outputIndex * problemSize * problemSize;
             if (desc.getLocation() == InputOutputDescriptor::VECTOR) {
-                std::copy(desc.mVector.begin(),
-                          desc.mVector.end(),
+                std::copy(desc.mVector.begin(), desc.mVector.end(),
                           nonPartitionedOutputs.begin() + outputOffset);
             } else {
                 float* region = static_cast<float*>(ioMemories.getRegion(desc.mMemoryRegion));
-                std::copy(region,
-                          region + problemSize * problemSize,
+                std::copy(region, region + problemSize * problemSize,
                           nonPartitionedOutputs.begin() + outputOffset);
             }
 #ifdef VERBOSE
@@ -1346,8 +1302,7 @@ TEST_P(RandomPartitioningTest, Test) {
                 std::cout << "   partitioned output[" << outputIndex << "] = ";
                 dump(desc.mVector.begin(), desc.mVector.end());
 #endif
-                ASSERT_TRUE(std::equal(desc.mVector.begin(),
-                                       desc.mVector.end(),
+                ASSERT_TRUE(std::equal(desc.mVector.begin(), desc.mVector.end(),
                                        nonPartitionedOutputs.begin() + outputOffset));
             } else {
                 float* region = static_cast<float*>(ioMemories.getRegion(desc.mMemoryRegion));
@@ -1355,8 +1310,7 @@ TEST_P(RandomPartitioningTest, Test) {
                 std::cout << "part output[" << outputIndex << "] = ";
                 dump(region, region + problemSize * problemSize);
 #endif
-                ASSERT_TRUE(std::equal(region,
-                                       region + problemSize * problemSize,
+                ASSERT_TRUE(std::equal(region, region + problemSize * problemSize,
                                        nonPartitionedOutputs.begin() + outputOffset));
             }
             outputIndex++;

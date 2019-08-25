@@ -18,24 +18,30 @@
 
 #include "CpuExecutor.h"
 
+#include <android/hardware_buffer.h>
+#include <sys/mman.h>
+
+#include <Eigen/Core>
+#include <memory>
+#include <vector>
+
+// b/109953668, disable OpenMP
+#ifdef NNAPI_OPENMP
+#include <omp.h>
+#endif  // NNAPI_OPENMP
+
 #include "NeuralNetworks.h"
 #include "OperationResolver.h"
 #include "Operations.h"
 #include "OperationsUtils.h"
 #include "Tracing.h"
 
-#include "Eigen/Core"
-// b/109953668, disable OpenMP
-#ifdef NNAPI_OPENMP
-#include <omp.h>
-#endif  // NNAPI_OPENMP
-#include <android/hardware_buffer.h>
-#include <sys/mman.h>
-
 namespace android {
 namespace nn {
 
 namespace {
+
+using namespace hal;
 
 class OperationExecutionContext : public IOperationExecutionContext {
     DISALLOW_IMPLICIT_CONSTRUCTORS(OperationExecutionContext);
@@ -263,7 +269,7 @@ class RunTimePoolInfo::RunTimePoolInfoImpl {
 
     uint8_t* getBuffer() const { return mBuffer; }
 
-    bool update() const;
+    bool flush() const;
 
     hidl_memory getHidlMemory() const { return mHidlMemory; }
 
@@ -286,7 +292,7 @@ RunTimePoolInfo::RunTimePoolInfoImpl::~RunTimePoolInfoImpl() {
         return;
     }
 
-    const std::string memType = mHidlMemory.name();
+    const auto& memType = mHidlMemory.name();
     if (memType == "ashmem") {
         // nothing to do
     } else if (memType == "mmap_fd") {
@@ -304,14 +310,10 @@ RunTimePoolInfo::RunTimePoolInfoImpl::~RunTimePoolInfoImpl() {
 }
 
 // Making sure the output data are correctly updated after execution.
-bool RunTimePoolInfo::RunTimePoolInfoImpl::update() const {
-    const std::string memType = mHidlMemory.name();
-    if (memType == "ashmem") {
-        mMemory->commit();
-        return true;
-    }
+bool RunTimePoolInfo::RunTimePoolInfoImpl::flush() const {
+    const auto& memType = mHidlMemory.name();
     if (memType == "mmap_fd") {
-        int prot = mHidlMemory.handle()->data[1];
+        const int prot = mHidlMemory.handle()->data[1];
         if (prot & PROT_WRITE) {
             const size_t size = mHidlMemory.size();
             return msync(mBuffer, size, MS_SYNC) == 0;
@@ -336,8 +338,7 @@ std::optional<RunTimePoolInfo> RunTimePoolInfo::createFromHidlMemory(
             LOG(ERROR) << "Can't map shared memory.";
             return std::nullopt;
         }
-        memory->update();
-        buffer = reinterpret_cast<uint8_t*>(static_cast<void*>(memory->getPointer()));
+        buffer = static_cast<uint8_t*>(static_cast<void*>(memory->getPointer()));
         if (buffer == nullptr) {
             LOG(ERROR) << "Can't access shared memory.";
             return std::nullopt;
@@ -394,8 +395,8 @@ uint8_t* RunTimePoolInfo::getBuffer() const {
     return mImpl->getBuffer();
 }
 
-bool RunTimePoolInfo::update() const {
-    return mImpl->update();
+bool RunTimePoolInfo::flush() const {
+    return mImpl->flush();
 }
 
 hidl_memory RunTimePoolInfo::getHidlMemory() const {
@@ -544,8 +545,7 @@ int CpuExecutor::run(const Model& model, const Request& request,
 #endif  // NNAPI_OPENMP
 
     mModel = &model;
-    mRequest = &request;  // TODO check if mRequest is needed
-    initializeRunTimeInfo(modelPoolInfos, requestPoolInfos);
+    initializeRunTimeInfo(request, modelPoolInfos, requestPoolInfos);
     // The model has serialized the operation in execution order.
     for (const auto& operation : model.operations) {
         int n = executeOperation(operation);
@@ -554,18 +554,16 @@ int CpuExecutor::run(const Model& model, const Request& request,
             return n;
         }
     }
-    for (auto& runtimeInfo : modelPoolInfos) {
-        runtimeInfo.update();
-    }
     for (auto& runtimeInfo : requestPoolInfos) {
-        runtimeInfo.update();
+        runtimeInfo.flush();
     }
     finish(ANEURALNETWORKS_NO_ERROR);
     VLOG(CPUEXE) << "Completed run normally";
     return ANEURALNETWORKS_NO_ERROR;
 }
 
-bool CpuExecutor::initializeRunTimeInfo(const std::vector<RunTimePoolInfo>& modelPoolInfos,
+bool CpuExecutor::initializeRunTimeInfo(const Request& request,
+                                        const std::vector<RunTimePoolInfo>& modelPoolInfos,
                                         const std::vector<RunTimePoolInfo>& requestPoolInfos) {
     VLOG(CPUEXE) << "CpuExecutor::initializeRunTimeInfo";
     const size_t count = mModel->operands.size();
@@ -642,8 +640,8 @@ bool CpuExecutor::initializeRunTimeInfo(const std::vector<RunTimePoolInfo>& mode
             }
         }
     };
-    updateForArguments(mModel->inputIndexes, mRequest->inputs);
-    updateForArguments(mModel->outputIndexes, mRequest->outputs);
+    updateForArguments(mModel->inputIndexes, request.inputs);
+    updateForArguments(mModel->outputIndexes, request.outputs);
 
     return true;
 }

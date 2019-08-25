@@ -27,6 +27,7 @@
 #include <iostream>
 #include <map>
 #include <thread>
+#include <vector>
 
 // Systrace is not available from CTS tests due to platform layering
 // constraints. We reuse the NNTEST_ONLY_PUBLIC_API flag, as that should also be
@@ -43,76 +44,36 @@ namespace generated_tests {
 using namespace android::nn::test_wrapper;
 using namespace test_helper;
 
-namespace {
-template <typename T>
-void print(std::ostream& os, const std::map<int, std::vector<T>>& test) {
-    // dump T-typed inputs
-    for_each<T>(test, [&os](int idx, const std::vector<T>& f) {
-        os << "    aliased_output" << idx << ": [";
-        for (size_t i = 0; i < f.size(); ++i) {
-            os << (i == 0 ? "" : ", ") << +f[i];
-        }
-        os << "],\n";
-    });
-}
-
-// Specialized for _Float16 because it requires explicit conversion.
-template <>
-void print<_Float16>(std::ostream& os, const std::map<int, std::vector<_Float16>>& test) {
-    for_each<_Float16>(test, [&os](int idx, const std::vector<_Float16>& f) {
-        os << "    aliased_output" << idx << ": [";
-        for (size_t i = 0; i < f.size(); ++i) {
-            os << (i == 0 ? "" : ", ") << +static_cast<float>(f[i]);
-        }
-        os << "],\n";
-    });
-}
-
-void printAll(std::ostream& os, const MixedTyped& test) {
-    print(os, test.float32Operands);
-    print(os, test.int32Operands);
-    print(os, test.quant8AsymmOperands);
-    print(os, test.quant16SymmOperands);
-    print(os, test.float16Operands);
-    print(os, test.bool8Operands);
-    print(os, test.quant8ChannelOperands);
-    print(os, test.quant16AsymmOperands);
-    print(os, test.quant8SymmOperands);
-    static_assert(9 == MixedTyped::kNumTypes,
-                  "Number of types in MixedTyped changed, but printAll function wasn't updated");
-}
-}  // namespace
-
-Compilation GeneratedTests::compileModel(const Model* model) {
+std::optional<Compilation> GeneratedTests::compileModel(const Model* model) {
     NNTRACE_APP(NNTRACE_PHASE_COMPILATION, "compileModel");
     if (mTestCompilationCaching) {
         // Compile the model twice with the same token, so that compilation caching will be
         // exercised if supported by the driver.
+        // No invalid model will be passed to this branch.
+        EXPECT_FALSE(mExpectFailure);
         Compilation compilation1(model);
-        compilation1.setCaching(mCacheDir, mToken);
-        compilation1.finish();
+        EXPECT_EQ(compilation1.setCaching(mCacheDir, mToken), Result::NO_ERROR);
+        EXPECT_EQ(compilation1.finish(), Result::NO_ERROR);
         Compilation compilation2(model);
-        compilation2.setCaching(mCacheDir, mToken);
-        compilation2.finish();
+        EXPECT_EQ(compilation2.setCaching(mCacheDir, mToken), Result::NO_ERROR);
+        EXPECT_EQ(compilation2.finish(), Result::NO_ERROR);
         return compilation2;
     } else {
         Compilation compilation(model);
-        compilation.finish();
+        Result result = compilation.finish();
+
+        // For valid model, we check the compilation result == NO_ERROR.
+        // For invalid model, the driver may fail at compilation or execution, so any result code is
+        // permitted at this point.
+        if (mExpectFailure && result != Result::NO_ERROR) return std::nullopt;
+        EXPECT_EQ(result, Result::NO_ERROR);
         return compilation;
     }
 }
 
 void GeneratedTests::executeWithCompilation(const Model* model, Compilation* compilation,
                                             std::function<bool(int)> isIgnored,
-                                            std::vector<MixedTypedExample>& examples,
-                                            std::string dumpFile) {
-    bool dumpToFile = !dumpFile.empty();
-    std::ofstream s;
-    if (dumpToFile) {
-        s.open(dumpFile, std::ofstream::trunc);
-        ASSERT_TRUE(s.is_open());
-    }
-
+                                            std::vector<MixedTypedExample>& examples) {
     int exampleNo = 0;
     float fpAtol = 1e-5f;
     float fpRtol = 5.0f * 1.1920928955078125e-7f;
@@ -151,8 +112,14 @@ void GeneratedTests::executeWithCompilation(const Model* model, Compilation* com
             });
         }
 
-        Result r = execution.compute();
-        ASSERT_EQ(Result::NO_ERROR, r);
+        Result result = execution.compute();
+        if (mExpectFailure) {
+            ASSERT_NE(result, Result::NO_ERROR);
+            continue;
+        } else {
+            ASSERT_EQ(result, Result::NO_ERROR);
+        }
+
         {
             NNTRACE_APP(NNTRACE_PHASE_RESULTS, "executeWithCompilation example");
 
@@ -161,14 +128,6 @@ void GeneratedTests::executeWithCompilation(const Model* model, Compilation* com
                     test.operandDimensions, [&execution](int idx, std::vector<uint32_t>& t) {
                         ASSERT_EQ(Result::NO_ERROR, execution.getOutputOperandDimensions(idx, &t));
                     });
-
-            // Dump all outputs for the slicing tool
-            if (dumpToFile) {
-                s << "output" << exampleNo << " = {\n";
-                printAll(s, test);
-                // all outputs are done
-                s << "}\n";
-            }
 
             // Filter out don't cares
             MixedTyped filteredGolden = filter(golden, isIgnored);
@@ -186,10 +145,12 @@ void GeneratedTests::executeWithCompilation(const Model* model, Compilation* com
 }
 
 void GeneratedTests::executeOnce(const Model* model, std::function<bool(int)> isIgnored,
-                                 std::vector<MixedTypedExample>& examples, std::string dumpFile) {
+                                 std::vector<MixedTypedExample>& examples) {
     NNTRACE_APP(NNTRACE_PHASE_OVERALL, "executeOnce");
-    Compilation compilation = compileModel(model);
-    executeWithCompilation(model, &compilation, isIgnored, examples, dumpFile);
+    std::optional<Compilation> compilation = compileModel(model);
+    // Early return if compilation fails. The compilation result code is checked in compileModel.
+    if (!compilation) return;
+    executeWithCompilation(model, &compilation.value(), isIgnored, examples);
 }
 
 void GeneratedTests::executeMultithreadedOwnCompilation(const Model* model,
@@ -199,7 +160,7 @@ void GeneratedTests::executeMultithreadedOwnCompilation(const Model* model,
     SCOPED_TRACE("MultithreadedOwnCompilation");
     std::vector<std::thread> threads;
     for (int i = 0; i < 10; i++) {
-        threads.push_back(std::thread([&]() { executeOnce(model, isIgnored, examples, ""); }));
+        threads.push_back(std::thread([&]() { executeOnce(model, isIgnored, examples); }));
     }
     std::for_each(threads.begin(), threads.end(), [](std::thread& t) { t.join(); });
 }
@@ -209,11 +170,14 @@ void GeneratedTests::executeMultithreadedSharedCompilation(
         std::vector<MixedTypedExample>& examples) {
     NNTRACE_APP(NNTRACE_PHASE_OVERALL, "executeMultithreadedSharedCompilation");
     SCOPED_TRACE("MultithreadedSharedCompilation");
-    Compilation compilation = compileModel(model);
+    std::optional<Compilation> compilation = compileModel(model);
+    // Early return if compilation fails. The ompilation result code is checked in compileModel.
+    if (!compilation) return;
     std::vector<std::thread> threads;
     for (int i = 0; i < 10; i++) {
-        threads.push_back(std::thread(
-                [&]() { executeWithCompilation(model, &compilation, isIgnored, examples, ""); }));
+        threads.push_back(std::thread([&]() {
+            executeWithCompilation(model, &compilation.value(), isIgnored, examples);
+        }));
     }
     std::for_each(threads.begin(), threads.end(), [](std::thread& t) { t.join(); });
 }
@@ -221,26 +185,26 @@ void GeneratedTests::executeMultithreadedSharedCompilation(
 // Test driver for those generated from ml/nn/runtime/test/spec
 void GeneratedTests::execute(std::function<void(Model*)> createModel,
                              std::function<bool(int)> isIgnored,
-                             std::vector<MixedTypedExample>& examples,
-                             [[maybe_unused]] std::string dumpFile) {
+                             std::vector<MixedTypedExample>& examples) {
     NNTRACE_APP(NNTRACE_PHASE_OVERALL, "execute");
     Model model;
     createModel(&model);
     model.finish();
-    auto executeInternal = [&model, &isIgnored, &examples,
-                            this]([[maybe_unused]] std::string dumpFile) {
+    auto executeInternal = [&model, &isIgnored, &examples, this]() {
         SCOPED_TRACE("TestCompilationCaching = " + std::to_string(mTestCompilationCaching));
 #ifndef NNTEST_MULTITHREADED
-        executeOnce(&model, isIgnored, examples, dumpFile);
+        executeOnce(&model, isIgnored, examples);
 #else   // defined(NNTEST_MULTITHREADED)
         executeMultithreadedOwnCompilation(&model, isIgnored, examples);
         executeMultithreadedSharedCompilation(&model, isIgnored, examples);
 #endif  // !defined(NNTEST_MULTITHREADED)
     };
     mTestCompilationCaching = false;
-    executeInternal(dumpFile);
-    mTestCompilationCaching = true;
-    executeInternal("");
+    executeInternal();
+    if (!mExpectFailure) {
+        mTestCompilationCaching = true;
+        executeInternal();
+    }
 }
 
 void GeneratedTests::SetUp() {

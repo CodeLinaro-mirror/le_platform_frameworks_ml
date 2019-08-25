@@ -14,15 +14,21 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "Operations"
+
 #include "CpuOperationUtils.h"
+#include "HalInterfaces.h"
 #include "OperationResolver.h"
 
-#include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
+#include <tensorflow/lite/kernels/internal/optimized/optimized_ops.h>
 
 #include "Tracing.h"
 
 namespace android {
 namespace nn {
+
+using namespace hal;
+
 namespace pooling {
 
 constexpr uint32_t kInputTensor = 0;

@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-#ifndef ANDROID_ML_NN_COMMON_OPERATIONS_UTILS_H
-#define ANDROID_ML_NN_COMMON_OPERATIONS_UTILS_H
+#ifndef ANDROID_FRAMEWORKS_ML_NN_COMMON_OPERATIONS_UTILS_H
+#define ANDROID_FRAMEWORKS_ML_NN_COMMON_OPERATIONS_UTILS_H
 
+#include "HalInterfaces.h"
 #include "Utils.h"
 
 #include <cstdint>
@@ -43,11 +44,11 @@ enum PaddingScheme {
 
 // Stores operand type information. "Shape" is a historical name.
 struct Shape {
-    OperandType type;
+    hal::OperandType type;
     std::vector<uint32_t> dimensions;
     float scale;
     int32_t offset;
-    Operand::ExtraParams extraParams;
+    hal::Operand::ExtraParams extraParams;
 };
 
 // Provides information available during graph creation to validate an operation.
@@ -72,12 +73,12 @@ class IOperationValidationContext {
     virtual HalVersion getHalVersion() const = 0;
 
     virtual uint32_t getNumInputs() const = 0;
-    virtual OperandType getInputType(uint32_t index) const = 0;
+    virtual hal::OperandType getInputType(uint32_t index) const = 0;
     virtual Shape getInputShape(uint32_t index) const = 0;
-    virtual const Operand::ExtraParams getInputExtraParams(uint32_t index) const = 0;
+    virtual const hal::Operand::ExtraParams getInputExtraParams(uint32_t index) const = 0;
 
     virtual uint32_t getNumOutputs() const = 0;
-    virtual OperandType getOutputType(uint32_t index) const = 0;
+    virtual hal::OperandType getOutputType(uint32_t index) const = 0;
     virtual Shape getOutputShape(uint32_t index) const = 0;
 };
 
@@ -87,13 +88,13 @@ class IOperationExecutionContext {
     virtual ~IOperationExecutionContext() {}
 
     virtual uint32_t getNumInputs() const = 0;
-    virtual OperandType getInputType(uint32_t index) const = 0;
+    virtual hal::OperandType getInputType(uint32_t index) const = 0;
     virtual Shape getInputShape(uint32_t index) const = 0;
     virtual const void* getInputBuffer(uint32_t index) const = 0;
-    virtual const Operand::ExtraParams getInputExtraParams(uint32_t index) const = 0;
+    virtual const hal::Operand::ExtraParams getInputExtraParams(uint32_t index) const = 0;
 
     virtual uint32_t getNumOutputs() const = 0;
-    virtual OperandType getOutputType(uint32_t index) const = 0;
+    virtual hal::OperandType getOutputType(uint32_t index) const = 0;
     virtual Shape getOutputShape(uint32_t index) const = 0;
     virtual void* getOutputBuffer(uint32_t index) = 0;
 
@@ -121,11 +122,11 @@ class IOperationExecutionContext {
 
 // Verifies that the number and types of operation inputs are as expected.
 bool validateInputTypes(const IOperationValidationContext* context,
-                        const std::vector<OperandType>& expectedTypes);
+                        const std::vector<hal::OperandType>& expectedTypes);
 
 // Verifies that the number and types of operation outputs are as expected.
 bool validateOutputTypes(const IOperationValidationContext* context,
-                         const std::vector<OperandType>& expectedTypes);
+                         const std::vector<hal::OperandType>& expectedTypes);
 
 // Verifies that the HAL version specified in the context is greater or equal
 // than the minimal supported HAL version.
@@ -145,8 +146,7 @@ bool combineDimensions(const std::vector<uint32_t>& lhs, const std::vector<uint3
 // Return the total number of elements, i.e. all the dimensions multiplied
 // together. For a scalar, returns one.
 uint32_t getNumberOfElements(const Shape& shape);
-uint32_t getNumberOfElements(const Shape& shape,
-                             size_t firstAxisInclusive,
+uint32_t getNumberOfElements(const Shape& shape, size_t firstAxisInclusive,
                              size_t lastAxisExclusive);
 
 uint32_t getNumberOfDimensions(const Shape& shape);
@@ -178,27 +178,20 @@ inline int32_t computeOutSizeTransposeConv(int32_t imageSize, int32_t filterSize
 
 __wur bool QuantizeMultiplier(double double_multiplier, int32_t* quantized_multiplier, int* shift);
 
-__wur
-bool QuantizeMultiplierSmallerThanOne(double double_multiplier,
-                                      int32_t* quantized_multiplier,
-                                      int32_t* right_shift);
+__wur bool QuantizeMultiplierSmallerThanOne(double double_multiplier, int32_t* quantized_multiplier,
+                                            int32_t* right_shift);
 
-__wur
-bool QuantizeMultiplierGreaterThanOne(double double_multiplier,
-                                      int32_t* quantized_multiplier,
-                                      int* left_shift);
+__wur bool QuantizeMultiplierGreaterThanOne(double double_multiplier, int32_t* quantized_multiplier,
+                                            int* left_shift);
 
 __wur bool GetQuantizedConvolutionMultipler(const Shape& inputShape, const Shape& filterShape,
                                             const Shape& biasShape, const Shape& outputShape,
                                             double* multiplier);
 
-void CalculateActivationRangeUint8(int32_t activation,
-                                   const Shape& outputShape,
-                                   int32_t* act_min,
+void CalculateActivationRangeUint8(int32_t activation, const Shape& outputShape, int32_t* act_min,
                                    int32_t* act_max);
 
-void CalculateActivationRangeFloat(int32_t activation,
-                                   float* activation_min,
+void CalculateActivationRangeFloat(int32_t activation, float* activation_min,
                                    float* activation_max);
 
 int32_t CalculateInputRadius(int input_integer_bits, int input_left_shift);
@@ -230,11 +223,11 @@ inline void calculateExplicitPaddingTransposeConv(int32_t in_size, int32_t strid
                                  padding_tail);
 }
 
-inline PaddingScheme getPaddingScheme(int32_t inWidth, int32_t inHeight,
-                                      int32_t strideWidth, int32_t strideHeight,
-                                      int32_t filterWidth, int32_t filterHeight,
-                                      int32_t paddingLeft, int32_t paddingRight,
-                                      int32_t paddingTop, int32_t paddingBottom) {
+inline PaddingScheme getPaddingScheme(int32_t inWidth, int32_t inHeight, int32_t strideWidth,
+                                      int32_t strideHeight, int32_t filterWidth,
+                                      int32_t filterHeight, int32_t paddingLeft,
+                                      int32_t paddingRight, int32_t paddingTop,
+                                      int32_t paddingBottom) {
     if (paddingLeft == 0 && paddingRight == 0 && paddingTop == 0 && paddingBottom == 0) {
         return kPaddingValid;
     }
@@ -242,8 +235,8 @@ inline PaddingScheme getPaddingScheme(int32_t inWidth, int32_t inHeight,
     int32_t expectedPaddingLeft, expectedPaddingRight;
     int32_t expectedPaddingTop, expectedPaddingBottom;
 
-    calculateExplicitPadding(inWidth, strideWidth, filterWidth, kPaddingSame,
-                             &expectedPaddingLeft, &expectedPaddingRight);
+    calculateExplicitPadding(inWidth, strideWidth, filterWidth, kPaddingSame, &expectedPaddingLeft,
+                             &expectedPaddingRight);
     calculateExplicitPadding(inHeight, strideHeight, filterHeight, kPaddingSame,
                              &expectedPaddingTop, &expectedPaddingBottom);
     if (expectedPaddingLeft == paddingLeft && expectedPaddingRight == paddingRight &&
@@ -254,33 +247,30 @@ inline PaddingScheme getPaddingScheme(int32_t inWidth, int32_t inHeight,
     }
 }
 
-// TODO: add more documentation from upstream.
 // Reverse order of bits in the mask to match the expected order in kernel
 inline int ReverseMaskBits(int mask, int num_dimensions) {
-  int out = 0;
-  for (int dim = 0; dim < num_dimensions; dim++) {
-    out <<= 1;
-    out += (mask & 1);
-    mask >>= 1;
-  }
-  return out;
+    int out = 0;
+    for (int dim = 0; dim < num_dimensions; dim++) {
+        out <<= 1;
+        out += (mask & 1);
+        mask >>= 1;
+    }
+    return out;
 }
 
-// TODO: add more documentation from upstream.
+// Compute the positive remainder.
 inline int32_t PositiveRemainder(int32_t dividend, int32_t divisor) {
-  return (divisor + (dividend % divisor)) % divisor;
+    return (divisor + (dividend % divisor)) % divisor;
 }
 
-// TODO: add more documentation from upstream.
+// Compute clamped index.
 inline int32_t ClampedIndex(int32_t index, int dim, bool pos_stride) {
-  return pos_stride
-             ? (index >= dim ? dim
-                             : PositiveRemainder(
-                                   std::min(std::max(index, -dim), dim), dim))
-             : (index < -dim
-                    ? -1
-                    : PositiveRemainder(
-                          std::min(std::max(index, -dim), dim - 1), dim));
+    return pos_stride
+                   ? (index >= dim ? dim
+                                   : PositiveRemainder(std::min(std::max(index, -dim), dim), dim))
+                   : (index < -dim
+                              ? -1
+                              : PositiveRemainder(std::min(std::max(index, -dim), dim - 1), dim));
 }
 
 // Broadcasts input shape against one another and puts the result into output
@@ -303,63 +293,38 @@ bool genericActivationPrepare(const Shape& input, Shape* output);
 
 bool genericNormalizationPrepare(const Shape& input, Shape* output);
 
-bool reshapePrepare(const Shape& input,
-                    const int32_t* targetDims,
-                    const int32_t targetDimsSize,
+bool reshapePrepare(const Shape& input, const int32_t* targetDims, const int32_t targetDimsSize,
                     Shape* output);
 
-bool depthToSpacePrepare(const Shape& input,
-                         int32_t blockSize,
-                         Shape* output);
+bool depthToSpacePrepare(const Shape& input, int32_t blockSize, Shape* output);
 
-bool spaceToDepthPrepare(const Shape& input,
-                         int32_t blockSize,
-                         Shape* output);
+bool spaceToDepthPrepare(const Shape& input, int32_t blockSize, Shape* output);
 
-bool embeddingLookupPrepare(const Shape &valueShape,
-                            const Shape &lookupShape,
-                            Shape *outputShape);
+bool embeddingLookupPrepare(const Shape& valueShape, const Shape& lookupShape, Shape* outputShape);
 
-bool hashtableLookupPrepare(const Shape &lookupShape,
-                            const Shape &keyShape,
-                            const Shape &valueShape,
-                            Shape *outputShape,
-                            Shape *hitShape);
+bool hashtableLookupPrepare(const Shape& lookupShape, const Shape& keyShape,
+                            const Shape& valueShape, Shape* outputShape, Shape* hitShape);
 
-bool padPrepare(const Shape& input,
-                const int32_t* paddingsData,
-                const Shape& paddingsShape,
+bool padPrepare(const Shape& input, const int32_t* paddingsData, const Shape& paddingsShape,
                 Shape* output);
 
-bool batchToSpacePrepare(const Shape& input,
-                         const int32_t* blockSizeData,
-                         const Shape& blockSizeShape,
-                         Shape* output);
+bool batchToSpacePrepare(const Shape& input, const int32_t* blockSizeData,
+                         const Shape& blockSizeShape, Shape* output);
 
-bool spaceToBatchPrepare(const Shape& input,
-                         const int32_t* blockSizeData,
-                         const Shape& blockSizeShape,
-                         const int32_t* paddingsData,
-                         const Shape& paddingsShape,
-                         Shape* output);
+bool spaceToBatchPrepare(const Shape& input, const int32_t* blockSizeData,
+                         const Shape& blockSizeShape, const int32_t* paddingsData,
+                         const Shape& paddingsShape, Shape* output);
 
-bool squeezePrepare(const Shape& input,
-                    const int32_t* squeezeDims,
-                    const Shape& squeezeDimsShape,
+bool squeezePrepare(const Shape& input, const int32_t* squeezeDims, const Shape& squeezeDimsShape,
                     Shape* output);
 
-bool meanPrepare(const Shape& input,
-                 const int32_t* axisData,
-                 const Shape& axisShape,
-                 bool keepDims,
+bool meanPrepare(const Shape& input, const int32_t* axisData, const Shape& axisShape, bool keepDims,
                  Shape* output);
 
-bool stridedSlicePrepare(const Shape& input,
-                         const int32_t* beginData, const Shape& beginShape,
-                         const int32_t* endData, const Shape& endShape,
-                         const int32_t* stridesData, const Shape& stridesShape,
-                         int32_t beginMask, int32_t endMask, int32_t shrinkAxisMask,
-                         Shape* output);
+bool stridedSlicePrepare(const Shape& input, const int32_t* beginData, const Shape& beginShape,
+                         const int32_t* endData, const Shape& endShape, const int32_t* stridesData,
+                         const Shape& stridesShape, int32_t beginMask, int32_t endMask,
+                         int32_t shrinkAxisMask, Shape* output);
 
 bool argMinMaxPrepare(const Shape& input, int32_t axis, Shape* output);
 
@@ -428,7 +393,7 @@ inline bool mergeThirdDimension(const T* bufferA, const std::vector<uint32_t>& d
     return true;
 }
 
-} // namespace nn
-} // namespace android
+}  // namespace nn
+}  // namespace android
 
-#endif // ANDROID_ML_NN_COMMON_OPERATIONS_UTILS_H
+#endif  // ANDROID_FRAMEWORKS_ML_NN_COMMON_OPERATIONS_UTILS_H

@@ -14,67 +14,89 @@
  * limitations under the License.
  */
 
-#ifndef ANDROID_ML_NN_RUNTIME_MANAGER_H
-#define ANDROID_ML_NN_RUNTIME_MANAGER_H
-
-#include "HalInterfaces.h"
-#include "Utils.h"
-#include "VersionedInterfaces.h"
+#ifndef ANDROID_FRAMEWORKS_ML_NN_RUNTIME_MANAGER_H
+#define ANDROID_FRAMEWORKS_ML_NN_RUNTIME_MANAGER_H
 
 #include <android-base/macros.h>
+
 #include <map>
+#include <memory>
+#include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
+
+#include "Callbacks.h"
+#include "HalInterfaces.h"
+#include "Memory.h"
+#include "Utils.h"
 
 namespace android {
 namespace nn {
 
+// Forward declaration
+class MetaModel;
+class ExecutionBurstController;
+struct ModelArgumentInfo;
+
+// A unified interface for actual driver prepared model as well as the CPU.
+class PreparedModel {
+    DISALLOW_COPY_AND_ASSIGN(PreparedModel);
+
+   public:
+    PreparedModel() = default;
+    virtual ~PreparedModel() = default;
+
+    // Start computation with given input/output argument info and memory pools.
+    //
+    // When executed on an actual driver device, this method may append new memory pools to
+    // "memories" for inputs and outputs specified via pointers, and the data location for
+    // "inputs" and "outputs" may get updated.
+    virtual int execute(const std::shared_ptr<ExecutionBurstController>& burstController,
+                        hal::MeasureTiming measure, std::vector<ModelArgumentInfo>* inputs,
+                        std::vector<ModelArgumentInfo>* outputs, MemoryTracker* memories,
+                        sp<ExecutionCallback>* synchronizationCallback) const = 0;
+
+    virtual std::shared_ptr<ExecutionBurstController> configureExecutionBurst(
+            bool blocking) const = 0;
+};
+
 // A unified interface for actual driver devices as well as the CPU
 class Device {
-   public:
-    virtual ~Device() {}
+    DISALLOW_COPY_AND_ASSIGN(Device);
 
-    // Get the handle of underlying VersionedIDevice, if any
-    virtual VersionedIDevice* getInterface() = 0;
+   public:
+    Device() = default;
+    virtual ~Device() = default;
 
     // Introspection methods returning device information
     virtual const char* getName() const = 0;
     virtual const char* getVersionString() const = 0;
-    virtual int64_t getFeatureLevel() = 0;
+    virtual int64_t getFeatureLevel() const = 0;
     virtual int32_t getType() const = 0;
-    virtual hidl_vec<Extension> getSupportedExtensions() const = 0;
+    virtual hal::hidl_vec<hal::Extension> getSupportedExtensions() const = 0;
 
-    // If hidlModel is not compliant with the HAL version of the driver device,
-    // then the behavior depends on whether or not a non-nullptr slicer is
-    // provided.
-    //
-    // If there is no slicer, then no operations are supported.
-    //
-    // If there is a slicer, and it successfully slices the model, then some
-    // operations may be supported.
-    //
-    // See the IModelSlicer class in Utils.h for more details.
-    virtual void getSupportedOperations(const Model& hidlModel, IModelSlicer* slicer,
-                                        hidl_vec<bool>* supportedOperations) = 0;
-    void getSupportedOperations(const Model& hidlModel, hidl_vec<bool>* supportedOperations) {
-        return getSupportedOperations(hidlModel, nullptr, supportedOperations);
-    }
+    // See the MetaModel class in MetaModel.h for more details.
+    virtual void getSupportedOperations(const MetaModel& metaModel,
+                                        hal::hidl_vec<bool>* supportedOperations) const = 0;
 
-    virtual PerformanceInfo getPerformance(OperandType type) const = 0;
-    virtual PerformanceInfo getRelaxedFloat32toFloat16PerformanceScalar() const = 0;
-    virtual PerformanceInfo getRelaxedFloat32toFloat16PerformanceTensor() const = 0;
+    virtual hal::PerformanceInfo getPerformance(hal::OperandType type) const = 0;
+    virtual hal::PerformanceInfo getRelaxedFloat32toFloat16PerformanceScalar() const = 0;
+    virtual hal::PerformanceInfo getRelaxedFloat32toFloat16PerformanceTensor() const = 0;
     virtual std::pair<uint32_t, uint32_t> getNumberOfCacheFilesNeeded() const = 0;
     bool isCachingSupported() const;
 
     virtual int prepareModel(
-            const Model& hidlModel, ExecutionPreference executionPreference,
-            const hidl_vec<hidl_handle>& modelCache, const hidl_vec<hidl_handle>& dataCache,
-            const hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>& token,
-            std::shared_ptr<VersionedIPreparedModel>* preparedModel) = 0;
+            const hal::Model& hidlModel, hal::ExecutionPreference executionPreference,
+            const hal::hidl_vec<hal::hidl_handle>& modelCache,
+            const hal::hidl_vec<hal::hidl_handle>& dataCache,
+            const hal::hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>& token,
+            std::shared_ptr<PreparedModel>* preparedModel) const = 0;
     virtual int prepareModelFromCache(
-            const hidl_vec<hidl_handle>& modelCache, const hidl_vec<hidl_handle>& dataCache,
-            const hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>& token,
-            std::shared_ptr<VersionedIPreparedModel>* preparedModel) = 0;
+            const hal::hidl_vec<hal::hidl_handle>& modelCache,
+            const hal::hidl_vec<hal::hidl_handle>& dataCache,
+            const hal::hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>& token,
+            std::shared_ptr<PreparedModel>* preparedModel) const = 0;
 };
 
 // Manages the NN HAL devices.  Only one instance of this class will exist.
@@ -105,11 +127,7 @@ class DeviceManager {
     // 1 - Do graph partitioning; but fall back to non-partitioned
     //     execution if there is a partitioning failure.
     // 2 - Do graph partitioning, and rely on it; there is no fallback.
-    enum {
-        kPartitioningNo              = 0,
-        kPartitioningWithFallback    = 1,
-        kPartitioningWithoutFallback = 2
-    };
+    enum { kPartitioningNo = 0, kPartitioningWithFallback = 1, kPartitioningWithoutFallback = 2 };
     uint32_t getPartitioning() const { return mPartitioning; }
     static bool partitioningAllowsFallback(uint32_t partitioning) {
         return partitioning == kPartitioningWithFallback;
@@ -134,7 +152,7 @@ class DeviceManager {
     }
 
     // Register a test device.
-    void forTest_registerDevice(const char* name, const sp<V1_0::IDevice>& device) {
+    void forTest_registerDevice(const char* name, const sp<hal::V1_0::IDevice>& device) {
         registerDevice(name, device);
     }
 
@@ -147,7 +165,7 @@ class DeviceManager {
 
     // Make a test device
     static std::shared_ptr<Device> forTest_makeDriverDevice(const std::string& name,
-                                                            const sp<V1_0::IDevice>& device);
+                                                            const sp<hal::V1_0::IDevice>& device);
 
     bool forTest_isCpuDevice(const ANeuralNetworksDevice* device) const {
         return reinterpret_cast<const Device*>(device) == getCpuDevice().get();
@@ -158,7 +176,7 @@ class DeviceManager {
     DeviceManager();
 
     // Adds a device for the manager to use.
-    void registerDevice(const char* name, const sp<V1_0::IDevice>& device);
+    void registerDevice(const char* name, const sp<hal::V1_0::IDevice>& device);
 
     void findAvailableDevices();
 
@@ -187,7 +205,7 @@ class DeviceManager {
     bool mStrictSlicing = false;
 };
 
-} // namespace nn
-} // namespace android
+}  // namespace nn
+}  // namespace android
 
-#endif // ANDROID_ML_NN_RUNTIME_MANAGER_H
+#endif  // ANDROID_FRAMEWORKS_ML_NN_RUNTIME_MANAGER_H

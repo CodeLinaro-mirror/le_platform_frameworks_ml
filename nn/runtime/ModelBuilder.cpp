@@ -26,10 +26,13 @@
 #include "ValidateHal.h"
 
 #include <map>
+#include <memory>
 #include <utility>
 
 namespace android {
 namespace nn {
+
+using namespace hal;
 
 // The maximum number of operands and operations that a model may have.
 const uint32_t MAX_NUMBER_OF_OPERANDS = 0xFFFFFFFE;
@@ -251,17 +254,12 @@ int ModelBuilder::copyLargeValuesToSharedMemory() {
             poolSize += operand.location.length;
         }
 
-        // Allocated the shared memory.
-        int n = mLargeValueMemory.create(poolSize);
-        if (n != ANEURALNETWORKS_NO_ERROR) {
-            return n;
-        }
-        uint8_t* memoryPointer = nullptr;
-        n = mLargeValueMemory.getPointer(&memoryPointer);
-        if (n != ANEURALNETWORKS_NO_ERROR) {
-            return n;
-        }
-        uint32_t poolIndex = mMemories.add(&mLargeValueMemory);
+        // Allocate the shared memory.
+        int n;
+        std::tie(n, mLargeValueMemory) = MemoryAshmem::create(poolSize);
+        NN_RETURN_IF_ERROR(n);
+        uint8_t* memoryPointer = mLargeValueMemory->getPointer();
+        uint32_t poolIndex = mMemories.add(mLargeValueMemory.get());
         VLOG(MODEL) << "Allocated large value pool of size " << poolSize << " at index "
                     << poolIndex;
 
@@ -456,8 +454,7 @@ int ModelBuilder::finish() {
     // NOTE: Must copyLargeValuesToSharedMemory() before validation; otherwise,
     //       a CONSTANT_REFERENCE operand will not have correct .poolIndex, and
     //       validation will not work properly.
-    Model modelForValidation;
-    setHidlModel(&modelForValidation);
+    const Model modelForValidation = makeHidlModel();
     if (!validateModel(modelForValidation)) {
         LOG(ERROR) << "ANeuralNetworksModel_finish called on invalid model";
         mInvalidModel = true;
@@ -527,20 +524,23 @@ void ModelBuilder::sortIntoRunOrder() {
     mOperations = runOrder;
 }
 
-void ModelBuilder::setHidlModel(Model* model) const {
-    model->operands = mOperands;
-    model->operations = mOperations;
-    model->inputIndexes = mInputIndexes;
-    model->outputIndexes = mOutputIndexes;
-    model->operandValues = mSmallOperandValues;
-    model->relaxComputationFloat32toFloat16 = mRelaxComputationFloat32toFloat16;
-    model->extensionNameToPrefix = getExtensionNameToPrefixMap();
+Model ModelBuilder::makeHidlModel() const {
+    Model model;
+
+    model.operands = mOperands;
+    model.operations = mOperations;
+    model.inputIndexes = mInputIndexes;
+    model.outputIndexes = mOutputIndexes;
+    model.operandValues = mSmallOperandValues;
+    model.relaxComputationFloat32toFloat16 = mRelaxComputationFloat32toFloat16;
+    model.extensionNameToPrefix = getExtensionNameToPrefixMap();
 
     uint32_t count = mMemories.size();
-    model->pools.resize(count);
-    for (uint32_t i = 0; i < count; i++) {
-        model->pools[i] = mMemories[i]->getHidlMemory();
-    }
+    model.pools.resize(count);
+    std::transform(mMemories.cbegin(), mMemories.cend(), model.pools.begin(),
+                   [](const Memory* m) { return m->getHidlMemory(); });
+
+    return model;
 }
 
 std::vector<Model::ExtensionNameAndPrefix> ModelBuilder::getExtensionNameToPrefixMap() const {

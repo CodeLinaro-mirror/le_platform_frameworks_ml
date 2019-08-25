@@ -16,7 +16,7 @@
 
 #define LOG_TAG "Operations"
 
-#include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
+#include <tensorflow/lite/kernels/internal/reference/reference_ops.h>
 
 #include "HalInterfaces.h"
 #include "OperationResolver.h"
@@ -41,6 +41,8 @@ constexpr _Float16 kFloat16Max = 65504;
 constexpr _Float16 kFloat16Lowest = -kFloat16Max;
 
 namespace {
+
+using namespace hal;
 
 template <typename T>
 inline bool compute(IOperationExecutionContext* context, T init, T func(T, T)) {

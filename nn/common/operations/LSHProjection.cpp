@@ -14,16 +14,21 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "Operations"
+
 #include "LSHProjection.h"
 
 #include "CpuExecutor.h"
+#include "HalInterfaces.h"
 #include "Tracing.h"
 #include "Utils.h"
 
-#include "utils/hash/farmhash.h"
+#include <utils/hash/farmhash.h>
 
 namespace android {
 namespace nn {
+
+using namespace hal;
 
 LSHProjection::LSHProjection(const Operation& operation,
                              std::vector<RunTimeOperandInfo>& operands) {

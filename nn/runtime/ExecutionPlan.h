@@ -16,8 +16,20 @@
 
 // Classes used to plan how to execute a model across multiple devices.
 
-#ifndef ANDROID_ML_NN_RUNTIME_EXECUTION_PLAN_H
-#define ANDROID_ML_NN_RUNTIME_EXECUTION_PLAN_H
+#ifndef ANDROID_FRAMEWORKS_ML_NN_RUNTIME_EXECUTION_PLAN_H
+#define ANDROID_FRAMEWORKS_ML_NN_RUNTIME_EXECUTION_PLAN_H
+
+#include <android-base/logging.h>
+#include <openssl/sha.h>
+
+#include <map>
+#include <memory>
+#include <ostream>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "HalInterfaces.h"
 #include "Memory.h"
@@ -25,12 +37,6 @@
 #include "NeuralNetworks.h"
 #include "TokenHasher.h"
 #include "Utils.h"
-#include "VersionedInterfaces.h"
-
-#include <openssl/sha.h>
-
-#include <set>
-#include <string>
 
 namespace android {
 namespace nn {
@@ -42,10 +48,11 @@ class ExecutionBuilder;
 class ExecutionPlan;
 class ExecutionBurstController;
 class Memory;
+class PreparedModel;
 class StepExecutor;
 
 class ExecutionStep {
-public:
+   public:
     typedef std::vector<std::pair<uint32_t, uint32_t>> RemapVectorType;
     typedef std::set<std::pair<uint32_t, uint32_t>> SubModelOutputSetType;
 
@@ -57,21 +64,13 @@ public:
                    const ModelBuilder& fromModel, OperandKind kind);
 
     // Each container entry is of the form (fromModel index, subModel index)
-    const RemapVectorType& getModelInputs() const {
-        return mModelInputs;
-    }
-    const RemapVectorType& getModelOutputs() const {
-        return mModelOutputs;
-    }
-    const RemapVectorType& getTempsAsSubModelInputs() const {
-        return mTempsAsSubModelInputs;
-    }
+    const RemapVectorType& getModelInputs() const { return mModelInputs; }
+    const RemapVectorType& getModelOutputs() const { return mModelOutputs; }
+    const RemapVectorType& getTempsAsSubModelInputs() const { return mTempsAsSubModelInputs; }
     const SubModelOutputSetType& getTempsAsSubModelOutputs() const {
         return mTempsAsSubModelOutputs;
     }
-    const RemapVectorType& getOutputsAsSubModelInputs() const {
-        return mOutputsAsSubModelInputs;
-    }
+    const RemapVectorType& getOutputsAsSubModelInputs() const { return mOutputsAsSubModelInputs; }
     const std::vector<uint32_t>& getOutputIndexSubModelToFromModel() const {
         return mOutputIndexSubModelToFromModel;
     }
@@ -95,9 +94,7 @@ public:
     std::shared_ptr<Device> getDevice() const { return mDevice; }
 
     // only available after calling finishSubModel()
-    std::shared_ptr<VersionedIPreparedModel> getPreparedSubModel() const {
-        return mPreparedSubModel;
-    }
+    std::shared_ptr<PreparedModel> getPreparedSubModel() const { return mPreparedSubModel; }
 
     // Map inputs and outputs from ExecutionBuilder to StepExecutor.
     void mapInputsAndOutputs(std::shared_ptr<StepExecutor> stepExecutor) const;
@@ -118,7 +115,7 @@ public:
     uint32_t mIndex;  // index of step within plan
     ModelBuilder mSubModel;
     std::shared_ptr<Device> mDevice;
-    std::shared_ptr<VersionedIPreparedModel> mPreparedSubModel;  // not used for CPU
+    std::shared_ptr<PreparedModel> mPreparedSubModel;
 
     // Inputs of original model that are also inputs of this submodel:
     //     (fromModel index, subModel index)
@@ -166,11 +163,11 @@ public:
 };
 
 class ExecutionPlan {
-public:
+   public:
     ExecutionPlan(const ExecutionPlan&) = delete;
     ExecutionPlan& operator=(const ExecutionPlan&) = delete;
 
-    ExecutionPlan() { }
+    ExecutionPlan() {}
     ~ExecutionPlan() { delete mBody; }
 
     // Controller is part of the interface to a mechanism for
@@ -186,7 +183,8 @@ public:
     //   a problem has occurred.
     class Controller {
         friend class ExecutionPlan;
-    private:
+
+       private:
         Controller(const Controller&) = delete;
         Controller& operator=(const Controller&) = delete;
 
@@ -205,8 +203,9 @@ public:
         const ExecutionPlan* mPlan;
         ExecutionBuilder* mExecutionBuilder;
         const BurstBuilder* mBurstBuilder;
-        std::shared_ptr<const SubModelInputsAndOutputsType> mSubModelInputsAndOutputs;  // may be nullptr
-        Memory mTemporaries;
+        std::shared_ptr<const SubModelInputsAndOutputsType>
+                mSubModelInputsAndOutputs;  // may be nullptr
+        std::unique_ptr<MemoryAshmem> mTemporaries;
         size_t mNextStepIndex;
     };
 
@@ -219,7 +218,8 @@ public:
              std::shared_ptr<ExecutionBurstController>* burstController = nullptr) const;
 
     // Create the same executor as the last one created by next().
-    int fallback(std::shared_ptr<Controller> controller, std::shared_ptr<StepExecutor>* executor) const;
+    int fallback(std::shared_ptr<Controller> controller,
+                 std::shared_ptr<StepExecutor>* executor) const;
 
     std::shared_ptr<ExecutionStep> createNewStep(const std::shared_ptr<Device> device);
 
@@ -238,6 +238,8 @@ public:
     void reset();
 
     bool isValid() const { return mState != EMPTY && mBody != nullptr && mBody->mSuccessfulFinish; }
+    bool isSimple() const { return mState == SIMPLE; }
+    bool isSimpleCpu() const;
 
     void setCaching(const std::string* cacheDir, const uint8_t* token) {
         mCacheDir = cacheDir;
@@ -248,7 +250,12 @@ public:
 
     // These functions are solely intended for use by unit tests of
     // the partitioning algorithm.
-    enum class Kind { ERROR, EMPTY, SIMPLE, COMPOUND };
+    enum class Kind {
+        ERROR,
+        EMPTY,
+        SIMPLE,
+        COMPOUND
+    };  // See operator<< defined outside this class
     Kind forTest_getKind() const;
     std::shared_ptr<const Device> forTest_simpleGetDevice() const;
     const std::vector<std::shared_ptr<ExecutionStep>>& forTest_compoundGetSteps() const;
@@ -277,7 +284,7 @@ public:
 
         std::shared_ptr<Device> mDevice;
         const ModelBuilder* mModel;
-        std::shared_ptr<VersionedIPreparedModel> mPreparedModel;  // not used for CPU
+        std::shared_ptr<PreparedModel> mPreparedModel;
 
         const std::string* mCacheDir;
         TokenHasher mToken;
@@ -301,18 +308,31 @@ public:
         std::unordered_map<uint32_t, uint32_t> mTemporaryToDefiningStep;
 
         bool mHasSubModelOutputOfUnknownSize = false;
-    private:
+
+       private:
         void findTempsAsSubModelOutputs();
     };
 
     enum { EMPTY, SIMPLE, COMPOUND } mState = EMPTY;
     Body* mBody = nullptr;
+    SimpleBody* simple() {
+        CHECK(mState == SIMPLE);
+        CHECK(mBody != nullptr);
+        return static_cast<SimpleBody*>(mBody);
+    }
+    const SimpleBody* simple() const {
+        CHECK(mState == SIMPLE);
+        CHECK(mBody != nullptr);
+        return static_cast<const SimpleBody*>(mBody);
+    }
     CompoundBody* compound() {
-        nnAssert(mState == COMPOUND);
+        CHECK(mState == COMPOUND);
+        CHECK(mBody != nullptr);
         return static_cast<CompoundBody*>(mBody);
     }
     const CompoundBody* compound() const {
-        nnAssert(mState == COMPOUND);
+        CHECK(mState == COMPOUND);
+        CHECK(mBody != nullptr);
         return static_cast<const CompoundBody*>(mBody);
     }
 
@@ -321,7 +341,16 @@ public:
     const uint8_t* mToken = nullptr;
 };
 
+inline std::ostream& operator<<(std::ostream& out, ExecutionPlan::Kind kind) {
+    const int intKind = static_cast<int>(kind);
+    if (kind < ExecutionPlan::Kind::ERROR || kind > ExecutionPlan::Kind::COMPOUND) {
+        return out << "<UNK(" << intKind << ")>";
+    }
+    static const char* name[] = {"ERROR", "EMPTY", "SIMPLE", "COMPOUND"};
+    return out << name[intKind];
+}
+
 }  // namespace nn
 }  // namespace android
 
-#endif  // ANDROID_ML_NN_RUNTIME_EXECUTION_PLAN_H
+#endif  // ANDROID_FRAMEWORKS_ML_NN_RUNTIME_EXECUTION_PLAN_H

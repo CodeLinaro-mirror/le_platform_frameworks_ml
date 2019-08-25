@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "Operations"
+
 #include "CpuOperationUtils.h"
+#include "HalInterfaces.h"
 #include "OperationResolver.h"
 #include "OperationsUtils.h"
 
@@ -29,6 +32,8 @@ namespace nn {
 namespace bbox_ops {
 
 namespace {
+
+using namespace hal;
 
 struct BoxEncodingCorner {
     float x1, y1, x2, y2;
@@ -475,10 +480,10 @@ bool boxWithNmsLimitFloat32Compute(float* scoresData, const Shape& scoresShape,
             NN_RET_CHECK_LE(roi[1], roi[3]);
         }
         std::vector<uint32_t> result;
-        softNmsMultiClass(scoresBase, numClasses, batchSplitIn->at(b), scoreThreshold,
-                          nmsScoreThreshold, maxNumDetections, maxNumDetections,
-                          [&roiBase](uint32_t ind) { return roiBase + ind * kRoiDim; }, kernel,
-                          &result);
+        softNmsMultiClass(
+                scoresBase, numClasses, batchSplitIn->at(b), scoreThreshold, nmsScoreThreshold,
+                maxNumDetections, maxNumDetections,
+                [&roiBase](uint32_t ind) { return roiBase + ind * kRoiDim; }, kernel, &result);
         // Sort again by class.
         std::sort(result.begin(), result.end(),
                   [&scoresBase, numClasses](const uint32_t& lhs, const uint32_t& rhs) {

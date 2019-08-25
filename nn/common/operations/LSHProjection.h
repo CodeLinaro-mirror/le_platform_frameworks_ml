@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef FRAMEWORKS_ML_NN_LSH_PROJECTION_H
-#define FRAMEWORKS_ML_NN_LSH_PROJECTION_H
+#ifndef ANDROID_FRAMEWORKS_ML_NN_COMMON_OPERATIONS_LSHPROJECTION_H
+#define ANDROID_FRAMEWORKS_ML_NN_COMMON_OPERATIONS_LSHPROJECTION_H
 
 #include "HalOperation.h"
 
@@ -36,10 +36,11 @@ struct Shape;
 
 class LSHProjection {
    public:
-    LSHProjection(const Operation& operation, std::vector<RunTimeOperandInfo>& operands);
+    LSHProjection(const hardware::neuralnetworks::V1_2::Operation& operation,
+                  std::vector<RunTimeOperandInfo>& operands);
 
-    static bool Prepare(const Operation& operation, std::vector<RunTimeOperandInfo>& operands,
-                        Shape* outputShape);
+    static bool Prepare(const hardware::neuralnetworks::V1_2::Operation& operation,
+                        std::vector<RunTimeOperandInfo>& operands, Shape* outputShape);
     template <typename T>
     bool Eval();
 
@@ -76,4 +77,4 @@ void DenseLshProjection(const RunTimeOperandInfo* hash, const RunTimeOperandInfo
 }  // namespace nn
 }  // namespace android
 
-#endif  // FRAMEWORKS_ML_NN_LSH_PROJECTION_H
+#endif  // ANDROID_FRAMEWORKS_ML_NN_COMMON_OPERATIONS_LSHPROJECTION_H
