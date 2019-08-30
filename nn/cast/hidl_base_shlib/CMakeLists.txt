@@ -6,6 +6,7 @@ set (SOURCE_FILES
     StrongPointer.cpp
     native_handle.cpp
     RefBase.cpp
+    HidlInternal.cpp
 )
 
 add_library(${TARGET_NAME} SHARED ${SOURCE_FILES})
@@ -20,7 +21,7 @@ install(
 
 install(
     TARGETS ${TARGET_NAME}
-    LIBRARY DESTINATION lib
+    LIBRARY DESTINATION ${NNAPI_LIB_DIR}
     PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
                 GROUP_EXECUTE GROUP_READ
                 WORLD_EXECUTE WORLD_READ

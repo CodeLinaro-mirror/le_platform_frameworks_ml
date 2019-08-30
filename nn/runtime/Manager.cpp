@@ -138,7 +138,7 @@ void DeviceManager::findAvailableDevices() {
 #if defined(_LE_NN_)
     // LE doesn't support HIDL service registration and querying,
     // so loads the devices as shared libraries.
-    std::string path("/usr/lib/nn/");
+    std::string path(INSTALL_LIB_DIR"/nn/");
     DIR *dir = opendir(path.c_str());
     if (nullptr == dir) {
         LOG(ERROR) << "Failed to open nn drivers folder " << strerror(errno);

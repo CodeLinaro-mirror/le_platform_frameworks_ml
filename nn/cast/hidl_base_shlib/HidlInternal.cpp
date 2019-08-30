@@ -93,7 +93,11 @@ HidlInstrumentor::HidlInstrumentor(const std::string& package, const std::string
 HidlInstrumentor::~HidlInstrumentor() {}
 
 void HidlInstrumentor::configureInstrumentation(bool log) {
+#ifndef _LE_NN_
     mEnableInstrumentation = property_get_bool("hal.instrumentation.enable", false);
+#else
+    mEnableInstrumentation = false;
+#endif
     if (mEnableInstrumentation) {
         if (log) {
             LOG(INFO) << "Enable instrumentation.";

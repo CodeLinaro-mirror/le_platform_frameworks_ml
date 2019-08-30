@@ -23,7 +23,7 @@ set (SOURCE_FILES
     ValidateHal.cpp
 )
 
-add_library(${TARGET_NAME} STATIC ${SOURCE_FILES})
+add_library(${TARGET_NAME} SHARED ${SOURCE_FILES})
 
 include_directories(${SYSROOT_INCDIR}/gemmlowp)
 
@@ -37,8 +37,24 @@ target_include_directories(${TARGET_NAME}
 target_link_libraries(${TARGET_NAME}
     base
     log
+    pthread
     textclassifier_hash
     cast_nn_hidl_memory
     cast_nn_hidl_allocator
     tensorflow-lite
+)
+
+install(
+    TARGETS ${TARGET_NAME}
+    LIBRARY DESTINATION ${NNAPI_LIB_DIR}
+    ARCHIVE DESTINATION ${NNAPI_LIB_DIR}
+    PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+                GROUP_EXECUTE GROUP_READ
+                WORLD_EXECUTE WORLD_READ
+)
+
+install(DIRECTORY include
+    DESTINATION include/neuralnetworks_common
+    FILES_MATCHING
+    PATTERN "*.h"
 )
