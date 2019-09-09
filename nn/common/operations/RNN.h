@@ -18,6 +18,7 @@
 #define FRAMEWORKS_ML_NN_RNN_H
 
 #include "ActivationFunctor.h"
+#include <vector>
 
 namespace android {
 namespace hardware {

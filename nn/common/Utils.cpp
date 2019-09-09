@@ -20,13 +20,34 @@
 #include "NeuralNetworks.h"
 #include "NeuralNetworksOEM.h"
 
-#include <android-base/logging.h>
+#if !defined(_LE_NN_)
 #include <android-base/properties.h>
 #include <android-base/strings.h>
 #include <sys/system_properties.h>
+#endif
+
 #include <unordered_map>
 
+
+#include "external/android-base/logging.h"
+
 using ::android::hidl::allocator::V1_0::IAllocator;
+
+#if defined(_LE_NN_)
+namespace android {
+namespace hardware {
+namespace details {
+
+void logAlwaysFatal(const char* message) {
+    printf("%s\n", message);
+    abort();
+}
+
+} // namespace details
+} // namespace hardware
+} // namespace android
+#endif
+
 
 namespace android {
 namespace nn {
@@ -45,7 +66,11 @@ int vLogMask = ~0;
 //                                             COMPILATION tags.
 void initVLogMask() {
     vLogMask = 0;
+#if !defined(_LE_NN_)
     const std::string vLogSetting = android::base::GetProperty(kVLogPropKey, "");
+#else
+    const std::string vLogSetting = "";
+#endif
     if (vLogSetting.empty()) {
         return;
     }
@@ -60,6 +85,7 @@ void initVLogMask() {
         {"manager", MANAGER},
         {"driver", DRIVER}};
 
+#if !defined(_LE_NN_)
     std::vector<std::string> elements = android::base::Split(vLogSetting, " ,:");
     for (const auto& elem : elements) {
         const auto& flag = vLogFlags.find(elem);
@@ -77,6 +103,7 @@ void initVLogMask() {
             vLogMask |= 1 << flag->second;
         }
     }
+#endif
 }
 
 namespace {
@@ -231,7 +258,11 @@ uint32_t sizeOfData(OperandType type, const std::vector<uint32_t>& dimensions) {
 }
 
 hidl_memory allocateSharedMemory(int64_t size) {
+#if defined(_LE_NN_)
+    static const std::string type = "shpmem";
+#else
     static const std::string type = "ashmem";
+#endif
     static sp<IAllocator> allocator = IAllocator::getService(type);
 
     hidl_memory memory;
@@ -1722,7 +1753,11 @@ V1_1::Model convertToV1_1(const V1_1::Model& model) {
 
 #ifdef NN_DEBUGGABLE
 uint32_t getProp(const char* str, uint32_t defaultValue) {
+#if !defined(_LE_NN_)
     const std::string propStr = android::base::GetProperty(str, "");
+#else
+    const std::string propStr = "";
+#endif
     if (propStr.size() > 0) {
         return std::stoi(propStr);
     } else {

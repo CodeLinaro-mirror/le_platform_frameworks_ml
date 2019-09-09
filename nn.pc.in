@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+
+Name: Android NN framework
+Description: Android Neural Network Framework
+Version:
+URL:
+Libs:
+Cflags: -I${includedir}

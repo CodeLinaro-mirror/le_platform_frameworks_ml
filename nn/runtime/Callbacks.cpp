@@ -15,7 +15,8 @@
  */
 
 #include "Callbacks.h"
-#include <android-base/logging.h>
+
+#include "external/android-base/logging.h"
 
 namespace android {
 namespace hardware {

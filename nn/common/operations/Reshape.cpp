@@ -21,8 +21,8 @@
 #include "Operations.h"
 #include "CpuOperationUtils.h"
 
-#include "tensorflow/contrib/lite/kernels/internal/optimized/optimized_ops.h"
-#include "tensorflow/contrib/lite/kernels/internal/reference/reference_ops.h"
+#include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
+#include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
 
 namespace android {
 namespace nn {
@@ -137,12 +137,14 @@ bool batchToSpaceGeneric(const uint8_t* inputData, const Shape& inputShape,
                          const int32_t* blockSize,
                          uint8_t* outputData, const Shape& outputShape) {
     // Needed by low level implementation, but not really used.
-    tflite::Dims<4> blockSizeDim;
+    tflite::Dims<4> blockSizeDim, cropsDim;
+    const int32 crops[4] = {0, 0, 0, 0};
     if (inputShape.type == OperandType::TENSOR_FLOAT32) {
        tflite::optimized_ops::BatchToSpaceND(
                 reinterpret_cast<const float*>(inputData),
                 convertShapeToDims(inputShape),
                 blockSize, blockSizeDim,
+                crops, cropsDim,
                 reinterpret_cast<float*>(outputData),
                 convertShapeToDims(outputShape));
     } else if (inputShape.type == OperandType::TENSOR_QUANT8_ASYMM) {
@@ -150,6 +152,7 @@ bool batchToSpaceGeneric(const uint8_t* inputData, const Shape& inputShape,
                 reinterpret_cast<const uint8_t*>(inputData),
                 convertShapeToDims(inputShape),
                 blockSize, blockSizeDim,
+                crops, cropsDim,
                 reinterpret_cast<uint8_t*>(outputData),
                 convertShapeToDims(outputShape));
     } else {

@@ -20,8 +20,9 @@
 #include "HalInterfaces.h"
 #include "NeuralNetworks.h"
 
-#include <android-base/logging.h>
 #include <vector>
+
+#include "external/android-base/logging.h"
 
 namespace android {
 namespace nn {
@@ -43,6 +44,9 @@ const int kNumberOfOperationTypesOEM = 1;
 
 // The lowest number assigned to any OEM Code in NeuralNetworksOEM.h.
 const int kOEMCodeBase = 10000;
+
+// The mask for public execution preferences defined in NeuralNetworks.h.
+const int kPublicPreferencesMask = 0x0000000F;
 
 /* IMPORTANT: if you change the following list, don't
  * forget to update the corresponding 'tags' table in

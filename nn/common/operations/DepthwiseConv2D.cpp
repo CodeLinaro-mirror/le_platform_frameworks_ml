@@ -17,8 +17,9 @@
 #include "Operations.h"
 #include "CpuOperationUtils.h"
 
-#include "tensorflow/contrib/lite/kernels/internal/optimized/depthwiseconv_float.h"
-#include "tensorflow/contrib/lite/kernels/internal/optimized/depthwiseconv_uint8.h"
+#include "tensorflow/lite/kernels/internal/optimized/depthwiseconv_float.h"
+#include "tensorflow/lite/kernels/internal/optimized/depthwiseconv_uint8.h"
+#include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
 
 namespace android {
 namespace nn {

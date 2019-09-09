@@ -1,0 +1,147 @@
+#ifndef HIDL_GENERATED_ANDROID_HARDWARE_NEURALNETWORKS_V1_0_IDEVICE_H
+#define HIDL_GENERATED_ANDROID_HARDWARE_NEURALNETWORKS_V1_0_IDEVICE_H
+
+#include <android/hardware/neuralnetworks/1.0/IPreparedModelCallback.h>
+#include <android/hardware/neuralnetworks/1.0/types.h>
+#include <android/hidl/base/1.0/IBase.h>
+
+#include <android/hidl/manager/1.0/IServiceNotification.h>
+
+#include <hidl/HidlSupport.h>
+#include <hidl/MQDescriptor.h>
+#include <hidl/Status.h>
+#include <utils/NativeHandle.h>
+
+namespace android {
+namespace hardware {
+namespace neuralnetworks {
+namespace V1_0 {
+
+struct IDevice : public ::android::hidl::base::V1_0::IBase {
+
+    // Forward declaration for forward reference support:
+
+
+
+    using getCapabilities_cb = std::function<void(::android::hardware::neuralnetworks::V1_0::ErrorStatus status, const ::android::hardware::neuralnetworks::V1_0::Capabilities& capabilities)>;
+    /**
+     * Gets the capabilities of a driver.
+     *
+     * @return status Error status of the call, must be:
+     *                - NONE if successful
+     *                - DEVICE_UNAVAILABLE if driver is offline or busy
+     *                - GENERAL_FAILURE if there is an unspecified error
+     * @return capabilities Capabilities of the driver.
+     */
+    virtual ::android::hardware::Return<void> getCapabilities(getCapabilities_cb _hidl_cb) = 0;
+
+    using getSupportedOperations_cb = std::function<void(::android::hardware::neuralnetworks::V1_0::ErrorStatus status, const ::android::hardware::hidl_vec<bool>& supportedOperations)>;
+    /**
+     * Gets the supported operations in a model.
+     *
+     * getSupportedOperations indicates which operations of a model are fully
+     * supported by the vendor driver. If an operation may not be supported for
+     * any reason, getSupportedOperations must return false for that operation.
+     *
+     * @param model A model whose operations--and their corresponding
+     *              operands--are to be verified by the driver.
+     * @return status Error status of the call, must be:
+     *                - NONE if successful
+     *                - DEVICE_UNAVAILABLE if driver is offline or busy
+     *                - GENERAL_FAILURE if there is an unspecified error
+     *                - INVALID_ARGUMENT if provided model is invalid
+     * @return supportedOperations A list of supported operations, where true
+     *                             indicates the operation is supported and
+     *                             false indicates the operation is not
+     *                             supported. The index of "supported"
+     *                             corresponds with the index of the operation
+     *                             it is describing.
+     */
+    virtual ::android::hardware::Return<void> getSupportedOperations(const ::android::hardware::neuralnetworks::V1_0::Model& model, getSupportedOperations_cb _hidl_cb) = 0;
+
+    /**
+     * Creates a prepared model for execution.
+     *
+     * prepareModel is used to make any necessary transformations or alternative
+     * representations to a model for execution, possiblly including
+     * transformations on the constant data, optimization on the model's graph,
+     * or compilation into the device's native binary format. The model itself
+     * is not changed.
+     *
+     * The model is prepared asynchronously with respect to the caller. The
+     * prepareModel function must verify the inputs to the prepareModel function
+     * are correct. If there is an error, prepareModel must immediately invoke
+     * the callback with the appropriate ErrorStatus value and nullptr for the
+     * IPreparedModel, then return with the same ErrorStatus. If the inputs to
+     * the prepareModel function are valid and there is no error, prepareModel
+     * must launch an asynchronous task to prepare the model in the background,
+     * and immediately return from prepareModel with ErrorStatus::NONE. If the
+     * asynchronous task fails to launch, prepareModel must immediately invoke
+     * the callback with ErrorStatus::GENERAL_FAILURE and nullptr for the
+     * IPreparedModel, then return with ErrorStatus::GENERAL_FAILURE.
+     *
+     * When the asynchronous task has finished preparing the model, it must
+     * immediately invoke the callback function provided as an input to
+     * prepareModel. If the model was prepared successfully, the callback object
+     * must be invoked with an error status of ErrorStatus::NONE and the
+     * produced IPreparedModel object. If an error occurred preparing the model,
+     * the callback object must be invoked with the appropriate ErrorStatus
+     * value and nullptr for the IPreparedModel.
+     *
+     * The only information that may be unknown to the model at this stage is
+     * the shape of the tensors, which may only be known at execution time. As
+     * such, some driver services may return partially prepared models, where
+     * the prepared model can only be finished when it is paired with a set of
+     * inputs to the model. Note that the same prepared model object can be
+     * used with different shapes of inputs on different (possibly concurrent)
+     * executions.
+     *
+     * Multiple threads can call prepareModel on the same model concurrently.
+     *
+     * @param model The model to be prepared for execution.
+     * @param callback A callback object used to return the error status of
+     *                 preparing the model for execution and the prepared model
+     *                 if successful, nullptr otherwise. The callback object's
+     *                 notify function must be called exactly once, even if the
+     *                 model could not be prepared.
+     * @return status Error status of launching a task which prepares the model
+     *                in the background; must be:
+     *                - NONE if preparation task is successfully launched
+     *                - DEVICE_UNAVAILABLE if driver is offline or busy
+     *                - GENERAL_FAILURE if there is an unspecified error
+     *                - INVALID_ARGUMENT if one of the input arguments is
+     *                  invalid
+     */
+    virtual ::android::hardware::Return<::android::hardware::neuralnetworks::V1_0::ErrorStatus> prepareModel(const ::android::hardware::neuralnetworks::V1_0::Model& model, const ::android::sp<::android::hardware::neuralnetworks::V1_0::IPreparedModelCallback>& callback) = 0;
+
+    /**
+     * Returns the current status of a driver.
+     *
+     * @return status Status of the driver, one of:
+     *                - DeviceStatus::AVAILABLE
+     *                - DeviceStatus::BUSY
+     *                - DeviceStatus::OFFLINE
+     *                - DeviceStatus::UNKNOWN
+     */
+    virtual ::android::hardware::Return<::android::hardware::neuralnetworks::V1_0::DeviceStatus> getStatus() = 0;
+
+    using interfaceChain_cb = std::function<void(const ::android::hardware::hidl_vec<::android::hardware::hidl_string>& descriptors)>;
+
+
+    using interfaceDescriptor_cb = std::function<void(const ::android::hardware::hidl_string& descriptor)>;
+
+    using getHashChain_cb = std::function<void(const ::android::hardware::hidl_vec<::android::hardware::hidl_array<uint8_t, 32>>& hashchain)>;
+
+
+
+    static ::android::sp<IDevice> getService(const std::string &serviceName="default", bool getStub=false);
+
+    static const char* descriptor;
+};
+
+}  // namespace V1_0
+}  // namespace neuralnetworks
+}  // namespace hardware
+}  // namespace android
+
+#endif  // HIDL_GENERATED_ANDROID_HARDWARE_NEURALNETWORKS_V1_0_IDEVICE_H

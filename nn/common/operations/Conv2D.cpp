@@ -17,7 +17,9 @@
 #include "Operations.h"
 #include "CpuOperationUtils.h"
 
-#include "tensorflow/contrib/lite/kernels/internal/optimized/optimized_ops.h"
+#include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
+
+#include <mutex>
 
 namespace android {
 namespace nn {
@@ -55,25 +57,31 @@ static std::mutex executionMutex;
     }                                                                           \
                                                                                 \
     Type* im2colData = nullptr;                                                 \
-    uint64_t im2colByteSize = sizeof(Type);                                     \
-    std::unique_ptr<Type[]> im2colGuard;                                        \
-    for (int i=0; i<4; i++) {                                                   \
-        im2colByteSize *= im2colDim.sizes[i];                                   \
-    }                                                                           \
-    /* http://b/77982879, tflite::optimized_ops::Conv uses int for offsets */   \
-    if (im2colByteSize >= 0x7fffffff)  {                                        \
-        LOG(ERROR) << "Conv size is too large, not enough memory";              \
-        return false;                                                           \
-    }                                                                           \
-    if (im2colByteSize <= kStaticBufferSize) {                                  \
-        im2colData = reinterpret_cast<Type *>(static_scratch_buffer);           \
-    } else {                                                                    \
-        im2colData = new (std::nothrow) Type[im2colByteSize / sizeof(Type)];    \
-        if (im2colData == nullptr) {                                            \
+    const bool need_im2col = stride_width != 1 || stride_height != 1 ||         \
+                           filterWidth != 1 || filterHeight != 1;               \
+    /* Make sure we do not set im2colData if it is not needed. */               \
+    if (need_im2col) {                                                          \
+        uint64_t im2colByteSize = sizeof(Type);                                 \
+        std::unique_ptr<Type[]> im2colGuard;                                    \
+        for (int i=0; i<4; i++) {                                               \
+            im2colByteSize *= im2colDim.sizes[i];                               \
+        }                                                                       \
+        /*http://b/77982879, tflite::optimized_ops::Conv uses int for offsets*/ \
+        if (im2colByteSize >= 0x7fffffff)  {                                    \
             LOG(ERROR) << "Conv size is too large, not enough memory";          \
             return false;                                                       \
         }                                                                       \
-        im2colGuard.reset(im2colData);                                          \
+        if (im2colByteSize <= kStaticBufferSize) {                              \
+            im2colData = reinterpret_cast<Type *>(static_scratch_buffer);       \
+        } else {                                                                \
+            im2colData =                                                        \
+              new (std::nothrow) Type[im2colByteSize / sizeof(Type)];           \
+            if (im2colData == nullptr) {                                        \
+                LOG(ERROR) << "conv size is too large, not enough memory";      \
+                return false;                                                   \
+            }                                                                   \
+            im2colGuard.reset(im2colData);                                      \
+        }                                                                       \
     }
 
 bool convFloat32(const float* inputData, const Shape& inputShape,
@@ -93,11 +101,14 @@ bool convFloat32(const float* inputData, const Shape& inputShape,
 
     // Prevent concurrent executions that may access the scratch buffer.
     std::unique_lock<std::mutex> lock(executionMutex);
+    int32_t dilationWidthFactor = 1, dilationHeightFactor = 1;
     tflite::optimized_ops::Conv(
             inputData, convertShapeToDims(inputShape),
             filterData, convertShapeToDims(filterShape),
             biasData, convertShapeToDims(biasShape),
-            stride_width, stride_height, paddingWidth, paddingHeight,
+            stride_width, stride_height,
+            dilationWidthFactor, dilationHeightFactor,
+            paddingWidth, paddingHeight,
             output_activation_min, output_activation_max,
             outputData, convertShapeToDims(outputShape),
             im2colData, im2colDim);

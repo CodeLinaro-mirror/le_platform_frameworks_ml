@@ -21,7 +21,7 @@
 #include "Operations.h"
 #include "CpuOperationUtils.h"
 
-#include "tensorflow/contrib/lite/kernels/internal/reference/reference_ops.h"
+#include "tensorflow/lite/kernels/internal/reference/legacy_reference_ops.h"
 
 namespace android {
 namespace nn {
@@ -41,22 +41,9 @@ bool stridedSliceGeneric(const uint8_t* inputData, const Shape& inputShape,
 
     int32_t numInputDims = static_cast<int32_t>(getNumberOfDimensions(inputShape));
     for (int32_t idx = numInputDims - 1; idx >= 0; --idx) {
-      int32_t dim = static_cast<int32_t>(getSizeOfDimension(inputShape, idx));
-      int32_t stride = stridesData[idx];
-      // stride value has to be non-zero
-      NN_OPS_CHECK(stride != 0);
-      bool positiveStride = stride > 0;
-
-      int32_t begin = beginMask & (1 << idx)
-              ? positiveStride ? 0 : dim - 1
-              : ClampedIndex(beginData[idx], dim, positiveStride);
-      int32_t end = endMask & (1 << idx)
-              ? positiveStride ? dim : -1
-              : ClampedIndex(endData[idx], dim, positiveStride);
-
-      starts.emplace_back(begin);
-      stops.emplace_back(end);
-      strides.emplace_back(stride);
+      starts.emplace_back(beginData[idx]);
+      stops.emplace_back(endData[idx]);
+      strides.emplace_back(stridesData[idx]);
     }
 
     for (int i = numInputDims; i < kMaxDim; i++) {

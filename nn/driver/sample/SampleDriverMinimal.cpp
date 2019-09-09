@@ -23,8 +23,10 @@
 #include "Utils.h"
 #include "ValidateHal.h"
 
-#include <android-base/logging.h>
+#include "external/android-base/logging.h"
+#if !defined(_LE_NN_)
 #include <hidl/LegacySupport.h>
+#endif
 #include <thread>
 
 namespace android {
@@ -83,6 +85,11 @@ Return<void> SampleDriverMinimal::getSupportedOperations_1_1(const V1_1::Model& 
 }
 
 } // namespace sample_driver
+
+extern "C" sp<V1_0::IDevice> NNHalDeviceNew() {
+    return sp<V1_0::IDevice>(new sample_driver::SampleDriverMinimal());
+}
+
 } // namespace nn
 } // namespace android
 

@@ -20,7 +20,7 @@
 #include "NeuralNetworks.h"
 #include "Utils.h"
 
-#include <android-base/logging.h>
+#include "external/android-base/logging.h"
 
 namespace android {
 namespace nn {
@@ -365,6 +365,11 @@ static bool validateOperations(const hidl_vec<VersionedOperation>& operations,
 static bool validatePools(const hidl_vec<hidl_memory>& pools) {
     for (const hidl_memory& memory : pools) {
         const auto name = memory.name();
+#if defined(_LE_NN_)
+        if (name == "shpmem") {
+          continue;
+        }
+#endif
         if (name != "ashmem" && name != "mmap_fd") {
             LOG(ERROR) << "Unsupported memory type " << name;
             return false;

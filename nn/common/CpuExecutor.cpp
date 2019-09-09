@@ -22,7 +22,9 @@
 #include "Operations.h"
 
 #include "Eigen/Core"
+#if !defined(_LE_NN_)
 #include <omp.h>
+#endif
 #include <sys/mman.h>
 
 namespace android {
@@ -35,7 +37,11 @@ RunTimePoolInfo::RunTimePoolInfo(const hidl_memory& hidlMemory, bool* fail) {
     uint8_t* buffer = nullptr;
 
     auto memType = hidlMemory.name();
+#if defined(_LE_NN_)
+    if (memType == "ashmem" || memType == "shpmem") {
+#else
     if (memType == "ashmem") {
+#endif  // defined(_LE_NN_)
         memory = mapMemory(hidlMemory);
         if (memory == nullptr) {
             LOG(ERROR) << "Can't map shared memory.";
@@ -102,7 +108,11 @@ void RunTimePoolInfo::release() {
     }
 
     auto memType = mHidlMemory.name();
+#if defined(_LE_NN_)
+    if (memType == "ashmem" || memType == "shpmem") {
+#else
     if (memType == "ashmem") {
+#endif  // defined(_LE_NN_)
         // nothing to do
     } else if (memType == "mmap_fd") {
         size_t size = mHidlMemory.size();
@@ -123,7 +133,11 @@ void RunTimePoolInfo::release() {
 // Making sure the output data are correctly updated after execution.
 bool RunTimePoolInfo::update() const {
     auto memType = mHidlMemory.name();
+#if defined(_LE_NN_)
+    if (memType == "ashmem" || memType == "shpmem") {
+#else
     if (memType == "ashmem") {
+#endif  // defined(_LE_NN_)
         mMemory->commit();
         return true;
     } else if (memType == "mmap_fd") {
@@ -176,10 +190,24 @@ static bool setInfoAndAllocateIfNeeded(RunTimeOperandInfo* info, const Shape& sh
     info->zeroPoint = shape.offset;
     if (info->lifetime == OperandLifeTime::TEMPORARY_VARIABLE && info->buffer == nullptr) {
         uint32_t length = sizeOfData(info->type, info->dimensions);
-        info->buffer = new uint8_t[length];
+
+#if defined(_LE_NN_)
+        void* data = nullptr;
+
+        // NOTE: over-align to 8 byte for shared memory to avoid unaligned
+        // access for arbitrary value types.
+        int ret = posix_memalign(&data, 8, length);
+        if (ret != 0) {
+          LOG(ERROR) << "posix_memalign failed with ret: " << ret << std::endl;
+          return false;
+        }
+        info->buffer = static_cast<uint8_t*>(data);
         if (info->buffer == nullptr) {
             return false;
         }
+#else
+        info->buffer = new uint8_t[length];
+#endif  // _LE_NN_
     }
     return true;
 }
@@ -311,7 +339,11 @@ void CpuExecutor::freeNoLongerUsedOperands(const std::vector<uint32_t>& inputs) 
         info.numberOfUsesLeft--;
         if (info.numberOfUsesLeft == 0) {
             nnAssert(info.buffer != nullptr);
+#if defined(_LE_NN_)
+            free(info.buffer);
+#else
             delete[] info.buffer;
+#endif  // _LE_NN_
             info.buffer = nullptr;
         }
     }
@@ -1535,8 +1567,10 @@ int CpuExecutor::executeOperation(const Operation& operation) {
 }
 
 ScopedOpenmpSettings::ScopedOpenmpSettings() {
+#if !defined(_LE_NN_)
     mBlocktimeInitial = kmp_get_blocktime();
     kmp_set_blocktime(20);  // ms, see b/109645291
+#endif
 
 #if NNAPI_LIMIT_CPU_THREADS
     // Code not yet enabled. Choosing the number of threads to be based on
@@ -1554,7 +1588,10 @@ ScopedOpenmpSettings::ScopedOpenmpSettings() {
 }
 
 ScopedOpenmpSettings::~ScopedOpenmpSettings() {
+#if !defined(_LE_NN_)
     kmp_set_blocktime(mBlocktimeInitial);
+#endif
+
 #if NNAPI_LIMIT_CPU_THREADS
     Eigen::setNbThreads(mMaxThreadsInitial);
 #endif

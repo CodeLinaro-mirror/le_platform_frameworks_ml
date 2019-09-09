@@ -21,8 +21,8 @@
 #include "Operations.h"
 #include "CpuOperationUtils.h"
 
-#include "tensorflow/contrib/lite/kernels/internal/optimized/optimized_ops.h"
-#include "tensorflow/contrib/lite/kernels/internal/reference/reference_ops.h"
+#include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
+#include "tensorflow/lite/kernels/internal/reference/legacy_reference_ops.h"
 
 namespace android {
 namespace nn {
@@ -62,15 +62,14 @@ bool addFloat32(const float* in1, const Shape& shape1,
         ANDROID_NN_MACRO_DISPATCH(ANDROID_NN_BROADCAST_ADD)
         #undef ANDROID_NN_BROADCAST_ADD
     } else {
-        float output_activation_min, output_activation_max;
-        CalculateActivationRangeFloat(activation, &output_activation_min,
-                                      &output_activation_max);
+        #define ANDROID_NN_ADD(activation)                                               \
+            tflite::optimized_ops::Add<tflite::FusedActivationFunctionType::activation>( \
+                    in1, convertShapeToDims(shape1),                                     \
+                    in2, convertShapeToDims(shape2),                                     \
+                    out, convertShapeToDims(shapeOut))
 
-        tflite::optimized_ops::Add(
-                in1, convertShapeToDims(shape1),
-                in2, convertShapeToDims(shape2),
-                output_activation_min, output_activation_max,
-                out, convertShapeToDims(shapeOut));
+        ANDROID_NN_MACRO_DISPATCH(ANDROID_NN_ADD)
+        #undef ANDROID_NN_ADD
     }
 
     return true;
@@ -118,15 +117,19 @@ bool addQuant8(const uint8_t* in1, const Shape& shape1,
                                   &output_activation_max);
 
     if (needBroadcast) {
-        tflite::optimized_ops::BroadcastAdd(
-                left_shift,
-                in1, convertShapeToDims(shape1),
-                input1_offset, input1_multiplier, input1_shift,
-                in2, convertShapeToDims(shape2),
-                input2_offset, input2_multiplier, input2_shift,
-                output_offset, output_multiplier, output_shift,
-                output_activation_min, output_activation_max,
-                out, convertShapeToDims(shapeOut));
+        #define ANDROID_NN_BROADCAST_ADD(activation)                                    \
+            tflite::optimized_ops::BroadcastAdd<tflite::FusedActivationFunctionType::activation>(  \
+                    left_shift,                                                         \
+                    in1, convertShapeToDims(shape1),                                    \
+                    input1_offset, input1_multiplier, input1_shift,                     \
+                    in2, convertShapeToDims(shape2),                                    \
+                    input2_offset, input2_multiplier, input2_shift,                     \
+                    output_offset, output_multiplier, output_shift,                     \
+                    output_activation_min, output_activation_max,                       \
+                    out, convertShapeToDims(shapeOut));
+
+        ANDROID_NN_MACRO_DISPATCH(ANDROID_NN_BROADCAST_ADD)
+        #undef ANDROID_NN_BROADCAST_ADD
     } else {
         #define ANDROID_NN_NORMAL_ADD(activation)                                        \
             tflite::optimized_ops::Add<tflite::FusedActivationFunctionType::activation>( \
@@ -234,19 +237,23 @@ bool subFloat32(const float* in1, const Shape& shape1,
     CalculateActivationRangeFloat(activation, &output_activation_min,
                                   &output_activation_max);
 
+    tflite::ArithmeticParams op_params;
+    op_params.float_activation_min = output_activation_min;
+    op_params.float_activation_max = output_activation_max;
+
     bool needBroadcast = !SameShape(shape1, shape2);
     if (needBroadcast) {
-        tflite::optimized_ops::BroadcastSub(
-                in1, convertShapeToDims(shape1),
-                in2, convertShapeToDims(shape2),
-                output_activation_min, output_activation_max,
-                out, convertShapeToDims(shapeOut));
+        tflite::optimized_ops::BroadcastSub4DSlow(
+                op_params,
+                DimsToShape(convertShapeToDims(shape1)), in1,
+                DimsToShape(convertShapeToDims(shape2)), in2,
+                DimsToShape(convertShapeToDims(shapeOut)), out);
     } else {
         tflite::optimized_ops::Sub(
-                in1, convertShapeToDims(shape1),
-                in2, convertShapeToDims(shape2),
-                output_activation_min, output_activation_max,
-                out, convertShapeToDims(shapeOut));
+                op_params,
+                DimsToShape(convertShapeToDims(shape1)), in1,
+                DimsToShape(convertShapeToDims(shape2)), in2,
+                DimsToShape(convertShapeToDims(shapeOut)), out);
     }
     return true;
 }
@@ -288,23 +295,39 @@ bool meanGeneric(const uint8_t* inputData, const Shape& inputShape,
 
     bool result = true;
     if (inputShape.type == OperandType::TENSOR_FLOAT32) {
-        tflite::reference_ops::Mean<float>(
-                const_cast<float*>(reinterpret_cast<const float*>(inputData)),
-                reinterpret_cast<const int*>(inputShape.dimensions.data()),
-                getNumberOfDimensions(inputShape),
-                reinterpret_cast<float*>(outputData),
-                reinterpret_cast<const int*>(outputShape.dimensions.data()),
-                getNumberOfDimensions(outputShape),
-                axis, axisSize, keepDims, scratchBuffer, resolvedAxis);
+        float* tempSumBuffer = new (std::nothrow) float[getNumberOfElements(outputShape)];
+        if (!tempSumBuffer) {
+            LOG(ERROR) << "Failed to allocate tempSumBuffer for MEAN";
+            result = false;
+        } else {
+            tflite::reference_ops::Mean<float, float>(
+                    const_cast<float*>(reinterpret_cast<const float*>(inputData)),
+                    reinterpret_cast<const int*>(inputShape.dimensions.data()),
+                    getNumberOfDimensions(inputShape),
+                    reinterpret_cast<float*>(outputData),
+                    reinterpret_cast<const int*>(outputShape.dimensions.data()),
+                    getNumberOfDimensions(outputShape),
+                    axis, axisSize, keepDims, scratchBuffer, resolvedAxis,
+                    tempSumBuffer);
+            delete[] tempSumBuffer;
+        }
     } else if (inputShape.type == OperandType::TENSOR_QUANT8_ASYMM) {
-        tflite::reference_ops::Mean<uint8_t>(
-                const_cast<uint8_t*>(inputData),
-                reinterpret_cast<const int*>(inputShape.dimensions.data()),
-                getNumberOfDimensions(inputShape),
-                outputData,
-                reinterpret_cast<const int*>(outputShape.dimensions.data()),
-                getNumberOfDimensions(outputShape),
-                axis, axisSize, keepDims, scratchBuffer, resolvedAxis);
+        int32_t* tempSumBuffer = new (std::nothrow) int32_t[getNumberOfElements(outputShape)];
+        if (!tempSumBuffer) {
+            LOG(ERROR) << "Failed to allocate tempSumBuffer for MEAN";
+            result = false;
+        } else {
+            tflite::reference_ops::Mean<uint8_t, int32_t>(
+                    const_cast<uint8_t*>(inputData),
+                    reinterpret_cast<const int*>(inputShape.dimensions.data()),
+                    getNumberOfDimensions(inputShape),
+                    outputData,
+                    reinterpret_cast<const int*>(outputShape.dimensions.data()),
+                    getNumberOfDimensions(outputShape),
+                    axis, axisSize, keepDims, scratchBuffer, resolvedAxis,
+                    tempSumBuffer);
+            delete[] tempSumBuffer;
+        }
     } else {
         LOG(ERROR) << "Unsupported data type";
         result = false;
