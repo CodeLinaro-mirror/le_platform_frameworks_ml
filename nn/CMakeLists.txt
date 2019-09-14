@@ -1,12 +1,16 @@
 cmake_minimum_required(VERSION 3.3.1)
 project(nn-framework)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexceptions -fno-short-enums")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexceptions -fno-short-enums  -fPIC")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Ofast -lstdc++ -Wl,--no-undefined")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__ANDROID_API__=28")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_LE_NN_")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNAMESPACE_FOR_HASH_FUNCTIONS=farmhash")
 set(CMAKE_CXX_STANDARD 14)
+
+add_definitions(-DINSTALL_LIB_DIR=\"${NNAPI_LIB_DIR}\")
+add_definitions(-flax-vector-conversions)
+add_definitions(-fomit-frame-pointer)
 
 include_directories(${SYSROOT_INCDIR})
 include_directories(${SYSROOT_INCDIR}/eigen3)

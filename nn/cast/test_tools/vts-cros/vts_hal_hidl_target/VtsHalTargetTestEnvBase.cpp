@@ -27,7 +27,7 @@
 static constexpr const char* kListFlag = "--list_hal_drivers";
 static constexpr const char* kInstanceFlag = "--hal_instance";
 
-static constexpr const char* kNnhalPath = "/usr/lib/nn/";
+static constexpr const char* kNnhalPath = INSTALL_LIB_DIR"/nn/";
 static constexpr const char* kDefaultDevice = "libunifiedhal-driver.so";
 
 using namespace std;
