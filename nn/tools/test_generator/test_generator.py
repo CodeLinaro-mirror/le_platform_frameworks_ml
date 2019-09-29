@@ -19,7 +19,7 @@
 Contain classes definition and utilify functions for compiling models and
 examples into NDK-based CTS and VTS unit tests.
 
-Used by cts_generator.py, vts_generator.py, and spec_visualizer.py
+Used by example_generator.py and spec_visualizer.py
 """
 
 from __future__ import absolute_import
@@ -284,14 +284,14 @@ class Operand(NamedVariable):
         else:
             self.type = Type.GetType(*opType, extraParams=extraParams)
         self.SetValue(value)
-        self.dimensions = self.type.dimensions
         self.lifetime = "TEMPORARY_VARIABLE"
         self.model_index = None
         self.ins = []
         self.outs = []
 
     def SetValue(self, value):
-        self.value = value if type(value) is list or type(value) is tuple else [value]
+        self.value = value if type(value) is list or type(value) is tuple or value is None \
+                     else [value]
         return self
 
     def SetValueFromNumpy(self, value):
@@ -303,9 +303,9 @@ class Operand(NamedVariable):
 
     # Print value as cpp-style list initialization
     def GetListInitialization(self):
-        assert self.value is not None, \
-            "Trying to print operand %s with None value"%(str(self))
-        if self.type.IsFloat():
+        if self.value is None:
+            return "{}"
+        elif self.type.IsFloat():
             return "{%s}"%(GetJointStr(self.value, method=PrettyPrintAsFloat))
         elif self.type.IsBool():
             return "{%s}"%(GetJointStr(self.value, method=lambda v: "true" if v else "false"))
@@ -337,9 +337,6 @@ class InOut(Operand):
         self.SetValue(value[self] if type(value) is dict else value)
         return self
 
-    def GetListInitialization(self):
-        return "{%d, %s}"%(self.index, super().GetListInitialization())
-
 # A user-declared input operand
 class Input(InOut):
     def __init__(self, name, opType, backward=None, skipRenaming=False, extraParams=None):
@@ -358,7 +355,7 @@ class IgnoredOutput(Output):
         Output.__init__(self, name, opType, backward, skipRenaming=skipRenaming)
         self.lifetime = "MODEL_OUTPUT"
     def Feed(self, value):
-        numElements = reduce(lambda x,y: x*y, self.dimensions, 1)
+        numElements = reduce(lambda x,y: x*y, self.type.dimensions, 1)
         self.value = [0 for x in range(numElements)]
         return self
 
@@ -463,7 +460,6 @@ class Model:
         self.isRelaxed = False
         self.compiled = False
         self.dumped = False
-        self.hasDynamicOutputShape = False
         self.version = FileNames.version
         Model.models.append(self)
 
@@ -500,10 +496,6 @@ class Model:
 
     def RelaxedExecution(self, isRelaxed):
         self.isRelaxed = isRelaxed
-        return self
-
-    def TestDynamicOutputShape(self, hasDynamicOutputShape):
-        self.hasDynamicOutputShape = hasDynamicOutputShape
         return self
 
     # Sets the version of the model in compliance tests. Set to None to disable the test.
@@ -585,23 +577,14 @@ class Model:
         for op in operations:
             self.TopologicalSortHelper(op, deps, visited)
 
-    def SetOutputUnspecified(self):
-        for op in self.operands:
-            op.dimensions = op.type.dimensions
-        if self.hasDynamicOutputShape:
-            for op in self.GetOutputs():
-                op.ToUnspecifiedDim()
-        return self
-
     def Compile(self):
         if self.compiled:
             return self
         self.SetOperandIndex()
         self.SetOperandInsAndOuts()
         self.TopologicalSort()
-        self.SetOutputUnspecified()
-        # Do not check compliance for relaxed mode and dynamic output shape tests.
-        if self.isRelaxed or self.hasDynamicOutputShape:
+        # Do not check compliance for relaxed mode tests.
+        if self.isRelaxed:
             self.IntroducedIn(None)
         self.compiled = True
         return self
@@ -612,7 +595,6 @@ class Model:
         for o in self.GetOutputs():
             o.Feed(feedDict[1])
         return self
-
 
 # To track implicitly convertible variation types
 class ImplicitVariation:
@@ -640,11 +622,10 @@ class ModelVariation:
         self.targetOperands = {}
         self.name = name
 
-    # Make a deepcopy of the model and apply the change
-    def ApplyTo(self, modelOrigin):
-        model = copy.deepcopy(modelOrigin)
-        model.compiled = False
-        model.dumped = False
+    # Apply the model variation.
+    def ApplyTo(self, model):
+        assert not model.compiled
+        assert not model.dumped
 
         if not self.targetOperands:
             self.AutoIdentify(model)
@@ -899,18 +880,6 @@ class ActivationConverter(ModelVariation, ImplicitVariation):
                 v = np.minimum(v, high)
             return op.SetValueFromNumpy(v)
 
-class DynamicOutputShapeConverter(ModelVariation):
-    def __init__(self, name=None):
-        ModelVariation.__init__(self, name=name)
-
-    def SetToDefaultName(self):
-        self.name = "dynamic_output_shape"
-        return self
-
-    def TransformModel(self, model):
-        model.TestDynamicOutputShape(True)
-        return model
-
 # Convert all constant tensors as model inputs.
 class AllTensorsAsInputsConverter(ModelVariation):
 
@@ -923,6 +892,11 @@ class AllTensorsAsInputsConverter(ModelVariation):
 
     def TransformModel(self, model):
         if len(model.operations) != 1:
+            raise SkipVariation
+
+        # TODO: Re-enable after the corresponding null-deref bugs are addressed.
+        if model.operations[0].optype in [
+                "MEAN", "PAD", "SQUEEZE", "STRIDED_SLICE", "TRANSPOSE", "RESHAPE"]:
             raise SkipVariation
 
         # Find all constant tensors.
@@ -967,7 +941,6 @@ class AllInputsAsInternalCoverter(ModelVariation):
         model.UpdateEquivalentOperands([op.ConvertTo(Internal) for op in modelInputs])
         return model
 
-
 # An example is always attached to a model, and could have multiple variations
 class Example:
     examples = []
@@ -976,7 +949,7 @@ class Example:
     def __init__(self, *args, model=None, name=None):
         self.model = Model.models[-1] if model is None else model
         self.name = name
-        self.expectedMultinomialDistributionTolerance = None
+        self.expectedMultinomialDistributionTolerance = 0
         self.expectFailure = False
         self.testDynamicOutputShape = True
         self.testLifeTimeVariation = True
@@ -1124,11 +1097,9 @@ class Example:
 
     def Dump(self, DumpModel, model_fd, DumpExample, example_fd, DumpTest, test_fd):
         if self.testLifeTimeVariation and len(self.model.operations) == 1 and \
-                self.expectedMultinomialDistributionTolerance is None:
+                self.expectedMultinomialDistributionTolerance == 0:
             self.AddVariations(AllTensorsAsInputsConverter())
             self.AddVariations(AllInputsAsInternalCoverter())
-        if self.testDynamicOutputShape:
-            self.AddVariations(DynamicOutputShapeConverter())
         [v.SetToDefaultName() for vs in self.variations for v in vs if v.name is None]
 
         for feedDict in self.feedDicts:
@@ -1148,15 +1119,13 @@ class Example:
                 # Concat names for test and examples
                 varNames = [v.name for v in variationList]
                 self.testName = NamedTest(FileNames.specName, self.model.name, self.name, *varNames)
-                self.examplesName = GlobalVariable("examples", self.model.name, self.name,
+                self.examplesName = GlobalVariable("test_model", self.model.name, self.name,
                                                    *varNames)
                 if str(self.testName) in Example.versionOverrides:
                     self.model.IntroducedIn(Example.versionOverrides[str(self.testName)])
                 self.model.WithSuffix(*varNames).Compile()
 
                 # Dump files
-                if DumpModel is not None and model_fd is not None:
-                    DumpModel(self.model, model_fd)
                 if DumpExample is not None and example_fd is not None:
                     DumpExample(self, example_fd)
                 if DumpTest is not None and test_fd is not None:
@@ -1176,7 +1145,7 @@ class Example:
 
     # Specifies that this example is expected to fail during compilation or execution.
     def ExpectFailure(self):
-        assert self.expectedMultinomialDistributionTolerance is None
+        assert self.expectedMultinomialDistributionTolerance == 0
         self.expectFailure = True
         return self
 
@@ -1191,19 +1160,15 @@ class Example:
 class FileNames:
     specFiles = []
     specNames = []
-    modelFiles = []
     exampleFiles = []
-    testFiles = []
     specFile = ""
     specName = ""
-    modelFile = ""
     exampleFile = ""
-    testFile = ""
     version = ""
     fileIndex = 0
 
     @staticmethod
-    def InitializeFileLists(spec, model, example, test):
+    def InitializeFileLists(spec, example):
         # get all spec files and target files
         if os.path.isfile(spec):
             FileNames.specFiles = [os.path.abspath(spec)]
@@ -1214,9 +1179,7 @@ class FileNames:
             assert False, "%s is neither a file or a directory"%spec
         FileNames.specNames = [re.sub(r"\..*", "", os.path.basename(f))
             for f in FileNames.specFiles]
-        FileNames.modelFiles = FileNames.ParseTargetFiles(model, ".model.cpp")
         FileNames.exampleFiles = FileNames.ParseTargetFiles(example, ".example.cpp")
-        FileNames.testFiles = FileNames.ParseTargetFiles(test, ".test.cpp")
 
     @staticmethod
     def ParseTargetFiles(arg, ext):
@@ -1238,9 +1201,7 @@ class FileNames:
             return False
         FileNames.specFile = FileNames.specFiles[FileNames.fileIndex]
         FileNames.specName = FileNames.specNames[FileNames.fileIndex]
-        FileNames.modelFile = FileNames.modelFiles[FileNames.fileIndex]
         FileNames.exampleFile = FileNames.exampleFiles[FileNames.fileIndex]
-        FileNames.testFile = FileNames.testFiles[FileNames.fileIndex]
         FileNames.fileIndex += 1
         NamedObject.existingNames = set()
         NamedVariable.existingNames = set()
@@ -1267,7 +1228,7 @@ class Configuration:
         return Configuration.use_shm_for_weights
 
 def GetTestGeneratorMTime():
-    tgFiles = ['test_generator.py', 'cts_generator.py', 'vts_generator.py']
+    tgFiles = ['test_generator.py', 'example_generator.py']
     tgDir = os.path.dirname(__file__)
     return max(os.path.getmtime(os.path.join(tgDir, filename))
                for filename in tgFiles)
@@ -1275,9 +1236,8 @@ def GetTestGeneratorMTime():
 def MightNeedRegeneration():
     specTime = os.path.getmtime(FileNames.specFile)
     tgTime = GetTestGeneratorMTime()
-    return any(not os.path.exists(filename) or os.path.getmtime(filename) <= max(specTime, tgTime)
-               for filename in [FileNames.modelFile, FileNames.exampleFile, FileNames.testFile]
-               if filename is not None)
+    return not os.path.exists(FileNames.exampleFile) or \
+           os.path.getmtime(FileNames.exampleFile) <= max(specTime, tgTime)
 
 def Read(filename):
     with open(filename) as reader:
@@ -1323,8 +1283,6 @@ def ArgumentParser():
     parser = argparse.ArgumentParser()
     parser.add_argument("spec", help="the spec file or directory")
     parser.add_argument("--hook", help="hook mode", action='store_true')
-    parser.add_argument("-m", "--model", help="the output model file or directory")
-    parser.add_argument("-t", "--test", help="the output test file or directory")
     return parser
 
 def ParseArgs(parser):
@@ -1332,40 +1290,28 @@ def ParseArgs(parser):
     Configuration.hook_mode = args.hook
     return args
 
-def Run(InitializeFiles=None, DumpModel=None, DumpExample=None, DumpTest=None):
+def Run(InitializeFiles=None, DumpExample=None):
     exec_scope = GetExecScope()
     while FileNames.NextFile():
         try:
             if not MightNeedRegeneration():
                 continue
             exec(Read(FileNames.specFile), exec_scope)
-            model_buf = io.StringIO() if FileNames.modelFile else None
             example_buf = io.StringIO() if FileNames.exampleFile else None
-            test_buf = io.StringIO() if FileNames.testFile else None
-            InitializeFiles(model_fd=model_buf,
-                            example_fd=example_buf,
-                            test_fd=test_buf)
-            Example.DumpAllExamples(
-                DumpModel=DumpModel, model_fd=model_buf,
-                DumpExample=DumpExample, example_fd=example_buf,
-                DumpTest=DumpTest, test_fd=test_buf)
-            for buf, filename in [
-                    (model_buf, FileNames.modelFile),
-                    (example_buf, FileNames.exampleFile),
-                    (test_buf, FileNames.testFile),
-            ]:
-                if filename is None:
-                    continue
-                if Configuration.hook_mode and (not os.path.exists(filename) or
-                                                Read(filename) != buf.getvalue()):
-                    print(('\n{filename} is out of date. '
-                           'Please run {generate_all_tests_sh} before uploading.\n').format(
-                                   filename=filename,
-                                   generate_all_tests_sh=os.path.abspath(os.path.join(
-                                           os.path.dirname(__file__), '..', '..', 'runtime', 'test',
-                                           'specs', 'generate_all_tests.sh'))))
-                    sys.exit(1)
-                AtomicWrite(filename, buf.getvalue())
+            InitializeFiles(example_fd=example_buf)
+            Example.DumpAllExamples(DumpExample=DumpExample, example_fd=example_buf)
+            if FileNames.exampleFile is None:
+                continue
+            if Configuration.hook_mode and (not os.path.exists(FileNames.exampleFile) or
+                                            Read(FileNames.exampleFile) != example_buf.getvalue()):
+                print(('\n{filename} is out of date. '
+                        'Please run {generate_all_tests_sh} before uploading.\n').format(
+                                filename=FileNames.exampleFile,
+                                generate_all_tests_sh=os.path.abspath(os.path.join(
+                                        os.path.dirname(__file__), '..', '..', 'runtime', 'test',
+                                        'specs', 'generate_all_tests.sh'))))
+                sys.exit(1)
+            AtomicWrite(FileNames.exampleFile, example_buf.getvalue())
         except Exception:
             traceback.print_exc()
             sys.exit("Exception raised when processing {}".format(FileNames.specFile))
