@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef ANDROID_ML_NN_COMMON_VALIDATEHAL_H
-#define ANDROID_ML_NN_COMMON_VALIDATEHAL_H
+#ifndef ANDROID_FRAMEWORKS_ML_NN_COMMON_VALIDATE_HAL_H
+#define ANDROID_FRAMEWORKS_ML_NN_COMMON_VALIDATE_HAL_H
 
 #include "HalInterfaces.h"
 
@@ -44,22 +44,22 @@ bool validateModel(const T_Model& model);
 // are correctly defined, as these are specific to each implementation.
 // Each driver should do their own validation of OEM types.
 template <class T_Model>
-bool validateRequest(const Request& request, const T_Model& model);
+bool validateRequest(const hal::Request& request, const T_Model& model);
 
 // Verfies that the execution preference is valid.
-bool validateExecutionPreference(ExecutionPreference preference);
+bool validateExecutionPreference(hal::ExecutionPreference preference);
 
-bool validOperationType(V1_0::OperationType operation);
-bool validOperationType(V1_1::OperationType operation);
-bool validOperationType(V1_2::OperationType operation);
+bool validOperationType(hal::V1_0::OperationType operation);
+bool validOperationType(hal::V1_1::OperationType operation);
+bool validOperationType(hal::V1_2::OperationType operation);
 
-bool validOperandType(V1_0::OperandType operand);
-bool validOperandType(V1_2::OperandType operand);
+bool validOperandType(hal::V1_0::OperandType operand);
+bool validOperandType(hal::V1_2::OperandType operand);
 
 // Verfies that the memory pool is valid in the specified HAL version.
-bool validatePool(const hidl_memory& pool, HalVersion ver = HalVersion::LATEST);
+bool validatePool(const hal::hidl_memory& pool, HalVersion ver = HalVersion::LATEST);
 
 }  // namespace nn
 }  // namespace android
 
-#endif  // ANDROID_ML_NN_COMMON_VALIDATEHAL_H
+#endif  // ANDROID_FRAMEWORKS_ML_NN_COMMON_VALIDATE_HAL_H

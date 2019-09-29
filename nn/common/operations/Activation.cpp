@@ -14,17 +14,22 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "Operations"
+
 #include "ActivationFunctor.h"
 #include "CpuOperationUtils.h"
+#include "HalInterfaces.h"
 #include "OperationResolver.h"
 
-#include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
-#include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
+#include <tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h>
+#include <tensorflow/lite/kernels/internal/optimized/optimized_ops.h>
 
 #include "Tracing.h"
 
 namespace android {
 namespace nn {
+
+using namespace hal;
 
 namespace activation {
 

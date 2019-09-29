@@ -24,59 +24,30 @@ See that script for details on how this script is used.
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-import argparse
-from functools import reduce
-import math
 import numpy as np
 import os
-import re
 import struct
-import sys
-import contextlib
-import pprint
 
-# Stuff from test generator
 import test_generator as tg
-from test_generator import ActivationConverter
-from test_generator import BoolScalar
-from test_generator import Configuration
-from test_generator import DataTypeConverter
-from test_generator import DataLayoutConverter
-from test_generator import Example
-from test_generator import Float16Scalar
-from test_generator import Float32Scalar
-from test_generator import Float32Vector
-from test_generator import IgnoredOutput
-from test_generator import Input
-from test_generator import Int32Scalar
-from test_generator import Int32Vector
-from test_generator import Internal
-from test_generator import Model
-from test_generator import Operand
-from test_generator import Output
-from test_generator import Parameter
-from test_generator import ParameterAsInputConverter
-from test_generator import RelaxedModeConverter
-from test_generator import SmartOpen
-from test_generator import SymmPerChannelQuantParams
 
 # Dumping methods that shared with CTS generator
-from cts_generator import DumpCtsExample
 from cts_generator import DumpCtsIsIgnored
+
+target_hal_version = None
 
 # Take a model from command line
 def ParseCmdLine():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("spec", help="the spec file")
+    global target_hal_version
+    parser = tg.ArgumentParser()
     parser.add_argument(
-        "-m", "--model", help="the output model file", default="-")
-    parser.add_argument(
-        "-e", "--example", help="the output example file", default="-")
-    parser.add_argument(
-        "-t", "--test", help="the output test file", default="-")
-    args = parser.parse_args()
-    tg.FileNames.InitializeFileLists(
-        args.spec, args.model, args.example, args.test)
+        "--target_hal_version",
+        help="the HAL version of the output",
+        required=True,
+        choices=["V1_0", "V1_1", "V1_2"])
+    args = tg.ParseArgs(parser)
+    target_hal_version = args.target_hal_version
+    args.example = None  # VTS generator does not generate examples. See cts_generator.py.
+    tg.FileNames.InitializeFileLists(args.spec, args.model, args.example, args.test)
 
 # Generate operands in VTS format
 def generate_vts_operands(model):
@@ -95,7 +66,7 @@ def generate_vts_operands(model):
   op_definitions = []
   extra_params_definitions = []
   for index, o in enumerate(model.operands):
-    length = o.type.GetByteSize() if isinstance(o, Parameter) else 0
+    length = o.type.GetByteSize() if isinstance(o, tg.Parameter) else 0
     add_extra_params = o.type.extraParams is not None and not o.type.extraParams.hide
     op = {
         "operand_type": o.type.type,
@@ -104,7 +75,7 @@ def generate_vts_operands(model):
         "scale": tg.PrettyPrintAsFloat(o.type.scale),
         "zero_point": str(int(o.type.zeroPoint)),
         "lifetime": o.lifetime,
-        "offset": offset if isinstance(o, Parameter) else 0,
+        "offset": offset if isinstance(o, tg.Parameter) else 0,
         "length": length,
         "extraParams": "" if not add_extra_params else "\n            .extraParams = std::move(extraParams%d)," % (index,),
     }
@@ -133,7 +104,7 @@ def generate_vts_operands(model):
 
 # Generate VTS operand values
 def generate_vts_operand_values(operands):
-    weights = [o for o in operands if isinstance(o, Parameter)]
+    weights = [o for o in operands if isinstance(o, tg.Parameter)]
     binit = []
     for w in weights:
         ty = w.type.type
@@ -184,9 +155,9 @@ def generate_vts_operations(model):
     vts_ops = [generate_vts_operation(op, model) for op in model.operations]
     return ",\n".join(vts_ops)
 
-def generate_vts_model(model, model_file):
+def generate_vts_model(model, model_fd):
   operand_values_fmt = ""
-  if Configuration.useSHM():
+  if tg.Configuration.useSHM():
     # Boilerplate code for passing weights in shared memory
     operand_values_fmt = """\
     std::vector<uint8_t> operandValues = {{}};
@@ -194,11 +165,11 @@ def generate_vts_model(model, model_file):
 
     // Allocate segment of android shared memory, wrapped in hidl_memory.
     // This object will be automatically freed when sharedMemory is destroyed.
-    hidl_memory sharedMemory = allocateSharedMemory(sizeof(data));
+    hidl_memory sharedMemory = ::android::nn::allocateSharedMemory(sizeof(data));
 
     // Mmap ashmem into usable address and hold it within the mappedMemory object.
     // MappedMemory will automatically munmap the memory when it is destroyed.
-    sp<IMemory> mappedMemory = mapMemory(sharedMemory);
+    sp<::android::hidl::memory::V1_0::IMemory> mappedMemory = mapMemory(sharedMemory);
 
     if (mappedMemory != nullptr) {{
         // Retrieve the mmapped pointer.
@@ -229,7 +200,6 @@ def generate_vts_model(model, model_file):
   operand_values = operand_values_fmt.format(**operand_values_val)
   #  operand_values = operand_values_fmt
   model_fmt = """\
-// Create the model
 Model {create_test_model_name}() {{
 {operand_decls}
 
@@ -260,75 +230,91 @@ Model {create_test_model_name}() {{
       "relaxed_field":
         "\n        .relaxComputationFloat32toFloat16 = true," if (model.isRelaxed) else ""
   }
-  print(model_fmt.format(**model_dict), file = model_file)
+  print(model_fmt.format(**model_dict), file=model_fd)
 
-def generate_vts(model, model_file):
-  assert model.compiled
-  generate_vts_model(model, model_file)
-  DumpCtsIsIgnored(model, model_file)
+def generate_vts(model, model_fd):
+    assert model.compiled
+    # Do not generate DynamicOutputShapeTest for pre-1.2 VTS.
+    if model.hasDynamicOutputShape and target_hal_version < "V1_2":
+        return
+    namespace = "android::hardware::neuralnetworks::{hal_version}::generated_tests::{spec_name}".format(
+        spec_name=tg.FileNames.specName, hal_version=target_hal_version)
+    print("namespace {namespace} {{\n".format(namespace=namespace), file=model_fd)
+    generate_vts_model(model, model_fd)
+    DumpCtsIsIgnored(model, model_fd)
+    print("}} // namespace {namespace}".format(namespace=namespace), file=model_fd)
 
-def generate_vts_test(example, test_file):
+def generate_vts_test(example, test_fd):
+    # Do not generate DynamicOutputShapeTest for pre-1.2 VTS.
+    if example.model.hasDynamicOutputShape and target_hal_version < "V1_2":
+        return
+
+    generated_vts_namespace = "android::hardware::neuralnetworks::{hal_version}::generated_tests::{spec_name}".format(
+        spec_name=tg.FileNames.specName, hal_version=target_hal_version)
+    generated_cts_namespace = "generated_tests::{spec_name}".format(spec_name=tg.FileNames.specName)
     testTemplate = """\
-TEST_F({test_case_name}, {test_name}) {{
-  generated_tests::Execute(device,
-                           {namespace}::{create_model_name},
-                           {namespace}::{is_ignored_name},
-                           {namespace}::get_{examples_name}(){test_dynamic_output_shape});\n}}
+namespace {generated_cts_namespace} {{
 
-TEST_F(ValidationTest, {test_name}) {{
-  const Model model = {namespace}::{create_model_name}();
-  const std::vector<Request> requests = createRequests({namespace}::get_{examples_name}());
-  validateEverything(model, requests);
-}}\n
+std::vector<::test_helper::MixedTypedExample>& get_{examples_name}();
+
+}} // namespace {generated_cts_namespace}
+
+namespace {generated_vts_namespace} {{
+
+Model {create_model_name}();
+bool {is_ignored_name}(int);
 """
-    if example.model.hasDynamicOutputShape:
-        print("#ifdef NN_TEST_DYNAMIC_OUTPUT_SHAPE", file=test_fd)
+
+    if not example.expectFailure:
+        testTemplate += """
+TEST_F({test_case_name}, {test_name}) {{
+  Execute(device,
+          {create_model_name},
+          {is_ignored_name},
+          ::{generated_cts_namespace}::get_{examples_name}(){test_dynamic_output_shape});
+}}
+"""
+
+    testTemplate += """
+TEST_F(ValidationTest, {test_name}) {{
+  const Model model = {create_model_name}();
+  const std::vector<Request> requests = createRequests(::{generated_cts_namespace}::get_{examples_name}());
+  {validation_method}(model, requests);
+}}
+
+}} // namespace {generated_vts_namespace}
+"""
+
     print(testTemplate.format(
             test_case_name="DynamicOutputShapeTest" if example.model.hasDynamicOutputShape \
                            else "NeuralnetworksHidlTest",
             test_name=str(example.testName),
-            namespace=tg.FileNames.specName,
+            generated_vts_namespace=generated_vts_namespace,
+            generated_cts_namespace=generated_cts_namespace,
+            hal_version=target_hal_version,
             create_model_name=str(example.model.createTestFunctionName),
             is_ignored_name=str(example.model.isIgnoredFunctionName),
             examples_name=str(example.examplesName),
-            test_dynamic_output_shape=", true" if example.model.hasDynamicOutputShape else ""
+            test_dynamic_output_shape=", true" if example.model.hasDynamicOutputShape else "",
+            validation_method="validateFailure" if example.expectFailure else "validateEverything",
         ), file=test_fd)
-    if example.model.hasDynamicOutputShape:
-        print("#endif", file=test_fd)
 
-def InitializeFiles(model_fd, example_fd, test_fd):
-    fileHeader = "// clang-format off\n// Generated file (from: {spec_file}). Do not edit"
-    testFileHeader = """\
-// Generated from: {spec_file}.
-namespace {spec_name} {{
-// Generated {spec_name} test
-#include "{example_file}"
-// Generated model constructor
-#include "{model_file}"
-}} // namespace {spec_name}\n"""
-    # This regex is to remove prefix and get relative path for #include
-    pathRegex = r".*frameworks/ml/nn/(runtime/test/generated/)?"
+def InitializeFiles(model_fd, test_fd, example_fd=None):
+    assert example_fd is None, 'VTS generator does not generate examples'
     specFileBase = os.path.basename(tg.FileNames.specFile)
-    print(fileHeader.format(spec_file=specFileBase), file=model_fd)
-    print(fileHeader.format(spec_file=specFileBase), file=example_fd)
-    print(testFileHeader.format(
-        spec_file=specFileBase,
-        model_file=re.sub(pathRegex, "", tg.FileNames.modelFile),
-        example_file=re.sub(pathRegex, "", tg.FileNames.exampleFile),
-        spec_name=tg.FileNames.specName), file=test_fd)
+    fileHeader = """\
+// Generated from {spec_file}
+// DO NOT EDIT
+// clang-format off
+#include "GeneratedTests.h"
+""".format(spec_file=specFileBase)
+    if model_fd is not None:
+        print(fileHeader, file=model_fd)
+    if test_fd is not None:
+        print(fileHeader, file=test_fd)
 
 if __name__ == "__main__":
     ParseCmdLine()
-    while tg.FileNames.NextFile():
-        print("Generating test(s) from spec: %s" % tg.FileNames.specFile, file=sys.stderr)
-        exec (open(tg.FileNames.specFile, "r").read())
-        print("Output VTS model: %s" % tg.FileNames.modelFile, file=sys.stderr)
-        print("Output example:" + tg.FileNames.exampleFile, file=sys.stderr)
-        with SmartOpen(tg.FileNames.modelFile) as model_fd, \
-             SmartOpen(tg.FileNames.exampleFile) as example_fd, \
-             SmartOpen(tg.FileNames.testFile, mode="a") as test_fd:
-            InitializeFiles(model_fd, example_fd, test_fd)
-            Example.DumpAllExamples(
-                DumpModel=generate_vts, model_fd=model_fd,
-                DumpExample=DumpCtsExample, example_fd=example_fd,
-                DumpTest=generate_vts_test, test_fd=test_fd)
+    tg.Run(InitializeFiles=InitializeFiles,
+           DumpTest=generate_vts_test,
+           DumpModel=generate_vts)

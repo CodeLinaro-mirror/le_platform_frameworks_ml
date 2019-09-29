@@ -21,13 +21,15 @@
 #include "OperationResolver.h"
 #include "Tracing.h"
 
-#include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
+#include <tensorflow/lite/kernels/internal/reference/reference_ops.h>
 
 #include <functional>
 #include <vector>
 
 namespace android {
 namespace nn {
+
+using namespace hal;
 
 namespace resize_image {
 

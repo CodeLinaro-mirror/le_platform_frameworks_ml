@@ -16,8 +16,8 @@
 
 // Provides C++ classes to more easily use the Neural Networks API.
 
-#ifndef ANDROID_ML_NN_RUNTIME_NEURAL_NETWORKS_WRAPPER_H
-#define ANDROID_ML_NN_RUNTIME_NEURAL_NETWORKS_WRAPPER_H
+#ifndef ANDROID_FRAMEWORKS_ML_NN_RUNTIME_NEURAL_NETWORKS_WRAPPER_H
+#define ANDROID_FRAMEWORKS_ML_NN_RUNTIME_NEURAL_NETWORKS_WRAPPER_H
 
 #include "NeuralNetworks.h"
 
@@ -127,15 +127,16 @@ struct OperandType {
         };
     }
 
-    OperandType(Type type, std::vector<uint32_t> data, float scale, int32_t zeroPoint,
-                SymmPerChannelQuantParams&& channelQuant)
+    OperandType(Type type, std::vector<uint32_t> data, SymmPerChannelQuantParams&& channelQuant)
         : dimensions(std::move(data)), channelQuant(std::move(channelQuant)) {
+        assert(type == Type::TENSOR_QUANT8_SYMM_PER_CHANNEL);
+
         operandType = {
                 .type = static_cast<int32_t>(type),
                 .dimensionCount = static_cast<uint32_t>(dimensions.size()),
                 .dimensions = dimensions.size() > 0 ? dimensions.data() : nullptr,
-                .scale = scale,
-                .zeroPoint = zeroPoint,
+                .scale = 0.0f,
+                .zeroPoint = 0,
         };
     }
 };
@@ -465,4 +466,4 @@ class Execution {
 }  // namespace nn
 }  // namespace android
 
-#endif  //  ANDROID_ML_NN_RUNTIME_NEURAL_NETWORKS_WRAPPER_H
+#endif  //  ANDROID_FRAMEWORKS_ML_NN_RUNTIME_NEURAL_NETWORKS_WRAPPER_H

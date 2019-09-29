@@ -18,13 +18,15 @@
 
 #include <gtest/gtest.h>
 
+#include "HalInterfaces.h"
 #include "ModelBuilder.h"
 #include "TestNeuralNetworksWrapper.h"
 #include "Utils.h"
 
 namespace compliance_test {
 
-using namespace ::android::nn;
+using namespace android::nn;
+using namespace hal;
 using HidlModel = V1_2::Model;
 using WrapperModel = test_wrapper::Model;
 using WrapperOperandType = test_wrapper::OperandType;
@@ -32,13 +34,11 @@ using WrapperType = test_wrapper::Type;
 
 // Creates a HIDL model from a creator of the wrapper model.
 static HidlModel createHidlModel(std::function<void(WrapperModel*)> createModel) {
-    HidlModel hidlModel;
     WrapperModel wrapperModel;
     createModel(&wrapperModel);
     EXPECT_EQ(wrapperModel.finish(), test_wrapper::Result::NO_ERROR);
     ModelBuilder* modelBuilder = reinterpret_cast<ModelBuilder*>(wrapperModel.getHandle());
-    modelBuilder->setHidlModel(&hidlModel);
-    return hidlModel;
+    return modelBuilder->makeHidlModel();
 }
 
 void ComplianceTest::testAvailableSinceV1_2(std::function<void(WrapperModel*)> createModel) {

@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef ANDROID_FRAMEWORK_ML_NN_RUNTIME_TEST_FUZZING_RANDOM_GRAPH_GENERATOR_UTILS_H
-#define ANDROID_FRAMEWORK_ML_NN_RUNTIME_TEST_FUZZING_RANDOM_GRAPH_GENERATOR_UTILS_H
+#ifndef ANDROID_FRAMEWORKS_ML_NN_RUNTIME_TEST_FUZZING_RANDOM_GRAPH_GENERATOR_UTILS_H
+#define ANDROID_FRAMEWORKS_ML_NN_RUNTIME_TEST_FUZZING_RANDOM_GRAPH_GENERATOR_UTILS_H
 
 #include <chrono>
 #include <fstream>
@@ -138,7 +138,6 @@ inline std::string joinStr(const std::string& joint, int limit, const std::vecto
     }
 }
 
-// TODO: Currently only 1.0 operations and operand types.
 static const char* kOperationNames[] = {
         "ADD",
         "AVERAGE_POOL_2D",
@@ -455,4 +454,4 @@ inline void randomShuffle(std::vector<T>* vec) {
 }  // namespace nn
 }  // namespace android
 
-#endif  // ANDROID_FRAMEWORK_ML_NN_RUNTIME_TEST_FUZZING_RANDOM_GRAPH_GENERATOR_UTILS_H
+#endif  // ANDROID_FRAMEWORKS_ML_NN_RUNTIME_TEST_FUZZING_RANDOM_GRAPH_GENERATOR_UTILS_H

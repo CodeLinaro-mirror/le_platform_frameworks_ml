@@ -18,6 +18,7 @@
 
 #include "Callbacks.h"
 #include "CompilationBuilder.h"
+#include "HalInterfaces.h"
 #include "Manager.h"
 #include "ModelBuilder.h"
 #include "NeuralNetworks.h"
@@ -33,12 +34,13 @@
 
 namespace android {
 
+using namespace nn::hal;
 using CompilationBuilder = nn::CompilationBuilder;
 using Device = nn::Device;
 using DeviceManager = nn::DeviceManager;
-using HidlModel = hardware::neuralnetworks::V1_2::Model;
-using HidlToken = hardware::hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
-using PreparedModelCallback = hardware::neuralnetworks::V1_2::implementation::PreparedModelCallback;
+using HidlModel = V1_2::Model;
+using HidlToken = hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
+using PreparedModelCallback = nn::PreparedModelCallback;
 using Result = nn::test_wrapper::Result;
 using SampleDriver = nn::sample_driver::SampleDriver;
 using WrapperCompilation = nn::test_wrapper::Compilation;
@@ -49,7 +51,7 @@ using WrapperOperandType = nn::test_wrapper::OperandType;
 using WrapperType = nn::test_wrapper::Type;
 
 template <typename T>
-using MQDescriptorSync = ::android::hardware::MQDescriptorSync<T>;
+using MQDescriptorSync = hardware::MQDescriptorSync<T>;
 
 namespace {
 
@@ -241,7 +243,7 @@ class TestDriver12 : public SampleDriver {
                                 actualCallback);
     }
 
-private:
+   private:
     ErrorStatus mErrorStatus;
 };
 
@@ -306,9 +308,9 @@ class TestDriver10 : public V1_0::IDevice {
 // This class adds some simple utilities on top of WrapperCompilation in order
 // to provide access to certain features from CompilationBuilder that are not
 // exposed by the base class.
-template<typename DriverClass>
+template <typename DriverClass>
 class TestCompilation : public WrapperCompilation {
-public:
+   public:
     // Allow dummying up the error status for all executions from this
     // compilation.  If errorStatus is NONE, then execute behaves
     // normally (and sends back the actual execution status).
@@ -431,20 +433,21 @@ class ExecutionTestTemplate
 
    private:
     static WrapperModel makeModel() {
-        static const WrapperOperandType tensorType(WrapperType::TENSOR_FLOAT32, { 1 });
+        static const WrapperOperandType tensorType(WrapperType::TENSOR_FLOAT32, {1});
 
         WrapperModel model;
         uint32_t input = model.addOperand(&tensorType);
         uint32_t output = model.addOperand(&tensorType);
-        model.addOperation(ANEURALNETWORKS_FLOOR, { input }, { output });
-        model.identifyInputsAndOutputs({ input }, { output } );
+        model.addOperation(ANEURALNETWORKS_FLOOR, {input}, {output});
+        model.identifyInputsAndOutputs({input}, {output});
         assert(model.finish() == Result::NO_ERROR);
 
         return model;
     }
 };
 
-template<class DriverClass> void ExecutionTestTemplate<DriverClass>::TestWait() {
+template <class DriverClass>
+void ExecutionTestTemplate<DriverClass>::TestWait() {
     SCOPED_TRACE(kName);
     // Skip Introspection API tests when CPU only flag is forced on.
     if (kUseIntrospectionAPI && DeviceManager::get()->getUseCpuOnly()) {

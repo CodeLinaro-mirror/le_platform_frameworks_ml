@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef FRAMEWORKS_ML_NN_RNN_H
-#define FRAMEWORKS_ML_NN_RNN_H
+#ifndef ANDROID_FRAMEWORKS_ML_NN_COMMON_OPERATIONS_RNN_H
+#define ANDROID_FRAMEWORKS_ML_NN_COMMON_OPERATIONS_RNN_H
 
 #include "ActivationFunctor.h"
 #include "HalOperation.h"
@@ -28,10 +28,12 @@ struct Shape;
 
 class RNN {
    public:
-    RNN(const Operation& operation, std::vector<RunTimeOperandInfo>& operands);
+    RNN(const hardware::neuralnetworks::V1_2::Operation& operation,
+        std::vector<RunTimeOperandInfo>& operands);
 
-    static bool Prepare(const Operation& operation, std::vector<RunTimeOperandInfo>& operands,
-                        Shape* hiddenStateShape, Shape* outputShape);
+    static bool Prepare(const hardware::neuralnetworks::V1_2::Operation& operation,
+                        std::vector<RunTimeOperandInfo>& operands, Shape* hiddenStateShape,
+                        Shape* outputShape);
     bool Eval();
 
     static constexpr int kInputTensor = 0;
@@ -75,4 +77,4 @@ class RNN {
 }  // namespace nn
 }  // namespace android
 
-#endif  // FRAMEWORKS_ML_NN_RNN_H
+#endif  // ANDROID_FRAMEWORKS_ML_NN_COMMON_OPERATIONS_RNN_H

@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef ANDROID_ML_NN_COMMON_CPU_OPERATION_UTILS_H
-#define ANDROID_ML_NN_COMMON_CPU_OPERATION_UTILS_H
+#ifndef ANDROID_FRAMEWORKS_ML_NN_COMMON_CPU_OPERATION_UTILS_H
+#define ANDROID_FRAMEWORKS_ML_NN_COMMON_CPU_OPERATION_UTILS_H
 
 #include "OperationsUtils.h"
 
@@ -23,7 +23,7 @@
 #include <cmath>
 #include <limits>
 
-#include "tensorflow/lite/kernels/internal/types.h"
+#include <tensorflow/lite/kernels/internal/types.h>
 
 namespace android {
 namespace nn {
@@ -195,4 +195,4 @@ class OutputWithLayout {
 }  // namespace nn
 }  // namespace android
 
-#endif  // ANDROID_ML_NN_COMMON_CPU_OPERATION_UTILS_H
+#endif  // ANDROID_FRAMEWORKS_ML_NN_COMMON_CPU_OPERATION_UTILS_H
