@@ -22,6 +22,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -67,32 +68,24 @@ class Device {
     virtual ~Device() = default;
 
     // Introspection methods returning device information
-    virtual const char* getName() const = 0;
-    virtual const char* getVersionString() const = 0;
+    virtual const std::string& getName() const = 0;
+    virtual const std::string& getVersionString() const = 0;
     virtual int64_t getFeatureLevel() const = 0;
     virtual int32_t getType() const = 0;
-    virtual hal::hidl_vec<hal::Extension> getSupportedExtensions() const = 0;
+    virtual const std::vector<hal::Extension>& getSupportedExtensions() const = 0;
 
     // See the MetaModel class in MetaModel.h for more details.
-    virtual void getSupportedOperations(const MetaModel& metaModel,
-                                        hal::hidl_vec<bool>* supportedOperations) const = 0;
+    virtual std::vector<bool> getSupportedOperations(const MetaModel& metaModel) const = 0;
 
     virtual hal::PerformanceInfo getPerformance(hal::OperandType type) const = 0;
     virtual hal::PerformanceInfo getRelaxedFloat32toFloat16PerformanceScalar() const = 0;
     virtual hal::PerformanceInfo getRelaxedFloat32toFloat16PerformanceTensor() const = 0;
-    virtual std::pair<uint32_t, uint32_t> getNumberOfCacheFilesNeeded() const = 0;
-    bool isCachingSupported() const;
+    virtual bool isCachingSupported() const = 0;
 
-    virtual int prepareModel(const hal::Model& hidlModel,
-                             hal::ExecutionPreference executionPreference,
-                             const hal::hidl_vec<hal::hidl_handle>& modelCache,
-                             const hal::hidl_vec<hal::hidl_handle>& dataCache,
-                             const hal::CacheToken& token,
-                             std::shared_ptr<PreparedModel>* preparedModel) const = 0;
-    virtual int prepareModelFromCache(const hal::hidl_vec<hal::hidl_handle>& modelCache,
-                                      const hal::hidl_vec<hal::hidl_handle>& dataCache,
-                                      const hal::CacheToken& token,
-                                      std::shared_ptr<PreparedModel>* preparedModel) const = 0;
+    virtual std::pair<int, std::shared_ptr<PreparedModel>> prepareModel(
+            const hal::ModelFactory& makeModel, hal::ExecutionPreference preference,
+            const std::string& cacheDir,
+            const std::optional<hal::CacheToken>& maybeToken) const = 0;
 };
 
 // Manages the NN HAL devices.  Only one instance of this class will exist.
@@ -148,7 +141,7 @@ class DeviceManager {
     }
 
     // Register a test device.
-    void forTest_registerDevice(const char* name, const sp<hal::V1_0::IDevice>& device) {
+    void forTest_registerDevice(const std::string& name, const sp<hal::V1_0::IDevice>& device) {
         registerDevice(name, device);
     }
 
@@ -172,7 +165,7 @@ class DeviceManager {
     DeviceManager();
 
     // Adds a device for the manager to use.
-    void registerDevice(const char* name, const sp<hal::V1_0::IDevice>& device);
+    void registerDevice(const std::string& name, const sp<hal::V1_0::IDevice>& device);
 
     void findAvailableDevices();
 

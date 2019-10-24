@@ -41,14 +41,14 @@ class FibonacciOperationResolver : public IOperationResolver {
 };
 
 // A driver that implements FibonacciExtension.
-// The only supported operation is TEST_VENDOR_FIBONACCI.
+// The only supported operation is EXAMPLE_FIBONACCI.
 class FibonacciDriver : public SampleDriver {
    public:
     FibonacciDriver() : SampleDriver(kDriverName, FibonacciOperationResolver::get()) {}
     hal::Return<void> getSupportedExtensions(getSupportedExtensions_cb cb) override;
-    hal::Return<void> getCapabilities_1_2(getCapabilities_1_2_cb cb) override;
-    hal::Return<void> getSupportedOperations_1_2(const hal::V1_2::Model& model,
-                                                 getSupportedOperations_1_2_cb cb) override;
+    hal::Return<void> getCapabilities_1_3(getCapabilities_1_3_cb cb) override;
+    hal::Return<void> getSupportedOperations_1_3(const hal::V1_3::Model& model,
+                                                 getSupportedOperations_1_3_cb cb) override;
 
     static constexpr char kDriverName[] = "sample-driver-fibonacci-extension";
 };

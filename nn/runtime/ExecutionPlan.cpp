@@ -58,120 +58,32 @@ namespace {
 
 using namespace hal;
 
-// Opens cache file by filename and sets the handle to the opened fd. Returns false on fail. The
-// handle is expected to come in as empty, and is only set to a fd when the function returns true.
-// The file descriptor is always opened with both read and write permission.
-bool createCacheHandle(const std::string& cache, bool createIfNotExist, hidl_handle* handle) {
-    CHECK(handle->getNativeHandle() == nullptr);
-    int fd = open(cache.c_str(), createIfNotExist ? (O_RDWR | O_CREAT) : O_RDWR, S_IRUSR | S_IWUSR);
-    NN_RET_CHECK_GE(fd, 0);
-    native_handle_t* cacheNativeHandle = native_handle_create(1, 0);
-    if (cacheNativeHandle == nullptr) {
-        close(fd);
-        return false;
-    }
-    cacheNativeHandle->data[0] = fd;
-    handle->setTo(cacheNativeHandle, /*shouldOwn=*/true);
-    return true;
-}
-
-// Opens a list of cache files and returns the handle vector. Returns empty vector on fail.
-// The file descriptors are always opened with both read and write permission.
-hidl_vec<hidl_handle> createCacheHandleVec(uint32_t numCacheFiles, const std::string& baseFileName,
-                                           bool createIfNotExist) {
-    CHECK(numCacheFiles <= static_cast<uint32_t>(Constant::MAX_NUMBER_OF_CACHE_FILES));
-    hidl_vec<hidl_handle> handles(numCacheFiles);
-    for (uint32_t i = 0; i < numCacheFiles; i++) {
-        std::string filename = baseFileName + std::to_string(i);
-        VLOG(COMPILATION) << "Cache " << i << ": " << filename;
-        if (!createCacheHandle(filename, createIfNotExist, &handles[i])) {
-            return hidl_vec<hidl_handle>();
-        }
-    }
-    return handles;
-}
-
-// Maps token to cache file names and sets the handle vectors to the opened fds. Returns false on
-// fail and leaves the vectors empty. Each vector is expected to come in as empty.
-bool getCacheHandles(const std::string& cacheDir, const uint8_t* token,
-                     const std::pair<uint32_t, uint32_t>& numCacheFiles, bool createIfNotExist,
-                     hidl_vec<hidl_handle>* modelCache, hidl_vec<hidl_handle>* dataCache) {
-    // The filename includes ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN * 2 characters for token,
-    // and 1 character for model/data cache identifier.
-    std::string filename(ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN * 2 + 1, '0');
-    for (uint32_t i = 0; i < ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN; i++) {
-        filename[i * 2] = 'A' + (token[i] & 0x0F);
-        filename[i * 2 + 1] = 'A' + (token[i] >> 4);
-    }
-    CHECK(cacheDir.empty() || cacheDir.back() == '/');
-    std::string cacheFileName = cacheDir + filename;
-
-    cacheFileName[ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN * 2] = '1';
-    *modelCache = createCacheHandleVec(numCacheFiles.first, cacheFileName, createIfNotExist);
-    if (modelCache->size() != numCacheFiles.first) {
-        return false;
-    }
-    cacheFileName[ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN * 2] = '2';
-    *dataCache = createCacheHandleVec(numCacheFiles.second, cacheFileName, createIfNotExist);
-    if (dataCache->size() != numCacheFiles.second) {
-        modelCache->resize(0);
-        return false;
-    }
-    return true;
-}
-
-// Tries to compile directly from cache, returns false on fail.
-bool compileFromCache(const std::shared_ptr<Device>& device, const std::string& cacheDir,
-                      const uint8_t* token, std::shared_ptr<PreparedModel>* preparedModel) {
-    CHECK(token != nullptr && device != nullptr);
-    VLOG(COMPILATION) << "compileFromCache";
-    *preparedModel = nullptr;
-    CacheToken cacheToken(token);
-    hidl_vec<hidl_handle> modelCache, dataCache;
-    NN_RET_CHECK(getCacheHandles(cacheDir, token, device->getNumberOfCacheFilesNeeded(),
-                                 /*createIfNotExist=*/false, &modelCache, &dataCache));
-    int ret = device->prepareModelFromCache(modelCache, dataCache, cacheToken, preparedModel);
-    return ret == ANEURALNETWORKS_NO_ERROR;
-}
-
-int compileModelAndCache(const std::shared_ptr<Device>& device, const ModelBuilder* model,
-                         int32_t executionPreference, const std::string& cacheDir,
-                         const uint8_t* token, std::shared_ptr<PreparedModel>* preparedModel) {
-    CHECK(device != nullptr);
-    *preparedModel = nullptr;
-    uint8_t dummyToken[ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN] = {0};
-    CacheToken cacheToken(token == nullptr ? dummyToken : token);
-    hidl_vec<hidl_handle> modelCache, dataCache;
-    if (token == nullptr || !getCacheHandles(cacheDir, token, device->getNumberOfCacheFilesNeeded(),
-                                             /*createIfNotExist=*/true, &modelCache, &dataCache)) {
-        modelCache.resize(0);
-        dataCache.resize(0);
-    }
-    return device->prepareModel(model->makeHidlModel(),
-                                static_cast<ExecutionPreference>(executionPreference), modelCache,
-                                dataCache, cacheToken, preparedModel);
-}
-
 // Compiles the model on device.
 // If compilation caching is available, depending on ExecutionPlan::mState, the token may only have
 // been initialized by the user provided token (SIMPLE body), or is already re-hashed by the
 // operation indices to be executed (COMPOUND body). The token will be re-hashed further by the
 // device name, device version string, and the execution preference in this function.
-int compile(std::shared_ptr<Device> device, const ModelBuilder* model, int32_t executionPreference,
+int compile(const Device& device, const ModelBuilder& model, int executionPreference,
             const std::string& cacheDir, TokenHasher* token,
             std::shared_ptr<PreparedModel>* preparedModel) {
-    CHECK(device != nullptr);
-    const uint8_t* tokenData = nullptr;
-    if (device->isCachingSupported() && token->ok() && token->updateFromString(device->getName()) &&
-        token->updateFromString(device->getVersionString()) &&
+    CHECK(token != nullptr);
+    CHECK(preparedModel != nullptr);
+    *preparedModel = nullptr;
+
+    std::optional<CacheToken> cacheToken;
+    if (device.isCachingSupported() && token->ok() &&
+        token->updateFromString(device.getName().c_str()) &&
+        token->updateFromString(device.getVersionString().c_str()) &&
         token->update(&executionPreference, sizeof(executionPreference)) && token->finish()) {
-        tokenData = token->getCacheToken();
+        cacheToken.emplace(token->getCacheToken());
     }
-    if (tokenData != nullptr && compileFromCache(device, cacheDir, tokenData, preparedModel)) {
-        return ANEURALNETWORKS_NO_ERROR;
-    }
-    return compileModelAndCache(device, model, executionPreference, cacheDir, tokenData,
-                                preparedModel);
+
+    const ModelFactory makeModel = [&model] { return model.makeHidlModel(); };
+    const ExecutionPreference preference = static_cast<ExecutionPreference>(executionPreference);
+    const auto [n, returnedPreparedModel] =
+            device.prepareModel(makeModel, preference, cacheDir, cacheToken);
+    *preparedModel = returnedPreparedModel;
+    return n;
 }
 
 typedef std::function<void(uint32_t)> OperationReadyCallback;
@@ -574,7 +486,7 @@ int ExecutionStep::finishSubModel(const ModelBuilder* fromModel, bool* hasOutput
 
     // TODO: Move compilation elsewhere?
     VLOG(COMPILATION) << "ExecutionStep::finishSubModel, compilation on " << mDevice->getName();
-    return compile(mDevice, &mSubModel, executionPreference, *mPlan->getCacheDir(), &mToken,
+    return compile(*mDevice, mSubModel, executionPreference, *mPlan->getCacheDir(), &mToken,
                    &mPreparedSubModel);
 }
 
@@ -611,7 +523,7 @@ int ExecutionPlan::SimpleBody::finish([[maybe_unused]] const ModelBuilder* fromM
     nnAssert(mDevice != nullptr);
     VLOG(COMPILATION) << "ExecutionPlan::SimpleBody::finish, compilation";
     const int n =
-            compile(mDevice, mModel, executionPreference, *mCacheDir, &mToken, &mPreparedModel);
+            compile(*mDevice, *mModel, executionPreference, *mCacheDir, &mToken, &mPreparedModel);
     mSuccessfulFinish = (n == ANEURALNETWORKS_NO_ERROR);
     return n;
 }
@@ -646,7 +558,8 @@ ExecutionPlan::Controller::Controller(
 // indicate the regular execution path should be used. This can occur either
 // because PreparedModel was nullptr (cpu was best choice), or because the
 // IPreparedModel was of insufficient version or failed to configure the burst.
-std::vector<std::shared_ptr<ExecutionBurstController>> ExecutionPlan::makeBursts() const {
+std::vector<std::shared_ptr<ExecutionBurstController>> ExecutionPlan::makeBursts(
+        int preference) const {
     switch (mState) {
         // burst object for each partition in the compound case
         case COMPOUND: {
@@ -654,7 +567,10 @@ std::vector<std::shared_ptr<ExecutionBurstController>> ExecutionPlan::makeBursts
             bursts.reserve(compound()->mSteps.size());
             for (const auto& step : compound()->mSteps) {
                 if (const auto preparedModel = step->getPreparedSubModel()) {
-                    bursts.push_back(preparedModel->configureExecutionBurst(/*blocking=*/true));
+                    const bool preferPowerOverLatency =
+                            (preference == ANEURALNETWORKS_PREFER_LOW_POWER);
+                    bursts.push_back(
+                            preparedModel->configureExecutionBurst(preferPowerOverLatency));
                 } else {
                     bursts.push_back(nullptr);
                 }
@@ -666,7 +582,9 @@ std::vector<std::shared_ptr<ExecutionBurstController>> ExecutionPlan::makeBursts
             std::vector<std::shared_ptr<ExecutionBurstController>> burst;
             auto simpleBody = simple();
             if (const auto preparedModel = simpleBody->mPreparedModel) {
-                burst.push_back(preparedModel->configureExecutionBurst(/*blocking=*/true));
+                const bool preferPowerOverLatency =
+                        (preference == ANEURALNETWORKS_PREFER_LOW_POWER);
+                burst.push_back(preparedModel->configureExecutionBurst(preferPowerOverLatency));
             } else {
                 burst.push_back(nullptr);
             }
@@ -1079,13 +997,13 @@ class CanDo {
     CanDo() {}
 
     void initialize(const MetaModel& metaModel, std::shared_ptr<Device> device) {
-        device->getSupportedOperations(metaModel, &mSupportsOperationByIndex);
+        mSupportsOperationByIndex = device->getSupportedOperations(metaModel);
     }
 
     bool check(size_t operationIndex) const { return mSupportsOperationByIndex[operationIndex]; }
 
    private:
-    hidl_vec<bool> mSupportsOperationByIndex;
+    std::vector<bool> mSupportsOperationByIndex;
 };
 
 }  // anonymous namespace
