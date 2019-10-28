@@ -17,60 +17,159 @@
 #define LOG_TAG "Manager"
 
 #include "Manager.h"
+#include "Callbacks.h"
 #include "HalInterfaces.h"
+#include "Tracing.h"
 #include "Utils.h"
 
-#if !defined(_LE_NN_)
 #include <android/hidl/manager/1.0/IServiceManager.h>
+#include <build/version.h>
 #include <hidl/HidlTransportSupport.h>
 #include <hidl/ServiceManagement.h>
-#endif
 
 #include <algorithm>
 #include <functional>
-#include <dirent.h>
-#include <dlfcn.h>
+
+using ::android::hardware::neuralnetworks::V1_2::implementation::ExecutionCallback;
+using ::android::hardware::neuralnetworks::V1_2::implementation::PreparedModelCallback;
+using HidlToken = hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
 
 namespace android {
 namespace nn {
 
-Device::Device(std::string name, const sp<V1_0::IDevice>& device) :
-      mName(std::move(name)), mInterface(device) {}
+bool Device::isCachingSupported() const {
+    auto pair = getNumberOfCacheFilesNeeded();
+    // Caching is supported if either of numModelCache or numDataCache is greater than 0.
+    return pair.first > 0 || pair.second > 0;
+}
+
+// A Device with actual underlying driver
+class DriverDevice : public Device {
+    DISALLOW_IMPLICIT_CONSTRUCTORS(DriverDevice);
+
+   public:
+    DriverDevice(std::string name, const sp<V1_0::IDevice>& device);
+
+    // Returns true if succesfully initialized.
+    bool initialize();
+
+    const char* getName() const override { return mName.c_str(); }
+    const char* getVersionString() const override { return mVersionString.c_str(); }
+    VersionedIDevice* getInterface() override { return mInterface.get(); }
+    int64_t getFeatureLevel() override { return mInterface->getFeatureLevel(); }
+    int32_t getType() const override { return mInterface->getType(); }
+    hidl_vec<Extension> getSupportedExtensions() const override;
+    void getSupportedOperations(const Model& hidlModel,
+                                hidl_vec<bool>* supportedOperations) override;
+    PerformanceInfo getPerformance(OperandType type) const override;
+    PerformanceInfo getRelaxedFloat32toFloat16PerformanceScalar() const override {
+        return mCapabilities.relaxedFloat32toFloat16PerformanceScalar;
+    }
+    PerformanceInfo getRelaxedFloat32toFloat16PerformanceTensor() const override {
+        return mCapabilities.relaxedFloat32toFloat16PerformanceTensor;
+    }
+    std::pair<uint32_t, uint32_t> getNumberOfCacheFilesNeeded() const override {
+        return mNumCacheFiles;
+    }
+
+    int prepareModel(const Model& hidlModel, ExecutionPreference executionPreference,
+                     const hidl_vec<hidl_handle>& modelCache,
+                     const hidl_vec<hidl_handle>& dataCache, const HidlToken& token,
+                     std::shared_ptr<VersionedIPreparedModel>* preparedModel) override;
+    int prepareModelFromCache(const hidl_vec<hidl_handle>& modelCache,
+                              const hidl_vec<hidl_handle>& dataCache, const HidlToken& token,
+                              std::shared_ptr<VersionedIPreparedModel>* preparedModel) override;
+
+   private:
+    int prepareModelHelper(
+            const std::function<Return<ErrorStatus>(const sp<PreparedModelCallback>& callback)>&
+                    prepare,
+            const std::string& prepareName,
+            std::shared_ptr<VersionedIPreparedModel>* preparedModel);
+
+    std::string mName;
+    std::string mVersionString;
+    const std::shared_ptr<VersionedIDevice> mInterface;
+    Capabilities mCapabilities;
+    hidl_vec<Extension> mSupportedExtensions;
+    std::pair<uint32_t, uint32_t> mNumCacheFiles;
+
+#ifdef NN_DEBUGGABLE
+    // For debugging: behavior of IDevice::getSupportedOperations for SampleDriver.
+    // 0 - all operations reported by IDevice::getSupportedOperations() supported
+    // 1 - some operations reported by IDevice::getSupportedOperations() supported
+    uint32_t mSupported = 0;
+#endif  // NN_DEBUGGABLE
+};
+
+DriverDevice::DriverDevice(std::string name, const sp<V1_0::IDevice>& device)
+    : mName(std::move(name)), mInterface(VersionedIDevice::create(device)) {}
 
 // TODO: handle errors from initialize correctly
-bool Device::initialize() {
+bool DriverDevice::initialize() {
 #ifdef NN_DEBUGGABLE
     static const char samplePrefix[] = "sample";
 
-    mSupported =
-            (mName.substr(0, sizeof(samplePrefix) - 1)  == samplePrefix)
-            ? getProp("debug.nn.sample.supported") : 0;
+    mSupported = (mName.substr(0, sizeof(samplePrefix) - 1) == samplePrefix)
+                         ? getProp("debug.nn.sample.supported")
+                         : 0;
 #endif  // NN_DEBUGGABLE
 
     ErrorStatus status = ErrorStatus::GENERAL_FAILURE;
-    Capabilities capabilities;
-    std::tie(status, capabilities) = mInterface.getCapabilities();
 
-    if (status != ErrorStatus::NONE) {
-        LOG(ERROR) << "IDevice::getCapabilities returned the error " << toString(status);
-    } else {
-        VLOG(MANAGER) << "Capab " << capabilities.float32Performance.execTime;
-        VLOG(MANAGER) << "Capab " << capabilities.quantized8Performance.execTime;
-        VLOG(MANAGER) << "Capab " << capabilities.relaxedFloat32toFloat16Performance.execTime;
-        mFloat32Performance = capabilities.float32Performance;
-        mQuantized8Performance = capabilities.quantized8Performance;
-        mRelaxedFloat32toFloat16Performance = capabilities.relaxedFloat32toFloat16Performance;
+    if (mInterface == nullptr) {
+        LOG(ERROR) << "DriverDevice contains invalid interface object.";
+        return false;
     }
 
-    return status == ErrorStatus::NONE;
+    std::tie(status, mCapabilities) = mInterface->getCapabilities();
+    if (status != ErrorStatus::NONE) {
+        LOG(ERROR) << "IDevice::getCapabilities returned the error " << toString(status);
+        return false;
+    }
+    VLOG(MANAGER) << "Capab " << toString(mCapabilities);
+
+    std::tie(status, mVersionString) = mInterface->getVersionString();
+    // TODO(miaowang): add a validation test case for in case of error.
+    if (status != ErrorStatus::NONE) {
+        LOG(ERROR) << "IDevice::getVersionString returned the error " << toString(status);
+        return false;
+    }
+
+    std::tie(status, mSupportedExtensions) = mInterface->getSupportedExtensions();
+    if (status != ErrorStatus::NONE) {
+        LOG(ERROR) << "IDevice::getSupportedExtensions returned the error " << toString(status);
+        return false;
+    }
+
+    std::tie(status, mNumCacheFiles.first, mNumCacheFiles.second) =
+            mInterface->getNumberOfCacheFilesNeeded();
+    if (status != ErrorStatus::NONE) {
+        LOG(WARNING) << "IDevice::getNumberOfCacheFilesNeeded returned the error "
+                     << toString(status);
+        mNumCacheFiles = {0, 0};
+    }
+    if (mNumCacheFiles.first > static_cast<uint32_t>(Constant::MAX_NUMBER_OF_CACHE_FILES) ||
+        mNumCacheFiles.second > static_cast<uint32_t>(Constant::MAX_NUMBER_OF_CACHE_FILES)) {
+        LOG(WARNING)
+                << "IDevice::getNumberOfCacheFilesNeeded returned invalid number of cache files "
+                   "numModelCache = "
+                << mNumCacheFiles.first << ", numDataCache = " << mNumCacheFiles.second;
+        mNumCacheFiles = {0, 0};
+    }
+    return true;
 }
 
-void Device::getSupportedOperations(const Model& hidlModel,
-                                    hidl_vec<bool>* outSupportedOperations) {
+hidl_vec<Extension> DriverDevice::getSupportedExtensions() const {
+    return mSupportedExtensions;
+}
+
+void DriverDevice::getSupportedOperations(const Model& hidlModel,
+                                          hidl_vec<bool>* outSupportedOperations) {
     // Query the driver for what it can do.
     ErrorStatus status = ErrorStatus::GENERAL_FAILURE;
     hidl_vec<bool> supportedOperations;
-    std::tie(status, supportedOperations) = mInterface.getSupportedOperations(hidlModel);
+    std::tie(status, supportedOperations) = mInterface->getSupportedOperations(hidlModel);
 
     if (status != ErrorStatus::NONE) {
         LOG(ERROR) << "IDevice::getSupportedOperations returned the error " << toString(status);
@@ -89,7 +188,7 @@ void Device::getSupportedOperations(const Model& hidlModel,
         return;
     }
 
-    *outSupportedOperations = supportedOperations;
+    *outSupportedOperations = std::move(supportedOperations);
 
 #ifdef NN_DEBUGGABLE
     if (mSupported != 1) {
@@ -129,55 +228,170 @@ void Device::getSupportedOperations(const Model& hidlModel,
 #endif  // NN_DEBUGGABLE
 }
 
+PerformanceInfo DriverDevice::getPerformance(OperandType type) const {
+    return lookup(mCapabilities.operandPerformance, type);
+}
+
+// Compilation logic copied from StepExecutor::startComputeOnDevice().
+int DriverDevice::prepareModelHelper(
+        const std::function<Return<ErrorStatus>(const sp<PreparedModelCallback>& callback)>&
+                prepare,
+        const std::string& prepareName, std::shared_ptr<VersionedIPreparedModel>* preparedModel) {
+    *preparedModel = nullptr;
+    sp<PreparedModelCallback> preparedModelCallback = new PreparedModelCallback();
+
+    Return<ErrorStatus> prepareLaunchStatus = prepare(preparedModelCallback);
+    if (!prepareLaunchStatus.isOk()) {
+        LOG(ERROR) << prepareName << " compilation failed due to transport error: "
+                   << prepareLaunchStatus.description();
+        return ANEURALNETWORKS_OP_FAILED;
+    }
+    if (prepareLaunchStatus != ErrorStatus::NONE) {
+        LOG(ERROR) << prepareName << " compilation failed with error: "
+                   << toString(static_cast<ErrorStatus>(prepareLaunchStatus));
+        return ANEURALNETWORKS_OP_FAILED;
+    }
+
+    preparedModelCallback->wait();
+    ErrorStatus prepareReturnStatus = preparedModelCallback->getStatus();
+    if (auto returnedPreparedModel = preparedModelCallback->getPreparedModel()) {
+        *preparedModel = VersionedIPreparedModel::create(returnedPreparedModel);
+    }
+    if (prepareReturnStatus != ErrorStatus::NONE || *preparedModel == nullptr) {
+        LOG(ERROR) << prepareName << " on " << getName() << " failed:"
+                   << " prepareReturnStatus=" << toString(prepareReturnStatus)
+                   << ", preparedModel=" << preparedModel->get();
+        return ANEURALNETWORKS_OP_FAILED;
+    }
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
+int DriverDevice::prepareModel(const Model& hidlModel, ExecutionPreference executionPreference,
+                               const hidl_vec<hidl_handle>& modelCache,
+                               const hidl_vec<hidl_handle>& dataCache, const HidlToken& token,
+                               std::shared_ptr<VersionedIPreparedModel>* preparedModel) {
+    // Note that some work within VersionedIDevice will be subtracted from the IPC layer
+    NNTRACE_FULL(NNTRACE_LAYER_IPC, NNTRACE_PHASE_COMPILATION, "prepareModel");
+    return prepareModelHelper(
+            [this, &hidlModel, &executionPreference, &modelCache, &dataCache,
+             &token](const sp<PreparedModelCallback>& callback) {
+                return mInterface->prepareModel(hidlModel, executionPreference, modelCache,
+                                                dataCache, token, callback);
+            },
+            "prepareModel", preparedModel);
+}
+
+int DriverDevice::prepareModelFromCache(const hidl_vec<hidl_handle>& modelCache,
+                                        const hidl_vec<hidl_handle>& dataCache,
+                                        const HidlToken& token,
+                                        std::shared_ptr<VersionedIPreparedModel>* preparedModel) {
+    // Note that some work within VersionedIDevice will be subtracted from the IPC layer
+    NNTRACE_FULL(NNTRACE_LAYER_IPC, NNTRACE_PHASE_COMPILATION, "prepareModelFromCache");
+    return prepareModelHelper(
+            [this, &modelCache, &dataCache, &token](const sp<PreparedModelCallback>& callback) {
+                return mInterface->prepareModelFromCache(modelCache, dataCache, token, callback);
+            },
+            "prepareModelFromCache", preparedModel);
+}
+
+// A special abstracted device for the CPU. Only one instance of this class will exist.
+// Use get() to retrieve it.
+class CpuDevice : public Device {
+    DISALLOW_COPY_AND_ASSIGN(CpuDevice);
+
+   public:
+    // Returns the singleton CPU fallback device.
+    static std::shared_ptr<CpuDevice> get() {
+        static std::shared_ptr<CpuDevice> instance(new CpuDevice);
+        return instance;
+    }
+
+    const char* getName() const override { return kName.c_str(); }
+    const char* getVersionString() const override { return kVersionString.c_str(); }
+    VersionedIDevice* getInterface() override { return nullptr; }
+    int64_t getFeatureLevel() override { return kFeatureLevel; }
+    int32_t getType() const override { return ANEURALNETWORKS_DEVICE_CPU; }
+    hidl_vec<Extension> getSupportedExtensions() const override { return {/* No extensions. */}; }
+    void getSupportedOperations(const Model& hidlModel,
+                                hidl_vec<bool>* supportedOperations) override;
+    PerformanceInfo getPerformance(OperandType) const override { return kPerformance; }
+    PerformanceInfo getRelaxedFloat32toFloat16PerformanceScalar() const override {
+        return kPerformance;
+    }
+    PerformanceInfo getRelaxedFloat32toFloat16PerformanceTensor() const override {
+        return kPerformance;
+    }
+    std::pair<uint32_t, uint32_t> getNumberOfCacheFilesNeeded() const override {
+        return kNumCacheFiles;
+    }
+
+    int prepareModel(const Model& hidlModel, ExecutionPreference executionPreference,
+                     const hidl_vec<hidl_handle>& modelCache,
+                     const hidl_vec<hidl_handle>& dataCache, const HidlToken&,
+                     std::shared_ptr<VersionedIPreparedModel>* preparedModel) override;
+    int prepareModelFromCache(const hidl_vec<hidl_handle>&, const hidl_vec<hidl_handle>&,
+                              const HidlToken&,
+                              std::shared_ptr<VersionedIPreparedModel>*) override {
+        CHECK(false) << "Should never call prepareModelFromCache on CpuDevice";
+        return ANEURALNETWORKS_OP_FAILED;
+    }
+
+   private:
+    CpuDevice() = default;
+    const int64_t kFeatureLevel = __ANDROID_API__;
+    const std::string kName = "nnapi-reference";
+    const std::string kVersionString = build::GetBuildNumber();
+    // Since the performance is a ratio compared to the CPU performance,
+    // by definition the performance of the CPU is 1.0.
+    const PerformanceInfo kPerformance = {.execTime = 1.0f, .powerUsage = 1.0f};
+    // CPU device does not support compilation caching.
+    const std::pair<uint32_t, uint32_t> kNumCacheFiles = {/*numModelCache=*/0,
+                                                          /*numDataCache=*/0};
+};
+
+void CpuDevice::getSupportedOperations(const Model& hidlModel,
+                                       hidl_vec<bool>* supportedOperations) {
+    const size_t count = hidlModel.operations.size();
+    hidl_vec<bool> result(count);
+    for (size_t i = 0; i < count; i++) {
+        // TODO(b/119870033): Decide whether and how post-P operations would be supported on CPU.
+        OperationType operationType = hidlModel.operations[i].type;
+        result[i] = !isExtensionOperationType(operationType) &&
+                    operationType != OperationType::OEM_OPERATION;
+    }
+    *supportedOperations = std::move(result);
+}
+
+int CpuDevice::prepareModel(const Model& hidlModel, ExecutionPreference executionPreference,
+                            const hidl_vec<hidl_handle>& modelCache,
+                            const hidl_vec<hidl_handle>& dataCache, const HidlToken&,
+                            std::shared_ptr<VersionedIPreparedModel>* preparedModel) {
+    CHECK(modelCache.size() == 0 && dataCache.size() == 0)
+            << "Should never call prepareModel with cache information on CpuDevice";
+    *preparedModel = nullptr;
+    if (!validateModel(hidlModel) || !validateExecutionPreference(executionPreference)) {
+        return ANEURALNETWORKS_OP_FAILED;
+    }
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
 DeviceManager* DeviceManager::get() {
     static DeviceManager manager;
     return &manager;
 }
 
+std::shared_ptr<Device> DeviceManager::getCpuDevice() {
+    return CpuDevice::get();
+}
+
+std::shared_ptr<Device> DeviceManager::forTest_makeDriverDevice(const std::string& name,
+                                                                const sp<V1_0::IDevice>& device) {
+    auto driverDevice = std::make_shared<DriverDevice>(name, device);
+    CHECK(driverDevice->initialize());
+    return driverDevice;
+}
+
 void DeviceManager::findAvailableDevices() {
-#if defined(_LE_NN_)
-    // LE doesn't support HIDL service registration and querying,
-    // so loads the devices as shared libraries.
-    std::string path(INSTALL_LIB_DIR"/nn/");
-    DIR *dir = opendir(path.c_str());
-    if (nullptr == dir) {
-        LOG(ERROR) << "Failed to open nn drivers folder " << strerror(errno);
-        return;
-    }
-
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != nullptr) {
-        if (std::string(entry->d_name).compare(".") == 0 ||
-            std::string(entry->d_name).compare("..") == 0) {
-            continue;
-        }
-        std::string library = path + entry->d_name;
-        try {
-            void *lib_handle;
-            dlerror();
-            lib_handle = dlopen(library.c_str(), RTLD_NOW);
-
-            const char *dlsym_error = dlerror();
-            if (!lib_handle || dlsym_error) {
-                LOG(ERROR) << dlsym_error;
-                continue;
-            }
-            mLibHandles.push_back(lib_handle);
-            sp<V1_0::IDevice> (*NNHalDeviceNewFunc)();
-            NNHalDeviceNewFunc =
-                (sp<V1_0::IDevice> (*)()) dlsym(lib_handle, "NNHalDeviceNew");
-            if (dlsym_error) {
-                LOG(ERROR) << dlsym_error;
-                continue;
-            }
-            sp<V1_0::IDevice> device(NNHalDeviceNewFunc());
-            registerDevice(entry->d_name, device);
-        } catch (const std::exception &e) {
-            LOG(ERROR) << e.what();
-        }
-    }
-    closedir(dir);
-#else
     using ::android::hidl::manager::V1_0::IServiceManager;
     VLOG(MANAGER) << "findAvailableDevices";
 
@@ -198,11 +412,14 @@ void DeviceManager::findAvailableDevices() {
             registerDevice(name.c_str(), device);
         }
     });
-#endif
+
+    // register CPU fallback device
+    mDevices.push_back(CpuDevice::get());
+    mDevicesCpuOnly.push_back(CpuDevice::get());
 }
 
 void DeviceManager::registerDevice(const char* name, const sp<V1_0::IDevice>& device) {
-    auto d = std::make_shared<Device>(name, device);
+    auto d = std::make_shared<DriverDevice>(name, device);
     if (d->initialize()) {
         mDevices.push_back(d);
     }
@@ -214,22 +431,12 @@ DeviceManager::DeviceManager() {
 #ifdef NN_DEBUGGABLE
     mPartitioning = getProp("debug.nn.partition", kPartitioningDefault);
     mDebugNNCpuOnly = (getProp("debug.nn.cpuonly") != 0);
+    mSyncExecCpu = (getProp("debug.nn.syncexec-cpu", 1) != 0);
+    if (!mSyncExecHalSetter) {
+        mSyncExecHal = (getProp("debug.nn.syncexec-hal", 1) != 0);
+    }
+    mSyncExecRuntime = (getProp("debug.nn.syncexec-runtime") != 0);
 #endif  // NN_DEBUGGABLE
-}
-
-DeviceManager::~DeviceManager() {
-    for (auto &device : mDevices) {
-        device = nullptr;
-    }
-    for (auto handle : mLibHandles) {
-        try {
-            if (nullptr != handle) {
-                dlclose(handle);
-            }
-        } catch (const std::exception &e) {
-            LOG(ERROR) << e.what();
-        }
-    }
 }
 
 }  // namespace nn

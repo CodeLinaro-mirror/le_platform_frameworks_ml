@@ -19,6 +19,7 @@
 
 #include "HalInterfaces.h"
 #include "NeuralNetworks.h"
+#include "ValidateHal.h"
 
 #include <vector>
 
@@ -28,10 +29,10 @@ namespace android {
 namespace nn {
 
 // The number of data types (OperandCode) defined in NeuralNetworks.h.
-const int kNumberOfDataTypes = 6;
+const int kNumberOfDataTypes = 14;
 
 // The number of operation types (OperationCode) defined in NeuralNetworks.h.
-const int kNumberOfOperationTypes = 38;
+const int kNumberOfOperationTypes = 95;
 
 // The number of execution preferences defined in NeuralNetworks.h.
 const int kNumberOfPreferences = 3;
@@ -79,31 +80,145 @@ void initVLogMask();
 #define SHOW_IF_DEBUG(msg) ""
 #endif
 
-// Assert macro, as Android does not generally support assert.
-#define nnAssert(v)                                                                            \
-    do {                                                                                       \
-        if (!(v)) {                                                                            \
-            LOG(ERROR) << "nnAssert failed at " << __FILE__ << ":" << __LINE__ << " - '" << #v \
-                       << "'\n";                                                               \
-            abort();                                                                           \
-        }                                                                                      \
+// DEPRECATED(b/118737105). Use CHECK.
+#define nnAssert(v) CHECK(v)
+
+#define NN_RETURN_IF_ERROR(expr)                      \
+    do {                                              \
+        int _errorCode = (expr);                      \
+        if (_errorCode != ANEURALNETWORKS_NO_ERROR) { \
+            return _errorCode;                        \
+        }                                             \
     } while (0)
 
+// The NN_RET_CHECK family of macros defined below is similar to the CHECK family defined in
+// system/core/base/include/android-base/logging.h
+//
+// The difference is that NN_RET_CHECK macros use LOG(ERROR) instead of LOG(FATAL)
+// and return false instead of aborting.
+
+// Logs an error and returns false. Append context using << after. For example:
+//
+//   NN_RET_CHECK_FAIL() << "Something went wrong";
+//
+// The containing function must return a bool.
+#define NN_RET_CHECK_FAIL() return ::android::nn::FalseyErrorStream() << "NN_RET_CHECK failed: "
+
+// Logs an error and returns false if condition is false. Extra logging can be appended using <<
+// after. For example:
+//
+//   NN_RET_CHECK(false) << "Something went wrong";
+//
+// The containing function must return a bool.
+#define NN_RET_CHECK(condition) \
+    while (UNLIKELY(!(condition))) NN_RET_CHECK_FAIL() << #condition << " "
+
+// Helper for NN_CHECK_xx(x, y) macros.
+#define NN_RET_CHECK_OP(LHS, RHS, OP)                                                 \
+    for (auto _values = ::android::base::MakeEagerEvaluator(LHS, RHS);                \
+         UNLIKELY(!(_values.lhs OP _values.rhs));                                     \
+         /* empty */)                                                                 \
+    NN_RET_CHECK_FAIL() << #LHS << " " << #OP << " " << #RHS << " (" << #LHS << " = " \
+                        << _values.lhs << ", " << #RHS << " = " << _values.rhs << ") "
+
+// Logs an error and returns false if a condition between x and y does not hold. Extra logging can
+// be appended using << after. For example:
+//
+//   NN_RET_CHECK_EQ(a, b) << "Something went wrong";
+//
+// The values must implement the appropriate comparison operator as well as
+// `operator<<(std::ostream&, ...)`.
+// The containing function must return a bool.
+#define NN_RET_CHECK_EQ(x, y) NN_RET_CHECK_OP(x, y, ==)
+#define NN_RET_CHECK_NE(x, y) NN_RET_CHECK_OP(x, y, !=)
+#define NN_RET_CHECK_LE(x, y) NN_RET_CHECK_OP(x, y, <=)
+#define NN_RET_CHECK_LT(x, y) NN_RET_CHECK_OP(x, y, <)
+#define NN_RET_CHECK_GE(x, y) NN_RET_CHECK_OP(x, y, >=)
+#define NN_RET_CHECK_GT(x, y) NN_RET_CHECK_OP(x, y, >)
+
+// A wrapper around LOG(ERROR) that can be implicitly converted to bool (always evaluates to false).
+// Used to implement stream logging in NN_RET_CHECK.
+class FalseyErrorStream {
+    DISALLOW_COPY_AND_ASSIGN(FalseyErrorStream);
+
+   public:
+    FalseyErrorStream() {}
+
+    template <typename T>
+    FalseyErrorStream& operator<<(const T& value) {
+        mBuffer << value;
+        return *this;
+    }
+
+    ~FalseyErrorStream() { LOG(ERROR) << mBuffer.str(); }
+
+    operator bool() const { return false; }
+
+   private:
+    std::ostringstream mBuffer;
+};
+
+// Return a vector with one entry for each non extension OperandType, set to the
+// specified PerformanceInfo value.  The vector will be sorted by OperandType.
+hidl_vec<Capabilities::OperandPerformance> nonExtensionOperandPerformance(PerformanceInfo perf);
+
+// Update the vector entry corresponding to the specified OperandType with the
+// specified PerformanceInfo value.  The vector must already have an entry for
+// that OperandType, and must be sorted by OperandType.
+void update(hidl_vec<Capabilities::OperandPerformance>* operandPerformance, OperandType type,
+            PerformanceInfo perf);
+
+// Look for a vector entry corresponding to the specified OperandType.  If
+// found, return the associated PerformanceInfo.  If not, return a pessimistic
+// PerformanceInfo (FLT_MAX).  The vector must be sorted by OperandType.
+PerformanceInfo lookup(const hidl_vec<Capabilities::OperandPerformance>& operandPerformance,
+                       OperandType type);
+
+// Returns true if an operand type is an extension type.
+bool isExtensionOperandType(OperandType type);
+
+// Returns true if an operation type is an extension type.
+bool isExtensionOperationType(OperationType type);
+
 // Returns the amount of space needed to store a value of the specified
-// dimensions and type.
-uint32_t sizeOfData(OperandType type, const std::vector<uint32_t>& dimensions);
+// dimensions and type. For a tensor with unspecified rank or at least one
+// unspecified dimension, returns zero.
+//
+// Aborts if the specified type is an extension type.
+//
+// See also TypeManager::getSizeOfData(OperandType, const std::vector<uint32_t>&).
+uint32_t nonExtensionOperandSizeOfData(OperandType type, const std::vector<uint32_t>& dimensions);
 
 // Returns the amount of space needed to store a value of the dimensions and
-// type of this operand.
-inline uint32_t sizeOfData(const Operand& operand) {
-    return sizeOfData(operand.type, operand.dimensions);
+// type of this operand. For a tensor with unspecified rank or at least one
+// unspecified dimension, returns zero.
+//
+// Aborts if the specified type is an extension type.
+//
+// See also TypeManager::getSizeOfData(const Operand&).
+inline uint32_t nonExtensionOperandSizeOfData(const Operand& operand) {
+    return nonExtensionOperandSizeOfData(operand.type, operand.dimensions);
 }
 
+// Returns true if a non-extension operand type is a scalar type.
+//
+// Aborts if the specified type is an extension type.
+//
+// See also TypeManager::isTensorType(OperandType).
+bool nonExtensionOperandTypeIsScalar(int type);
+
 // Returns the name of the operation type in ASCII.
-const char* getOperationName(OperationType opCode);
+std::string getOperationName(OperationType opCode);
 
 // Returns the name of the operand type in ASCII.
-const char* getOperandTypeName(OperandType type);
+std::string getOperandTypeName(OperandType type);
+
+// Whether an operand of tensor type has unspecified dimensions.
+//
+// Undefined behavior if the operand type is a scalar type.
+bool tensorHasUnspecifiedDimensions(int type, const uint32_t* dim, uint32_t dimCount);
+bool tensorHasUnspecifiedDimensions(const Operand& operand);
+bool tensorHasUnspecifiedDimensions(const ANeuralNetworksOperandType* type);
 
 // Memory is unmapped.
 // Memory is reference counted by hidl_memory instances, and is deallocated
@@ -122,6 +237,7 @@ uint32_t alignBytesNeeded(uint32_t index, size_t length);
 // Does a detailed LOG(INFO) of the model
 void logModelToInfo(const V1_0::Model& model);
 void logModelToInfo(const V1_1::Model& model);
+void logModelToInfo(const V1_2::Model& model);
 
 inline std::string toString(uint32_t obj) {
     return std::to_string(obj);
@@ -136,17 +252,44 @@ std::string toString(const std::vector<Type>& range) {
     return os += "]";
 }
 
+inline std::string toString(HalVersion halVersion) {
+    switch (halVersion) {
+        case HalVersion::UNKNOWN:
+            return "UNKNOWN HAL version";
+        case HalVersion::V1_0:
+            return "HAL version 1.0";
+        case HalVersion::V1_1:
+            return "HAL version 1.1";
+        case HalVersion::V1_2:
+            return "HAL version 1.2";
+    }
+}
+
 inline bool validCode(uint32_t codeCount, uint32_t codeCountOEM, uint32_t code) {
     return (code < codeCount) || (code >= kOEMCodeBase && (code - kOEMCodeBase) < codeCountOEM);
 }
 
-int validateOperandType(const ANeuralNetworksOperandType& type, const char* tag, bool allowPartial);
+bool validateOperandSymmPerChannelQuantParams(
+        const Operand& halOperand, const ANeuralNetworksSymmPerChannelQuantParams& channelQuant,
+        const char* tag);
+
+// Validates an operand type.
+//
+// extensionOperandTypeInfo must be nullptr iff the type is not an extension type.
+//
+// If allowPartial is true, the dimensions may be underspecified.
+int validateOperandType(const ANeuralNetworksOperandType& type,
+                        const Extension::OperandTypeInformation* const extensionOperandTypeInfo,
+                        const char* tag, bool allowPartial);
 int validateOperandList(uint32_t count, const uint32_t* list, uint32_t operandCount,
                         const char* tag);
-int validateOperation(ANeuralNetworksOperationType opType,
-                      uint32_t inputCount, const uint32_t* inputIndexes,
-                      uint32_t outputCount, const uint32_t* outputIndexes,
-                      const std::vector<Operand>& operands);
+
+// Returns ANEURALNETWORKS_NO_ERROR if the corresponding operation is defined and can handle the
+// provided operand types in the given HAL version, otherwise returns ANEURALNETWORKS_BAD_DATA.
+int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
+                      const uint32_t* inputIndexes, uint32_t outputCount,
+                      const uint32_t* outputIndexes, const std::vector<Operand>& operands,
+                      HalVersion halVersion);
 
 inline size_t getSizeFromInts(int lower, int higher) {
     return (uint32_t)(lower) + ((uint64_t)(uint32_t)(higher) << 32);
@@ -162,46 +305,48 @@ int convertErrorStatusToResultCode(ErrorStatus status);
 
 // Versioning
 
-bool compliantWithV1_0(V1_0::OperationType type);
-bool compliantWithV1_0(V1_1::OperationType type);
-bool compliantWithV1_1(V1_0::OperationType type);
-bool compliantWithV1_1(V1_1::OperationType type);
-
 bool compliantWithV1_0(const V1_0::Capabilities& capabilities);
 bool compliantWithV1_0(const V1_1::Capabilities& capabilities);
+bool compliantWithV1_0(const V1_2::Capabilities& capabilities);
 bool compliantWithV1_1(const V1_0::Capabilities& capabilities);
 bool compliantWithV1_1(const V1_1::Capabilities& capabilities);
-
-bool compliantWithV1_0(const V1_0::Operation& operation);
-bool compliantWithV1_0(const V1_1::Operation& operation);
-bool compliantWithV1_1(const V1_0::Operation& operation);
-bool compliantWithV1_1(const V1_1::Operation& operation);
+bool compliantWithV1_1(const V1_2::Capabilities& capabilities);
+bool compliantWithV1_2(const V1_0::Capabilities& capabilities);
+bool compliantWithV1_2(const V1_1::Capabilities& capabilities);
+bool compliantWithV1_2(const V1_2::Capabilities& capabilities);
 
 bool compliantWithV1_0(const V1_0::Model& model);
 bool compliantWithV1_0(const V1_1::Model& model);
+bool compliantWithV1_0(const V1_2::Model& model);
 bool compliantWithV1_1(const V1_0::Model& model);
 bool compliantWithV1_1(const V1_1::Model& model);
-
-V1_0::OperationType convertToV1_0(V1_0::OperationType type);
-V1_0::OperationType convertToV1_0(V1_1::OperationType type);
-V1_1::OperationType convertToV1_1(V1_0::OperationType type);
-V1_1::OperationType convertToV1_1(V1_1::OperationType type);
+bool compliantWithV1_1(const V1_2::Model& model);
 
 V1_0::Capabilities convertToV1_0(const V1_0::Capabilities& capabilities);
 V1_0::Capabilities convertToV1_0(const V1_1::Capabilities& capabilities);
+V1_0::Capabilities convertToV1_0(const V1_2::Capabilities& capabilities);
 V1_1::Capabilities convertToV1_1(const V1_0::Capabilities& capabilities);
 V1_1::Capabilities convertToV1_1(const V1_1::Capabilities& capabilities);
-
-V1_0::Operation convertToV1_0(const V1_0::Operation& operation);
-V1_0::Operation convertToV1_0(const V1_1::Operation& operation);
-V1_1::Operation convertToV1_1(const V1_0::Operation& operation);
-V1_1::Operation convertToV1_1(const V1_1::Operation& operation);
+V1_1::Capabilities convertToV1_1(const V1_2::Capabilities& capabilities);
+V1_2::Capabilities convertToV1_2(const V1_0::Capabilities& capabilities);
+V1_2::Capabilities convertToV1_2(const V1_1::Capabilities& capabilities);
+V1_2::Capabilities convertToV1_2(const V1_2::Capabilities& capabilities);
 
 V1_0::Model convertToV1_0(const V1_0::Model& model);
 V1_0::Model convertToV1_0(const V1_1::Model& model);
+V1_0::Model convertToV1_0(const V1_2::Model& model);
 V1_1::Model convertToV1_1(const V1_0::Model& model);
 V1_1::Model convertToV1_1(const V1_1::Model& model);
+V1_1::Model convertToV1_1(const V1_2::Model& model);
+V1_2::Model convertToV1_2(const V1_0::Model& model);
+V1_2::Model convertToV1_2(const V1_1::Model& model);
+V1_2::Model convertToV1_2(const V1_2::Model& model);
 
+V1_2::Operand convertToV1_2(const V1_0::Operand& operand);
+V1_2::Operand convertToV1_2(const V1_2::Operand& operand);
+
+hidl_vec<V1_2::Operand> convertToV1_2(const hidl_vec<V1_0::Operand>& operands);
+hidl_vec<V1_2::Operand> convertToV1_2(const hidl_vec<V1_2::Operand>& operands);
 
 #ifdef NN_DEBUGGABLE
 uint32_t getProp(const char* str, uint32_t defaultValue = 0);

@@ -18,13 +18,14 @@
 #define ANDROID_ML_NN_COMMON_CPU_EXECUTOR_H
 
 #include "HalInterfaces.h"
+#include "OperationResolver.h"
 #include "OperationsUtils.h"
 #include "Utils.h"
 
+#include <android-base/macros.h>
+#include <ui/GraphicBuffer.h>
 #include <algorithm>
 #include <vector>
-
-#include "external/android-base/macros.h"
 
 namespace android {
 namespace nn {
@@ -38,6 +39,17 @@ struct RunTimeOperandInfo {
     // change at runtime.  We include the type because it's useful
     // to pass together with the dimension to the functions implementing
     // the operators.
+    //
+    // A dimension being zero has different meanings for different operands at different stages:
+    // - Model inputs:
+    //   * Specified in model: implies "dynamic", and must be fully-specified in request.
+    //   * Specified in request: illegal.
+    // - Constant operands: illegal.
+    // - Model outputs and internal operands:
+    //   * Before evaluation: implies unknown and to be deduced from execution.
+    //   * After evaluation:
+    //     - If isSufficient reports true: the tensor is zero-sized.
+    //     - Otherwise: implies unknown.
     std::vector<uint32_t> dimensions;
 
     float scale;
@@ -56,8 +68,24 @@ struct RunTimeOperandInfo {
     // always 0.
     uint32_t numberOfUsesLeft;
 
+    Operand::ExtraParams extraParams;
+
     Shape shape() const {
-        return Shape{.type = type, .dimensions = dimensions, .scale = scale, .offset = zeroPoint};
+        return {
+                .type = type,
+                .dimensions = dimensions,
+                .scale = scale,
+                .offset = zeroPoint,
+                .extraParams = extraParams,
+        };
+    }
+
+    bool isSufficient() const {
+        if (isExtensionOperandType(type)) {
+            // We don't know sizes of extension types.
+            return true;
+        }
+        return length >= nonExtensionOperandSizeOfData(type, dimensions);
     }
 };
 
@@ -76,8 +104,8 @@ public:
     explicit RunTimePoolInfo(uint8_t* buffer);
 
     // Implement move
-    RunTimePoolInfo(RunTimePoolInfo&& other);
-    RunTimePoolInfo& operator=(RunTimePoolInfo&& other);
+    RunTimePoolInfo(RunTimePoolInfo&& other) noexcept;
+    RunTimePoolInfo& operator=(RunTimePoolInfo&& other) noexcept;
 
     // Forbid copy
     RunTimePoolInfo(const RunTimePoolInfo&) = delete;
@@ -93,9 +121,10 @@ private:
     void release();
     void moveFrom(RunTimePoolInfo&& other);
 
-    hidl_memory mHidlMemory;     // always used
-    uint8_t* mBuffer = nullptr;  // always used
-    sp<IMemory> mMemory;         // only used when hidlMemory.name() == "ashmem"
+    hidl_memory mHidlMemory;           // always used
+    uint8_t* mBuffer = nullptr;        // always used
+    sp<IMemory> mMemory;               // only used when hidlMemory.name() == "ashmem"
+    sp<GraphicBuffer> mGraphicBuffer;  // only used when hidlMemory.name() == "hardware_buffer_blob"
 };
 
 bool setRunTimePoolInfosFromHidlMemories(std::vector<RunTimePoolInfo>* poolInfos,
@@ -103,19 +132,34 @@ bool setRunTimePoolInfosFromHidlMemories(std::vector<RunTimePoolInfo>* poolInfos
 
 // This class is used to execute a model on the CPU.
 class CpuExecutor {
-public:
+   public:
+    // This constructor allows clients of CpuExecutor to provide custom CPU
+    // operation implementations. It is used by a sample driver to test
+    // extension support.
+    //
+    // Note that it is not possible to provide custom CPU implementations for
+    // non-OperationResolver operations (b/124041202).
+    //
+    // The operation resolver must outlive the executor.
+    explicit CpuExecutor(const IOperationResolver* operationResolver)
+        : mOperationResolver(operationResolver) {}
+
+    CpuExecutor() : CpuExecutor(BuiltinOperationResolver::get()) {}
+
     // Executes the model. The results will be stored at the locations
     // specified in the constructor.
     // The model must outlive the executor.  We prevent it from being modified
     // while this is executing.
-    int run(const V1_0::Model& model, const Request& request,
-            const std::vector<RunTimePoolInfo>& modelPoolInfos,
-            const std::vector<RunTimePoolInfo>& requestPoolInfos);
-    int run(const V1_1::Model& model, const Request& request,
+    int run(const Model& model, const Request& request,
             const std::vector<RunTimePoolInfo>& modelPoolInfos,
             const std::vector<RunTimePoolInfo>& requestPoolInfos);
 
-private:
+    const std::vector<OutputShape>& getOutputShapes() const {
+        CHECK(mFinished) << "getOutputShapes() called by an unfinished CpuExecutor.";
+        return mOutputShapes;
+    }
+
+   private:
     bool initializeRunTimeInfo(const std::vector<RunTimePoolInfo>& modelPoolInfos,
                                const std::vector<RunTimePoolInfo>& requestPoolInfos);
     // Runs one operation of the graph.
@@ -124,18 +168,30 @@ private:
     // allocated for any temporary variable with a count of zero.
     void freeNoLongerUsedOperands(const std::vector<uint32_t>& inputs);
 
+    // Frees the memory allocated for any temporary variable, and sets the
+    // output operand shapes returning to the runtime.
+    void finish(int result);
+
     // The model and the request that we'll execute. Only valid while run()
     // is being executed.
     const Model* mModel = nullptr;
     const Request* mRequest = nullptr;
 
     // We're copying the list of all the dimensions from the model, as
-    // these may be modified when we run the operatins.  Since we're
+    // these may be modified when we run the operations.  Since we're
     // making a full copy, the indexes used in the operand description
     // stay valid.
     //    std::vector<uint32_t> mDimensions;
     // Runtime information about all the operands.
     std::vector<RunTimeOperandInfo> mOperands;
+
+    // The output operand shapes returning to the runtime.
+    std::vector<OutputShape> mOutputShapes;
+
+    // Whether execution is finished and mOutputShapes is ready
+    bool mFinished = false;
+
+    const IOperationResolver* mOperationResolver;
 };
 
 // Class for setting reasonable OpenMP threading settings. (OpenMP is used by
@@ -162,28 +218,29 @@ private:
 // cores are the same. Decision to be based on benchmarking against a
 // representative set of workloads and devices. I'm keeping the code here for
 // reference.
+// b/109953668, disable OpenMP
+#ifdef NNAPI_OPENMP
 class ScopedOpenmpSettings {
 public:
     ScopedOpenmpSettings();
     ~ScopedOpenmpSettings();
     DISALLOW_COPY_AND_ASSIGN(ScopedOpenmpSettings);
 private:
-#if !defined(_LE_NN_)
     int mBlocktimeInitial;
-#endif
 #if NNAPI_LIMIT_CPU_THREADS
     int mMaxThreadsInitial;
 #endif
 };
+#endif  // NNAPI_OPENMP
 
 
 namespace {
 
 template <typename T>
 T getScalarData(const RunTimeOperandInfo& info) {
-  // TODO: Check buffer is at least as long as size of data.
-  T* data = reinterpret_cast<T*>(info.buffer);
-  return data[0];
+    // TODO: Check buffer is at least as long as size of data.
+    T* data = reinterpret_cast<T*>(info.buffer);
+    return data[0];
 }
 
 inline bool IsNullInput(const RunTimeOperandInfo *input) {

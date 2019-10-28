@@ -16,13 +16,12 @@
 
 #undef NDEBUG
 
-#include "Bridge.h"
 #include "CompilationBuilder.h"
 #include "Manager.h"
 #include "ModelBuilder.h"
 #include "NeuralNetworks.h"
-#include "NeuralNetworksWrapper.h"
 #include "SampleDriver.h"
+#include "TestNeuralNetworksWrapper.h"
 #include "Utils.h"
 #include "ValidateHal.h"
 
@@ -45,10 +44,6 @@
 // may be useful when analyzing failures:
 //
 // #define VERBOSE VERBOSE
-
-// Uncomment the following line to generate graphs from models:
-//
-// #define GRAPH GRAPH
 
 // We randomly generate tests (model + input data) at runtime, and verify
 // that we get the same results whether we do partitioned compilation/execution
@@ -97,17 +92,19 @@ using CompilationBuilder = nn::CompilationBuilder;
 using Device = nn::Device;
 using DeviceManager = nn::DeviceManager;
 using ExecutionPlan = nn::ExecutionPlan;
-using HidlModel = hardware::neuralnetworks::V1_1::Model;
+using HidlModel = hardware::neuralnetworks::V1_2::Model;
+using HidlToken =
+        ::android::hardware::hidl_array<uint8_t, ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN>;
 using MemoryBuilder = nn::Memory;
 using ModelBuilder = nn::ModelBuilder;
-using Result = nn::wrapper::Result;
+using Result = nn::test_wrapper::Result;
 using SampleDriver = nn::sample_driver::SampleDriver;
-using WrapperCompilation = nn::wrapper::Compilation;
-using WrapperExecution = nn::wrapper::Execution;
-using WrapperMemory = nn::wrapper::Memory;
-using WrapperModel = nn::wrapper::Model;
-using WrapperOperandType = nn::wrapper::OperandType;
-using WrapperType = nn::wrapper::Type;
+using WrapperCompilation = nn::test_wrapper::Compilation;
+using WrapperExecution = nn::test_wrapper::Execution;
+using WrapperMemory = nn::test_wrapper::Memory;
+using WrapperModel = nn::test_wrapper::Model;
+using WrapperOperandType = nn::test_wrapper::OperandType;
+using WrapperType = nn::test_wrapper::Type;
 
 namespace {
 
@@ -143,10 +140,9 @@ static const bool kAllWeightsInOnePool = false;
 // operation type for which the activation function is inapplicable).
 typedef std::pair<ANeuralNetworksOperationType, int> Signature;
 
-// This class adds some simple utilities on top of
-// ::android::nn::wrapper::Model.  For example, it provides access to
-// certain features from ModelBuilder that are not exposed by the base
-// class (such as inputCount() and operation index).
+// This class adds some simple utilities on top of WrapperModel.  For example,
+// it provides access to certain features from ModelBuilder that are not exposed
+// by the base class (such as inputCount() and operation index).
 class TestModel : public WrapperModel {
 public:
 
@@ -207,21 +203,25 @@ private:
     std::vector<std::vector<float>> mOperandValues;
 };
 
-// This class adds some simple utilities on top of
-// ::android::nn::wrapper::Compilation in order to provide access to
-// certain features from CompilationBuilder that are not exposed by
-// the base class.
+// This class adds some simple utilities on top of WrapperCompilation in order
+// to provide access to certain features from CompilationBuilder that are not
+// exposed by the base class.
 class TestCompilation : public WrapperCompilation {
 public:
     TestCompilation(const WrapperModel* model) : WrapperCompilation(model) {}
 
-    Result setPartitioning(uint32_t partitioning) {
-        return static_cast<Result>(builder()->setPartitioning(partitioning));
+    TestCompilation(const WrapperModel* model, std::vector<std::shared_ptr<Device>> devices) {
+        ModelBuilder* m = reinterpret_cast<ModelBuilder*>(model->getHandle());
+        CompilationBuilder* c = nullptr;
+        int result = m->createCompilation(&c, devices);
+        EXPECT_EQ(result, 0);
+        mCompilation = reinterpret_cast<ANeuralNetworksCompilation*>(c);
     }
 
     using WrapperCompilation::finish;
-    Result finish(const std::vector<std::shared_ptr<Device>>& devices) {
-        return static_cast<Result>(builder()->finish(devices));
+
+    Result setPartitioning(uint32_t partitioning) {
+        return static_cast<Result>(builder()->setPartitioning(partitioning));
     }
 
     const ExecutionPlan& getExecutionPlan() const {
@@ -350,8 +350,6 @@ public:
     static Signature getSignature(const HidlModel& model, const Operation& operation);
 
 protected:
-    void graphDump(const WrapperModel& model);
-
     bool randBool() {
         return randUInt(2) == 1;
     }
@@ -428,8 +426,9 @@ protected:
     };
 #endif
 
-private:
     std::mt19937 mRandNumEng;
+
+   private:
     std::uniform_real_distribution<double> mRandNumUnitDist;
 };
 
@@ -467,14 +466,6 @@ Signature RandomPartitioningTest::getSignature(const HidlModel& model, const Ope
     return Signature(operationType, value);
 }
 
-void RandomPartitioningTest::graphDump([[maybe_unused]] const WrapperModel& model) {
-#ifdef GRAPH
-    const std::string name = "Test-" + std::to_string(GetParam());
-    nn::bridge_tests::graphDump(name.c_str(),
-                                reinterpret_cast<const ModelBuilder*>(model.getHandle()));
-#endif
-}
-
 class TestDriver : public SampleDriver {
 public:
     // Behaves like SampleDriver, except that it only supports
@@ -482,17 +473,18 @@ public:
     TestDriver(const char* name, std::set<Signature> signatures) :
             SampleDriver(name), mSignatures(std::move(signatures)) { }
 
-    Return<void> getCapabilities_1_1(getCapabilities_1_1_cb _hidl_cb) override {
+    Return<void> getCapabilities_1_2(getCapabilities_1_2_cb _hidl_cb) override {
         android::nn::initVLogMask();
-        Capabilities capabilities =
-                {.float32Performance = {.execTime = 0.75f, .powerUsage = 0.75f},
-                 .quantized8Performance = {.execTime = 0.75f, .powerUsage = 0.75f},
-                 .relaxedFloat32toFloat16Performance = {.execTime = 0.75f, .powerUsage = 0.75f}};
+        const PerformanceInfo kPerf = {.execTime = 0.75f, .powerUsage = 0.75f};
+        Capabilities capabilities = {
+                .relaxedFloat32toFloat16PerformanceScalar = kPerf,
+                .relaxedFloat32toFloat16PerformanceTensor = kPerf,
+                .operandPerformance = nn::nonExtensionOperandPerformance(kPerf)};
         _hidl_cb(ErrorStatus::NONE, capabilities);
         return Void();
     }
 
-    Return<void> getSupportedOperations_1_1(const HidlModel& model,
+    Return<void> getSupportedOperations_1_2(const HidlModel& model,
                                             getSupportedOperations_cb cb) override {
         if (nn::validateModel(model)) {
             const size_t count = model.operations.size();
@@ -512,11 +504,14 @@ public:
         return Void();
     }
 
-    Return<ErrorStatus> prepareModel_1_1(const HidlModel& model, ExecutionPreference preference,
+    Return<ErrorStatus> prepareModel_1_2(const HidlModel& model, ExecutionPreference preference,
+                                         const hidl_vec<hidl_handle>& modelCache,
+                                         const hidl_vec<hidl_handle>& dataCache,
+                                         const HidlToken& token,
                                          const sp<IPreparedModelCallback>& callback) override {
         // NOTE: We verify that all operations in the model are supported.
         ErrorStatus outStatus = ErrorStatus::INVALID_ARGUMENT;
-        auto ret = getSupportedOperations_1_1(
+        auto ret = getSupportedOperations_1_2(
             model,
             [&outStatus](ErrorStatus inStatus, const hidl_vec<bool>& supportedOperations) {
                 if (inStatus == ErrorStatus::NONE) {
@@ -527,9 +522,10 @@ public:
                 }
             });
         if (ret.isOk() && (outStatus == ErrorStatus::NONE)) {
-            return SampleDriver::prepareModel_1_1(model, preference, callback);
+            return SampleDriver::prepareModel_1_2(model, preference, modelCache, dataCache, token,
+                                                  callback);
         } else {
-            callback->notify(ErrorStatus::INVALID_ARGUMENT, nullptr);
+            callback->notify_1_2(ErrorStatus::INVALID_ARGUMENT, nullptr);
             return ErrorStatus::INVALID_ARGUMENT;
         }
     }
@@ -908,7 +904,6 @@ TEST_P(RandomPartitioningTest, Test) {
     }
 #endif
     ASSERT_EQ(model.finish(), Result::NO_ERROR);
-    graphDump(model);
 
     // Non-partitioned compilation.
     TestCompilation c(&model);
@@ -935,27 +930,32 @@ TEST_P(RandomPartitioningTest, Test) {
     std::vector<std::shared_ptr<Device>> devices;
     for (unsigned i = 0; i < signaturesForDriver.size(); i++) {
         const std::string name = "TestDriver(" + std::to_string(i) + ")";
-        devices.push_back(std::make_shared<Device>(
-            name, new TestDriver(name.c_str(), signaturesForDriver[i])));
-        ASSERT_TRUE(devices.back()->initialize());
+        auto device = DeviceManager::forTest_makeDriverDevice(
+                name, new TestDriver(name.c_str(), signaturesForDriver[i]));
+        devices.push_back(device);
     }
+    // CPU fallback device
+    devices.push_back(DeviceManager::getCpuDevice());
 
     // Partitioned compilation.
     // For test cases without unknown intermediate operand sizes we require the
     // partitioning to succeed without CPU fallback. With unknown sizes we
     // retry with a fallback if the non-fallback partitioning fails and require
     // the fallback to succeed.
-    TestCompilation cNoFallback(&model);
-    TestCompilation cWithFallback(&model);
+    TestCompilation cNoFallback(&model, devices);
+    TestCompilation cWithFallback(&model, devices);
     TestCompilation *c2 = nullptr;
     ASSERT_EQ(cNoFallback.setPartitioning(DeviceManager::kPartitioningWithoutFallback),
               Result::NO_ERROR);
-    auto compilationResult = cNoFallback.finish(devices);
+    auto compilationResult = cNoFallback.finish();
     if (hasUnknownDimensions && compilationResult == Result::OP_FAILED &&
         cNoFallback.getExecutionPlan().forTest_hasSubModelOutputsOfUnknownSize()) {
         ASSERT_EQ(cWithFallback.setPartitioning(DeviceManager::kPartitioningWithFallback),
                   Result::NO_ERROR);
-        ASSERT_EQ(cWithFallback.finish(devices), Result::NO_ERROR);
+        ASSERT_EQ(cWithFallback.finish(), Result::NO_ERROR);
+        ASSERT_EQ(cWithFallback.getExecutionPlan().forTest_getKind(), ExecutionPlan::Kind::SIMPLE);
+        ASSERT_EQ(cWithFallback.getExecutionPlan().forTest_simpleGetDevice(),
+                  DeviceManager::getCpuDevice());
         c2 = &cWithFallback;
     } else {
         ASSERT_EQ(compilationResult, Result::NO_ERROR);
@@ -1048,8 +1048,7 @@ TEST_P(RandomPartitioningTest, Test) {
     //     out in that memory; and when we have inputs and outputs
     //     within the same Memory, we want the possibility that
     //     they'll be interleaved.
-    std::random_shuffle(ioDescriptors.begin(), ioDescriptors.end(),
-                        [this](unsigned n) { return randUInt(n); });
+    std::shuffle(ioDescriptors.begin(), ioDescriptors.end(), mRandNumEng);
     TestMemories ioMemories;
     for (auto &desc : ioDescriptors) {
         if (randFrac() < 0.5) {
