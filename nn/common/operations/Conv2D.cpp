@@ -22,6 +22,7 @@
 #include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
 
 #include "Tracing.h"
+#include <mutex>
 
 namespace android {
 namespace nn {

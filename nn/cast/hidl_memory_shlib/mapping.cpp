@@ -75,7 +75,8 @@ sp<IMemory> mapMemory(const hidl_memory& memory) {
         return nullptr;
     }
 
-    Return<sp<IMemory>> ret = mapper->mapMemory(memory);
+    sp<IMemory> map_mem = mapper->mapMemory(memory);
+    Return<sp<IMemory>> ret(map_mem);
 
     if (!ret.isOk()) {
         LOG(ERROR) << "hidl_memory map returned transport error.";

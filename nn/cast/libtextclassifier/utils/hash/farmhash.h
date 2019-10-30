@@ -17,8 +17,8 @@
  * limitations under the License.
  */
 
-#ifndef LIBTEXTCLASSIFIER_UTIL_HASH_FARMHASH_H_
-#define LIBTEXTCLASSIFIER_UTIL_HASH_FARMHASH_H_
+#ifndef LIBTEXTCLASSIFIER_UTILS_HASH_FARMHASH_H_
+#define LIBTEXTCLASSIFIER_UTILS_HASH_FARMHASH_H_
 
 #include <assert.h>
 #include <stdint.h>
@@ -27,7 +27,7 @@
 #include <utility>
 
 #ifndef NAMESPACE_FOR_HASH_FUNCTIONS
-#define NAMESPACE_FOR_HASH_FUNCTIONS tc2farmhash
+#define NAMESPACE_FOR_HASH_FUNCTIONS tc3farmhash
 #endif
 
 namespace NAMESPACE_FOR_HASH_FUNCTIONS {
@@ -264,4 +264,4 @@ inline uint128_t Fingerprint128(const Str& s) {
 
 }  // namespace NAMESPACE_FOR_HASH_FUNCTIONS
 
-#endif  // LIBTEXTCLASSIFIER_UTIL_HASH_FARMHASH_H_
+#endif  // LIBTEXTCLASSIFIER_UTILS_HASH_FARMHASH_H_

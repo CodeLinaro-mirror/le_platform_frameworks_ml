@@ -19,11 +19,11 @@
 
 #define LOG_TAG "sp"
 
-#if defined(_LE_NN_)
+#if defined(__LE_NN__)
 #include "external/android-base/logging.h"
 #else
 #include <log/log.h>
-#endif  // _LE_NN_
+#endif  // __LE_NN__
 
 namespace android {
 

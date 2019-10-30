@@ -21,12 +21,14 @@
 #include "Utils.h"
 
 #include <android-base/file.h>
+#ifndef __LE_NN__
 #include <android-base/properties.h>
 #include <android/content/pm/IPackageManagerNative.h>
 #include <binder/IServiceManager.h>
 #include <procpartition/procpartition.h>
-#include <algorithm>
 #include <string_view>
+#endif
+#include <algorithm>
 
 namespace android {
 namespace nn {
@@ -36,9 +38,12 @@ namespace nn {
 #if __cplusplus >= 202000L
 #error "When upgrading to C++20, remove this error and file a bug to remove this workaround."
 #endif
+
+#ifndef __LE_NN__
 inline bool StartsWith(std::string_view sv, std::string_view prefix) {
     return sv.substr(0u, prefix.size()) == prefix;
 }
+#endif
 
 namespace {
 
@@ -59,7 +64,11 @@ bool equal(const Extension& a, const Extension& b) {
 // which can't use NNAPI vendor extensions).
 const char kVExtProductDeny[] = "ro.nnapi.extensions.deny_on_product";
 bool isNNAPIVendorExtensionsUseAllowedInProductImage() {
+#ifdef __LE_NN__
+    const std::string vExtProductDeny("");
+#else
     const std::string vExtProductDeny = android::base::GetProperty(kVExtProductDeny, "");
+#endif
     return vExtProductDeny.empty();
 }
 
@@ -73,7 +82,7 @@ std::vector<std::string> getVendorExtensionWhitelistedApps() {
     std::string data;
     // Whitelist CTS by default.
     std::vector<std::string> whitelist = {kCtsWhitelist};
-
+#ifndef __LE_NN__
     if (!android::base::ReadFileToString(kAppWhitelistPath, &data)) {
         // Return default whitelist (no app can use extensions).
         LOG(INFO) << "Failed to read " << kAppWhitelistPath
@@ -92,12 +101,14 @@ std::vector<std::string> getVendorExtensionWhitelistedApps() {
             LOG(ERROR) << kAppWhitelistPath << " - Invalid entry: " << line;
         }
     }
+#endif
     return whitelist;
 }
 
 // Query PackageManagerNative service about Android app properties.
 // On success, it will populate appPackageInfo->app* fields.
 bool fetchAppPackageLocationInfo(uid_t uid, TypeManager::AppPackageInfo* appPackageInfo) {
+#ifndef __LE_NN__
     sp<::android::IServiceManager> sm(::android::defaultServiceManager());
     sp<::android::IBinder> binder(sm->getService(String16("package_native")));
     if (binder == nullptr) {
@@ -135,10 +146,14 @@ bool fetchAppPackageLocationInfo(uid_t uid, TypeManager::AppPackageInfo* appPack
     appPackageInfo->appIsOnProductImage =
             ((flags & content::pm::IPackageManagerNative::LOCATION_PRODUCT) != 0);
     return true;
+#else
+    return false;
+#endif
 }
 
 // Check if this process is allowed to use NNAPI Vendor extensions.
 bool isNNAPIVendorExtensionsUseAllowed(const std::vector<std::string>& whitelist) {
+#ifndef __LE_NN__
     TypeManager::AppPackageInfo appPackageInfo = {
             .binaryPath = ::android::procpartition::getExe(getpid()),
             .appPackageName = "",
@@ -155,6 +170,9 @@ bool isNNAPIVendorExtensionsUseAllowed(const std::vector<std::string>& whitelist
     }
     return TypeManager::isExtensionsUseAllowed(
             appPackageInfo, isNNAPIVendorExtensionsUseAllowedInProductImage(), whitelist);
+#else
+    return false;
+#endif
 }
 
 }  // namespace
@@ -166,6 +184,7 @@ TypeManager::TypeManager() {
     findAvailableExtensions();
 }
 
+#ifndef __LE_NN__
 bool TypeManager::isExtensionsUseAllowed(const AppPackageInfo& appPackageInfo,
                                          bool useOnProductImageEnabled,
                                          const std::vector<std::string>& whitelist) {
@@ -198,6 +217,7 @@ bool TypeManager::isExtensionsUseAllowed(const AppPackageInfo& appPackageInfo,
     }
     return false;
 }
+#endif
 
 void TypeManager::findAvailableExtensions() {
     for (const std::shared_ptr<Device>& device : mDeviceManager->getDrivers()) {

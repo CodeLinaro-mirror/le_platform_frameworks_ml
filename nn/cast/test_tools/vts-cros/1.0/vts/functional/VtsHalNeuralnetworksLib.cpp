@@ -18,6 +18,10 @@
 
 #include "VtsHalNeuralnetworksLib.h"
 
+#include <android-base/logging.h>
+
+#include "Callbacks.h"
+
 namespace android {
 namespace hardware {
 namespace neuralnetworks {
@@ -46,6 +50,7 @@ void NeuralnetworksHidlTest::SetUp() {
     ::testing::VtsHalTargetTestBase::SetUp();
     NeuralnetworksEnvironment *env = NeuralnetworksEnvironment::getInstance();
     device = env->getDevice();
+    ASSERT_NE(nullptr, device.get());
 }
 
 void NeuralnetworksHidlTest::TearDown() {
@@ -55,6 +60,12 @@ void NeuralnetworksHidlTest::TearDown() {
 
 }  // namespace functional
 }  // namespace vts
+}  // namespace V1_0
+}  // namespace neuralnetworks
+}  // namespace hardware
+}  // namespace android
+
+namespace android::hardware::neuralnetworks::V1_0 {
 
 ::std::ostream& operator<<(::std::ostream& os, ErrorStatus errorStatus) {
     return os << toString(errorStatus);
@@ -64,10 +75,7 @@ void NeuralnetworksHidlTest::TearDown() {
     return os << toString(deviceStatus);
 }
 
-}  // namespace V1_0
-}  // namespace neuralnetworks
-}  // namespace hardware
-}  // namespace android
+}  // namespace android::hardware::neuralnetworks::V1_0
 
 using android::hardware::neuralnetworks::V1_0::vts::functional::NeuralnetworksEnvironment;
 

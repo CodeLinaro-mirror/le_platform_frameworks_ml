@@ -16,7 +16,7 @@
 
 #define LOG_TAG "neuralnetworks_hidl_hal_test"
 
-#if defined(_LE_NN_)
+#if defined(__LE_NN__)
 #include "VtsHalNeuralnetworksLib.h"
 #else
 #include "VtsHalNeuralnetworks.h"
@@ -37,8 +37,8 @@ using V1_0::OperandType;
 namespace vts {
 namespace functional {
 
-using ::android::hardware::neuralnetworks::V1_0::implementation::ExecutionCallback;
-using ::android::hardware::neuralnetworks::V1_0::implementation::PreparedModelCallback;
+using ::android::hardware::neuralnetworks::V1_2::implementation::ExecutionCallback;
+using ::android::hardware::neuralnetworks::V1_2::implementation::PreparedModelCallback;
 
 ///////////////////////// UTILITY FUNCTIONS /////////////////////////
 

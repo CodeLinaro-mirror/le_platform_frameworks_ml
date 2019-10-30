@@ -151,7 +151,10 @@
 #define NNTRACE_LAYER_OTHER "LO"
 #define NNTRACE_LAYER_UTILITY "LU"              // Code used from multiple layers
 
-
+#if defined(__LE_NN__)
+#define NNTRACE_NAME_1(name) {}
+#define NNTRACE_NAME_SWITCH(name) {}
+#else
 // Implementation
 //
 // Almost same as ATRACE_NAME, but enforcing explicit distinction between
@@ -165,7 +168,7 @@
 #define NNTRACE_NAME_SWITCH(name) android::ScopedTrace PASTE(___tracer, __LINE__) \
         (ATRACE_TAG, name); \
         (void)___tracer_1  // ensure switch is only used after a basic trace
-
+#endif
 
 // Disallow use of raw ATRACE macros
 #undef ATRACE_NAME

@@ -22,6 +22,7 @@
 
 #include "Tracing.h"
 #include "tensorflow/lite/kernels/internal/common.h"
+#include <mutex>
 
 namespace android {
 namespace nn {

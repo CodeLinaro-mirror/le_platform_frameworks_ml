@@ -182,7 +182,7 @@
 
 // LightRefBase used to be declared in this header, so we have to include it
 
-#if defined(_LE_NN_)
+#if defined(__LE_NN__)
 #include "external/utils/LightRefBase.h"
 #include "external/utils/StrongPointer.h"
 #include "external/utils/TypeHelpers.h"
@@ -190,7 +190,7 @@
 #include <utils/LightRefBase.h>
 #include <utils/StrongPointer.h>
 #include <utils/TypeHelpers.h>
-#endif  // _LE_NN_
+#endif  // __LE_NN__
 // ---------------------------------------------------------------------------
 namespace android {
 

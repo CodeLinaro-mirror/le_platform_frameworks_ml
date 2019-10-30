@@ -18,6 +18,7 @@
 #define __VTS_HAL_HIDL_TARGET_TEST_ENV_BASE_H
 
 #include <gtest/gtest.h>
+#include <map>
 
 static constexpr const char* kDefaultServiceName = "default";
 
@@ -128,6 +129,12 @@ class VtsHalHidlTargetTestEnvBase : public ::testing::Environment {
    * Internal method to add a hal service instance.
    */
   void addHalServiceInstance(const string& halServiceInstance);
+
+  /*
+   * Helper method to check whether the given halServiceInstance is well
+   * formatted.
+   */
+  bool isValidInstance(const string& halServiceInstance);
 
   // Map of hal instances with their correpoding service names.
   map<string, string> halServiceInstances_;

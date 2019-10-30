@@ -89,7 +89,7 @@ std::shared_ptr<VersionedIPreparedModel> VersionedIPreparedModel::create(
         LOG(ERROR) << "VersionedIPreparedModel::create -- passed invalid preparedModel object.";
         return nullptr;
     }
-
+#ifndef __LE_NN__
     // create death handler object
     sp<IPreparedModelDeathHandler> deathHandler = new (std::nothrow) IPreparedModelDeathHandler();
     if (!deathHandler) {
@@ -112,26 +112,38 @@ std::shared_ptr<VersionedIPreparedModel> VersionedIPreparedModel::create(
     // return a valid VersionedIPreparedModel object
     return std::make_shared<VersionedIPreparedModel>(std::move(preparedModel),
                                                      std::move(deathHandler));
+#else
+    return std::make_shared<VersionedIPreparedModel>(std::move(preparedModel));
+#endif
 }
 
+#ifndef __LE_NN__
 VersionedIPreparedModel::VersionedIPreparedModel(sp<V1_0::IPreparedModel> preparedModel,
                                                  sp<IPreparedModelDeathHandler> deathHandler)
     : mPreparedModelV1_0(std::move(preparedModel)),
       mPreparedModelV1_2(V1_2::IPreparedModel::castFrom(mPreparedModelV1_0).withDefault(nullptr)),
       mDeathHandler(std::move(deathHandler)) {}
+#else
+VersionedIPreparedModel::VersionedIPreparedModel(sp<V1_0::IPreparedModel> preparedModel)
+    : mPreparedModelV1_0(std::move(preparedModel)),
+      mPreparedModelV1_2(dynamic_cast<V1_2::IPreparedModel*>(mPreparedModelV1_0.get())) {}
+#endif
 
 VersionedIPreparedModel::~VersionedIPreparedModel() {
+#ifndef __LE_NN__
     // It is safe to ignore any errors resulting from this unlinkToDeath call
     // because the VersionedIPreparedModel object is already being destroyed and
     // its underlying IPreparedModel object is no longer being used by the NN
     // runtime.
     mPreparedModelV1_0->unlinkToDeath(mDeathHandler).isOk();
+#endif
 }
 
 ErrorStatus VersionedIPreparedModel::execute(const Request& request, MeasureTiming measure,
                                              const sp<ExecutionCallback>& callback) {
+#ifndef __LE_NN__
     const auto scoped = mDeathHandler->protectCallback(callback);
-
+#endif
     if (mPreparedModelV1_2 != nullptr) {
         Return<ErrorStatus> ret = mPreparedModelV1_2->execute_1_2(request, measure, callback);
         callback->wait();
@@ -192,11 +204,11 @@ std::shared_ptr<ExecutionBurstController> VersionedIPreparedModel::configureExec
     }
 }
 
-bool VersionedIPreparedModel::operator==(nullptr_t) const {
+bool VersionedIPreparedModel::operator==(std::nullptr_t) const {
     return mPreparedModelV1_0 == nullptr;
 }
 
-bool VersionedIPreparedModel::operator!=(nullptr_t) const {
+bool VersionedIPreparedModel::operator!=(std::nullptr_t) const {
     return mPreparedModelV1_0 != nullptr;
 }
 
@@ -206,7 +218,7 @@ std::shared_ptr<VersionedIDevice> VersionedIDevice::create(sp<V1_0::IDevice> dev
         LOG(ERROR) << "VersionedIDevice::create -- passed invalid device object.";
         return nullptr;
     }
-
+#ifndef __LE_NN__
     // create death handler object
     sp<IDeviceDeathHandler> deathHandler = new (std::nothrow) IDeviceDeathHandler();
     if (!deathHandler) {
@@ -227,20 +239,33 @@ std::shared_ptr<VersionedIDevice> VersionedIDevice::create(sp<V1_0::IDevice> dev
 
     // return a valid VersionedIDevice object
     return std::make_shared<VersionedIDevice>(std::move(device), std::move(deathHandler));
+#else
+    return std::make_shared<VersionedIDevice>(std::move(device));
+#endif
 }
 
+#ifndef __LE_NN__
 // HIDL guarantees all V1_1 interfaces inherit from their corresponding V1_0 interfaces.
 VersionedIDevice::VersionedIDevice(sp<V1_0::IDevice> device, sp<IDeviceDeathHandler> deathHandler)
     : mDeviceV1_0(std::move(device)),
       mDeviceV1_1(V1_1::IDevice::castFrom(mDeviceV1_0).withDefault(nullptr)),
       mDeviceV1_2(V1_2::IDevice::castFrom(mDeviceV1_0).withDefault(nullptr)),
       mDeathHandler(std::move(deathHandler)) {}
+#else
+// HIDL guarantees all V1_1 interfaces inherit from their corresponding V1_0 interfaces.
+VersionedIDevice::VersionedIDevice(sp<V1_0::IDevice> device)
+    : mDeviceV1_0(std::move(device)),
+      mDeviceV1_1(dynamic_cast<V1_1::IDevice*>(mDeviceV1_0.get())),
+      mDeviceV1_2(dynamic_cast<V1_2::IDevice*>(mDeviceV1_0.get())) {}
+#endif
 
 VersionedIDevice::~VersionedIDevice() {
+#ifndef __LE_NN__
     // It is safe to ignore any errors resulting from this unlinkToDeath call
     // because the VersionedIDevice object is already being destroyed and its
     // underlying IDevice object is no longer being used by the NN runtime.
     mDeviceV1_0->unlinkToDeath(mDeathHandler).isOk();
+#endif
 }
 
 std::pair<ErrorStatus, Capabilities> VersionedIDevice::getCapabilities() {
@@ -358,8 +383,9 @@ ErrorStatus VersionedIDevice::prepareModel(const Model& model, ExecutionPreferen
                                            const hidl_vec<hidl_handle>& dataCache,
                                            const HidlToken& token,
                                            const sp<PreparedModelCallback>& callback) {
+#ifndef __LE_NN__
     const auto scoped = mDeathHandler->protectCallback(callback);
-
+#endif
     if (mDeviceV1_2 != nullptr) {
         Return<ErrorStatus> ret = mDeviceV1_2->prepareModel_1_2(model, preference, modelCache,
                                                                 dataCache, token, callback);
@@ -435,8 +461,9 @@ ErrorStatus VersionedIDevice::prepareModelFromCache(const hidl_vec<hidl_handle>&
                                                     const hidl_vec<hidl_handle>& dataCache,
                                                     const HidlToken& token,
                                                     const sp<PreparedModelCallback>& callback) {
+#ifndef __LE_NN__
     const auto scoped = mDeathHandler->protectCallback(callback);
-
+#endif
     if (mDeviceV1_2 != nullptr) {
         Return<ErrorStatus> ret =
                 mDeviceV1_2->prepareModelFromCache(modelCache, dataCache, token, callback);
@@ -472,11 +499,11 @@ DeviceStatus VersionedIDevice::getStatus() {
 
 int64_t VersionedIDevice::getFeatureLevel() {
     if (mDeviceV1_2 != nullptr) {
-        return __ANDROID_API_Q__;
+        return 29; //__ANDROID_API_Q__;
     } else if (mDeviceV1_1 != nullptr) {
-        return __ANDROID_API_P__;
+        return 28; //__ANDROID_API_P__;
     } else if (mDeviceV1_0 != nullptr) {
-        return __ANDROID_API_O_MR1__;
+        return 27; //__ANDROID_API_O_MR1__;
     } else {
         LOG(ERROR) << "Device not available!";
         return -1;
@@ -543,11 +570,11 @@ std::tuple<ErrorStatus, uint32_t, uint32_t> VersionedIDevice::getNumberOfCacheFi
     }
 }
 
-bool VersionedIDevice::operator==(nullptr_t) const {
+bool VersionedIDevice::operator==(std::nullptr_t) const {
     return mDeviceV1_0 == nullptr;
 }
 
-bool VersionedIDevice::operator!=(nullptr_t) const {
+bool VersionedIDevice::operator!=(std::nullptr_t) const {
     return mDeviceV1_0 != nullptr;
 }
 

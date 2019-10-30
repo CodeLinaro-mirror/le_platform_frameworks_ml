@@ -6,6 +6,7 @@ target_include_directories(neuralnetworks_headers
 set (TARGET_NAME neuralnetworks)
 
 set (SOURCE_FILES
+    BurstBuilder.cpp
     Callbacks.cpp
     CompilationBuilder.cpp
     ExecutionBuilder.cpp
@@ -14,7 +15,8 @@ set (SOURCE_FILES
     Memory.cpp
     ModelBuilder.cpp
     NeuralNetworks.cpp
-    VersionedIDevice.cpp
+    TypeManager.cpp
+    VersionedInterfaces.cpp
 )
 
 add_library(${TARGET_NAME} SHARED ${SOURCE_FILES})

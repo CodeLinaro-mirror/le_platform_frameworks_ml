@@ -20,6 +20,7 @@
 #include "OperationResolver.h"
 #include "OperationsUtils.h"
 #include "Tracing.h"
+#include <cstring>
 
 namespace android {
 namespace nn {

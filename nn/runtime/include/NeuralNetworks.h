@@ -42,11 +42,20 @@
  *   - DO NOT CHANGE THE LAYOUT OR SIZE OF STRUCTURES
  */
 
+#ifndef __LE_NN__
 #include <android/hardware_buffer.h>
+#endif
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/cdefs.h>
 
+#ifdef __LE_NN__
+#ifndef __INTRODUCED_IN
+#define __INTRODUCED_IN(__api_level)
+#endif
+
+typedef struct AHardwareBuffer AHardwareBuffer;
+#endif
 __BEGIN_DECLS
 
 /**

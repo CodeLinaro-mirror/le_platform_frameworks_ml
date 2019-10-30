@@ -28,29 +28,28 @@
 
 #include "external/android-base/macros.h"
 
-namespace android {
-namespace base {
+namespace android
+{
+namespace base
+{
 
 #define LOG_BUF_SIZE 4096
 
-enum LogSeverity {
-  VERBOSE,
-  DEBUG,
-  INFO,
-  WARNING,
-  ERROR,
-  FATAL,
+enum LogSeverity
+{
+  VERBOSE, DEBUG, INFO, WARNING, ERROR, FATAL,
 };
 
 // This class is used to explicitly ignore values in the conditional
 // logging macros.  This avoids compiler warnings like "value computed
 // is not used" and "statement has no effect".
-class LogMessageVoidify {
+class LogMessageVoidify
+{
  public:
   LogMessageVoidify() = default;
   // This has to be an operator with a precedence lower than << but
   // higher than ?:
-  void operator&(std::ostream&) { }
+  void operator&(std::ostream&) {}
 };
 
 // This is never instantiated. This is only used with LogMessageVoidify to have
@@ -69,9 +68,16 @@ static std::ostream* local_swallow_stream;
 // TODO(bingxue): Differentiate ABORT_AFTER_LOG_FATAL for clang static analyzer
 // when a LogMessage class is properly implemented.
 #define ABORT_AFTER_LOG_FATAL for (;; abort())
-struct LogAbortAfterFullExpr {
-  ~LogAbortAfterFullExpr() __attribute__((noreturn)) { abort(); }
-  explicit operator bool() const { return false; }
+struct LogAbortAfterFullExpr
+{
+  ~LogAbortAfterFullExpr() __attribute__((noreturn))
+  {
+    abort();
+  }
+  explicit operator bool() const
+  {
+    return false;
+  }
 };
 // Provides an expression that evaluates to the truthiness of `x`, automatically
 // aborting if `c` is true.
@@ -88,6 +94,30 @@ struct LogAbortAfterFullExpr {
   LIKELY((x)) || ABORT_AFTER_LOG_FATAL_EXPR(false) || \
       LOG(FATAL) << "Check failed: " #x << " "
 
+// clang-format off
+// Helper for CHECK_xx(x,y) macros.
+#define CHECK_OP(LHS, RHS, OP)                                                 \
+  for (auto _values = ::android::base::MakeEagerEvaluator(LHS, RHS);           \
+       UNLIKELY(!(_values.lhs OP _values.rhs));                                \
+       /* empty */)                                                            \
+  ABORT_AFTER_LOG_FATAL_EXPR(false) ||                                         \
+  LOG(FATAL)  << "Check failed: " << #LHS << " " << #OP << " " << #RHS << " (" #LHS "=" << _values.lhs \
+              << ", " #RHS "=" << _values.rhs << ") "
+// clang-format on
+
+// Check whether a condition holds between x and y, LOG(FATAL) if not. The value
+// of the expressions x and y is evaluated once. Extra logging can be appended
+// using << after. For example:
+//
+//     CHECK_NE(0 == 1, false) results in
+//       "Check failed: false != false (0==1=false, false=false) ".
+#define CHECK_EQ(x, y) CHECK_OP(x, y, == )
+#define CHECK_NE(x, y) CHECK_OP(x, y, != )
+#define CHECK_LE(x, y) CHECK_OP(x, y, <= )
+#define CHECK_LT(x, y) CHECK_OP(x, y, < )
+#define CHECK_GE(x, y) CHECK_OP(x, y, >= )
+#define CHECK_GT(x, y) CHECK_OP(x, y, > )
+
 #define EAT_STREAM_PARAMETERS \
   true ? (void) 0 : ::android::base::LogMessageVoidify() & *::android::base::local_swallow_stream
 
@@ -103,7 +133,6 @@ struct LogAbortAfterFullExpr {
 #else
 #define DCHECK(condition)  CHECK(condition)
 #endif // !DCHECK_IS_ON()
-
 #define DCHECK_EQ(v1, v2) DCHECK(v1 == v2)
 
 // TODO(bingxue): We should implement a proper VLOG and proper log stream.
@@ -112,12 +141,58 @@ struct LogAbortAfterFullExpr {
 #else // DCHECK_IS_ON()
 #define DLOG(severity) LOG(severity)
 #endif // DCHECK_IS_ON()
-
 #define DLOG_IF(severity, condition) \
   !(condition) ? (void)0 : DLOG(severity)
 
+// Temporary class created to evaluate the LHS and RHS, used with
+// MakeEagerEvaluator to infer the types of LHS and RHS.
+template<typename LHS, typename RHS>
+struct EagerEvaluator
+{
+  constexpr EagerEvaluator(LHS l, RHS r) :
+    lhs(l), rhs(r)
+  {
+  }
+  LHS lhs;
+  RHS rhs;
+};
+
+// Helper function for CHECK_xx.
+template <typename LHS, typename RHS>
+constexpr EagerEvaluator<LHS, RHS> MakeEagerEvaluator(LHS lhs, RHS rhs) {
+  return EagerEvaluator<LHS, RHS>(lhs, rhs);
+}
+
+// Explicitly instantiate EagerEvalue for pointers so that char*s aren't treated
+// as strings. To compare strings use CHECK_STREQ and CHECK_STRNE. We rely on
+// signed/unsigned warnings to protect you against combinations not explicitly
+// listed below.
+#define EAGER_PTR_EVALUATOR(T1, T2)               \
+  template <>                                     \
+  struct EagerEvaluator<T1, T2> {                 \
+    EagerEvaluator(T1 l, T2 r)                    \
+        : lhs(reinterpret_cast<const void*>(l)),  \
+          rhs(reinterpret_cast<const void*>(r)) { \
+    }                                             \
+    const void* lhs;                              \
+    const void* rhs;                              \
+  }
+EAGER_PTR_EVALUATOR(const char*, const char*);
+EAGER_PTR_EVALUATOR(const char*, char*);
+EAGER_PTR_EVALUATOR(char*, const char*);
+EAGER_PTR_EVALUATOR(char*, char*);
+EAGER_PTR_EVALUATOR(const unsigned char*, const unsigned char*);
+EAGER_PTR_EVALUATOR(const unsigned char*, unsigned char*);
+EAGER_PTR_EVALUATOR(unsigned char*, const unsigned char*);
+EAGER_PTR_EVALUATOR(unsigned char*, unsigned char*);
+EAGER_PTR_EVALUATOR(const signed char*, const signed char*);
+EAGER_PTR_EVALUATOR(const signed char*, signed char*);
+EAGER_PTR_EVALUATOR(signed char*, const signed char*);
+EAGER_PTR_EVALUATOR(signed char*, signed char*);
+
 // Thread unsafe ALOG macros for replacing utils/Log.h.
-inline void nn_print_log(char* buf, int buf_size, const char* fmt, ...) {
+inline void nn_print_log(char* buf, int buf_size, const char* fmt, ...)
+{
   va_list ap;
   va_start(ap, fmt);
   vsnprintf(buf, buf_size, fmt, ap);
@@ -142,7 +217,6 @@ inline void nn_print_log(char* buf, int buf_size, const char* fmt, ...) {
 #else
 #define ALOGD(...) ALOG(DEBUG, __VA_ARGS__)
 #endif // !DCHECK_IS_ON
-
 // Log a fatal error. If the given condition fails, this stops program execution
 // like a normal assertion but also generates the given message. This is NOT
 // stripped from release builds. Not that the condition test is -inverted- from
@@ -161,7 +235,6 @@ inline void nn_print_log(char* buf, int buf_size, const char* fmt, ...) {
 #ifndef LOG_ALWAYS_FATAL
 #define LOG_ALWAYS_FATAL(...) LOG_ALWAYS_FATAL_IF(true, __VA_ARGS__)
 #endif  // LOG_ALWAYS_FATAL
-
 // Assertion that generates a log message when the assertion fails.
 // TODO(bingxue): ALOG_ASSERT should be stripped out of release builds.
 #ifndef ALOG_ASSERT

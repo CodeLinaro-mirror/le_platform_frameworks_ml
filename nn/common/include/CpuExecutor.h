@@ -22,8 +22,13 @@
 #include "OperationsUtils.h"
 #include "Utils.h"
 
-#include <android-base/macros.h>
+#if defined(__LE_NN__)
+#include "external/android-base/macros.h"
+#else
 #include <ui/GraphicBuffer.h>
+#include <android-base/macros.h>
+#endif
+
 #include <algorithm>
 #include <vector>
 
@@ -124,7 +129,9 @@ private:
     hidl_memory mHidlMemory;           // always used
     uint8_t* mBuffer = nullptr;        // always used
     sp<IMemory> mMemory;               // only used when hidlMemory.name() == "ashmem"
+#if !defined(__LE_NN__)
     sp<GraphicBuffer> mGraphicBuffer;  // only used when hidlMemory.name() == "hardware_buffer_blob"
+#endif
 };
 
 bool setRunTimePoolInfosFromHidlMemories(std::vector<RunTimePoolInfo>* poolInfos,
@@ -226,7 +233,9 @@ public:
     ~ScopedOpenmpSettings();
     DISALLOW_COPY_AND_ASSIGN(ScopedOpenmpSettings);
 private:
+#if !defined(__LE_NN__)
     int mBlocktimeInitial;
+#endif
 #if NNAPI_LIMIT_CPU_THREADS
     int mMaxThreadsInitial;
 #endif

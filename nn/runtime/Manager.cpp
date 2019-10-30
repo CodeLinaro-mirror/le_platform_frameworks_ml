@@ -22,13 +22,16 @@
 #include "Tracing.h"
 #include "Utils.h"
 
+#if !defined(__LE_NN__)
 #include <android/hidl/manager/1.0/IServiceManager.h>
 #include <build/version.h>
 #include <hidl/HidlTransportSupport.h>
 #include <hidl/ServiceManagement.h>
+#endif
 
 #include <algorithm>
 #include <functional>
+#include <dlfcn.h>
 
 using ::android::hardware::neuralnetworks::V1_2::implementation::ExecutionCallback;
 using ::android::hardware::neuralnetworks::V1_2::implementation::PreparedModelCallback;
@@ -340,7 +343,11 @@ class CpuDevice : public Device {
     CpuDevice() = default;
     const int64_t kFeatureLevel = __ANDROID_API__;
     const std::string kName = "nnapi-reference";
+#if defined(__LE_NN__)
+    const std::string kVersionString = "n/a";
+#else
     const std::string kVersionString = build::GetBuildNumber();
+#endif
     // Since the performance is a ratio compared to the CPU performance,
     // by definition the performance of the CPU is 1.0.
     const PerformanceInfo kPerformance = {.execTime = 1.0f, .powerUsage = 1.0f};
@@ -392,6 +399,49 @@ std::shared_ptr<Device> DeviceManager::forTest_makeDriverDevice(const std::strin
 }
 
 void DeviceManager::findAvailableDevices() {
+#if defined(__LE_NN__)
+    // LE doesn't support HIDL service registration and querying,
+    // so loads the devices as shared libraries.
+    std::string path(INSTALL_LIB_DIR"/nn/");
+    DIR *dir = opendir(path.c_str());
+    if (nullptr == dir) {
+        LOG(ERROR) << "Failed to open nn drivers folder " << strerror(errno);
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (std::string(entry->d_name).compare(".") == 0 ||
+            std::string(entry->d_name).compare("..") == 0) {
+            continue;
+        }
+        std::string library = path + entry->d_name;
+        try {
+            void *lib_handle;
+            dlerror();
+            lib_handle = dlopen(library.c_str(), RTLD_NOW);
+
+            const char *dlsym_error = dlerror();
+            if (!lib_handle || dlsym_error) {
+                LOG(ERROR) << dlsym_error;
+                continue;
+            }
+            mLibHandles.push_back(lib_handle);
+            sp<V1_0::IDevice> (*NNHalDeviceNewFunc)();
+            NNHalDeviceNewFunc =
+                (sp<V1_0::IDevice> (*)()) dlsym(lib_handle, "NNHalDeviceNew");
+            if (dlsym_error) {
+                LOG(ERROR) << dlsym_error;
+                continue;
+            }
+            sp<V1_0::IDevice> device(NNHalDeviceNewFunc());
+            registerDevice(entry->d_name, device);
+        } catch (const std::exception &e) {
+            LOG(ERROR) << e.what();
+        }
+    }
+    closedir(dir);
+#else
     using ::android::hidl::manager::V1_0::IServiceManager;
     VLOG(MANAGER) << "findAvailableDevices";
 
@@ -412,6 +462,7 @@ void DeviceManager::findAvailableDevices() {
             registerDevice(name.c_str(), device);
         }
     });
+#endif
 
     // register CPU fallback device
     mDevices.push_back(CpuDevice::get());
@@ -437,6 +488,21 @@ DeviceManager::DeviceManager() {
     }
     mSyncExecRuntime = (getProp("debug.nn.syncexec-runtime") != 0);
 #endif  // NN_DEBUGGABLE
+}
+
+DeviceManager::~DeviceManager() {
+    for (auto &device : mDevices) {
+        device = nullptr;
+    }
+    for (auto handle : mLibHandles) {
+        try {
+            if (nullptr != handle) {
+                dlclose(handle);
+            }
+        } catch (const std::exception &e) {
+            LOG(ERROR) << e.what();
+        }
+    }
 }
 
 }  // namespace nn

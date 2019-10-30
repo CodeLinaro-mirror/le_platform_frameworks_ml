@@ -30,12 +30,12 @@ namespace hidl {
 namespace allocator {
 namespace V1_0 {
 
-#if defined(_LE_NN_)
-::android::sp<IAllocator> IAllocator::getService(const std::string& /*type*/) {
+#if defined(__LE_NN__)
+::android::sp<IAllocator> IAllocator::getService(const std::string& /*type*/, bool getStub) {
   return new implementation::ShpAllocator;
 }
 
-#endif  // _LE_NN_
+#endif  // __LE_NN__
 
 namespace implementation {
 

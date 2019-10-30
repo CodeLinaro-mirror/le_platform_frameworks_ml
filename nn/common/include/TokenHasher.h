@@ -18,6 +18,7 @@
 #define ANDROID_ML_NN_COMMON_TOKEN_HASHER_H
 
 #include <cstring>
+#include <cstdint>
 #include <vector>
 
 #include <android-base/macros.h>

@@ -224,5 +224,31 @@ bool RNN::RNNStep(const T* inputData, const Shape& inputShape, const T* auxInput
     return true;
 }
 
+template bool RNN::RNNStep<float>(const float* inputData, const Shape& inputShape, const float* hiddenStateInputData,
+    const float* biasData, const float* weightsData, const Shape& weightsShape,
+    const float* recurrentWeightsData, const Shape& recurrentWeightsShape,
+    const int32_t activation, float* outputData);
+
+template bool RNN::RNNStep<_Float16>(const _Float16* inputData, const Shape& inputShape, const _Float16* hiddenStateInputData,
+    const _Float16* biasData, const _Float16* weightsData, const Shape& weightsShape,
+    const _Float16* recurrentWeightsData, const Shape& recurrentWeightsShape,
+    const int32_t activation, _Float16* outputData);
+
+template bool RNN::RNNStep<float>(const float* inputData, const Shape& inputShape, const float* auxInputData,
+    const Shape& auxInputShape, const float* hiddenStateInputData, const float* biasData,
+    const float* weightsData, const Shape& weightsShape, const float* auxWeightsData,
+    const Shape& auxWeightsShape, const float* recurrentWeightsData,
+    const Shape& recurrentWeightsShape, const int32_t activation,
+    const uint32_t outputBatchStride, const uint32_t outputBatchOffset, float* outputData,
+    float* hiddenStateOutput);
+
+template bool RNN::RNNStep<_Float16>(const _Float16* inputData, const Shape& inputShape, const _Float16* auxInputData,
+    const Shape& auxInputShape, const _Float16* hiddenStateInputData, const _Float16* biasData,
+    const _Float16* weightsData, const Shape& weightsShape, const _Float16* auxWeightsData,
+    const Shape& auxWeightsShape, const _Float16* recurrentWeightsData,
+    const Shape& recurrentWeightsShape, const int32_t activation,
+    const uint32_t outputBatchStride, const uint32_t outputBatchOffset, _Float16* outputData,
+    _Float16* hiddenStateOutput);
+
 }  // namespace nn
 }  // namespace android

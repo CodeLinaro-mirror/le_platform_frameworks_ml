@@ -22,7 +22,11 @@
 #include "Tracing.h"
 #include "Utils.h"
 
+#if defined(__LE_NN__)
+#include "external/android-base/logging.h"
+#else
 #include <android-base/logging.h>
+#endif
 
 namespace android {
 namespace nn {
@@ -421,6 +425,11 @@ static bool validateOperations(const hidl_vec<VersionedOperation>& operations,
 static bool validatePools(const hidl_vec<hidl_memory>& pools) {
     for (const hidl_memory& memory : pools) {
         const auto& name = memory.name();
+#if defined(__LE_NN__)
+        if (name == "shpmem") {
+          continue;
+        }
+#endif
         if (name != "ashmem" && name != "mmap_fd" && name != "hardware_buffer_blob" &&
             name != "hardware_buffer") {
             LOG(ERROR) << "Unsupported memory type " << name;

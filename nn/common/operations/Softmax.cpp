@@ -21,6 +21,7 @@
 #include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
 
 #include "Tracing.h"
+#include <float.h>
 
 namespace android {
 namespace nn {

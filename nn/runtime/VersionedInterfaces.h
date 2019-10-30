@@ -83,7 +83,11 @@ class VersionedIDevice {
      *                     the case when the service containing the IDevice
      *                     object crashes.
      */
+#ifndef __LE_NN__
     VersionedIDevice(sp<V1_0::IDevice> device, sp<IDeviceDeathHandler> deathHandler);
+#else
+    VersionedIDevice(sp<V1_0::IDevice> device);
+#endif
 
     /**
      * Destructor for the VersionedIDevice object.
@@ -442,7 +446,7 @@ class VersionedIDevice {
      * @return bool true if V1_0::IDevice (which could be V1_1::IDevice) is
      *              valid, false otherwise.
      */
-    bool operator!=(nullptr_t) const;
+    bool operator!=(std::nullptr_t) const;
 
     /**
      * Returns whether this handle to an IDevice object is valid or not.
@@ -450,7 +454,7 @@ class VersionedIDevice {
      * @return bool true if V1_0::IDevice (which could be V1_1::IDevice) is
      *              invalid, false otherwise.
      */
-    bool operator==(nullptr_t) const;
+    bool operator==(std::nullptr_t) const;
 
    private:
     /**
@@ -477,10 +481,12 @@ class VersionedIDevice {
     sp<V1_1::IDevice> mDeviceV1_1;
     sp<V1_2::IDevice> mDeviceV1_2;
 
+#ifndef __LE_NN__
     /**
      * HIDL callback to be invoked if the service for mDeviceV1_0 crashes.
      */
     const sp<IDeviceDeathHandler> mDeathHandler;
+#endif
 };
 
 /** This class wraps an IPreparedModel object of any version. */
@@ -516,8 +522,12 @@ class VersionedIPreparedModel {
      *                     the case when the service containing the IDevice
      *                     object crashes.
      */
+#ifndef __LE_NN__
     VersionedIPreparedModel(sp<V1_0::IPreparedModel> preparedModel,
                             sp<IPreparedModelDeathHandler> deathHandler);
+#else
+    VersionedIPreparedModel(sp<V1_0::IPreparedModel> preparedModel);
+#endif
 
     /**
      * Destructor for the VersionedIPreparedModel object.
@@ -644,7 +654,7 @@ class VersionedIPreparedModel {
      * @return bool true if V1_0::IPreparedModel (which could be V1_2::IPreparedModel) is
      *              valid, false otherwise.
      */
-    bool operator!=(nullptr_t) const;
+    bool operator!=(std::nullptr_t) const;
 
     /**
      * Returns whether this handle to an IPreparedModel object is valid or not.
@@ -652,7 +662,7 @@ class VersionedIPreparedModel {
      * @return bool true if V1_0::IPreparedModel (which could be V1_2::IPreparedModel) is
      *              invalid, false otherwise.
      */
-    bool operator==(nullptr_t) const;
+    bool operator==(std::nullptr_t) const;
 
    private:
     /**
@@ -677,10 +687,12 @@ class VersionedIPreparedModel {
     sp<V1_0::IPreparedModel> mPreparedModelV1_0;
     sp<V1_2::IPreparedModel> mPreparedModelV1_2;
 
+#ifndef __LE_NN__
     /**
      * HIDL callback to be invoked if the service for mPreparedModelV1_0 crashes.
      */
     const sp<IPreparedModelDeathHandler> mDeathHandler;
+#endif
 };
 
 }  // namespace nn

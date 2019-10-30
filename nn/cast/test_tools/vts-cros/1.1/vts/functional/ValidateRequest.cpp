@@ -38,12 +38,12 @@ namespace V1_1 {
 namespace vts {
 namespace functional {
 
-using ::android::hardware::neuralnetworks::V1_0::implementation::ExecutionCallback;
-using ::android::hardware::neuralnetworks::V1_0::implementation::PreparedModelCallback;
+using ::android::hardware::neuralnetworks::V1_2::implementation::ExecutionCallback;
+using ::android::hardware::neuralnetworks::V1_2::implementation::PreparedModelCallback;
 using ::android::hidl::memory::V1_0::IMemory;
-using test_helper::MixedTyped;
-using test_helper::MixedTypedExampleType;
 using test_helper::for_all;
+using test_helper::MixedTyped;
+using test_helper::MixedTypedExample;
 
 ///////////////////////// UTILITY FUNCTIONS /////////////////////////
 
@@ -157,15 +157,15 @@ static void removeOutputTest(const sp<IPreparedModel>& preparedModel, const Requ
 
 ///////////////////////////// ENTRY POINT //////////////////////////////////
 
-std::vector<Request> createRequests(const std::vector<MixedTypedExampleType>& examples) {
+std::vector<Request> createRequests(const std::vector<MixedTypedExample>& examples) {
     const uint32_t INPUT = 0;
     const uint32_t OUTPUT = 1;
 
     std::vector<Request> requests;
 
     for (auto& example : examples) {
-        const MixedTyped& inputs = example.first;
-        const MixedTyped& outputs = example.second;
+        const MixedTyped& inputs = example.operands.first;
+        const MixedTyped& outputs = example.operands.second;
 
         std::vector<RequestArgument> inputs_info, outputs_info;
         uint32_t inputSize = 0, outputSize = 0;
@@ -174,14 +174,13 @@ std::vector<Request> createRequests(const std::vector<MixedTypedExampleType>& ex
         // The contents are copied over below.
         for_all(inputs, [&inputs_info, &inputSize](int index, auto, auto s) {
             if (inputs_info.size() <= static_cast<size_t>(index)) inputs_info.resize(index + 1);
-            RequestArgument arg{};
-            arg.location.poolIndex = INPUT;
-            arg.location.offset = 0;
-            arg.location.length = static_cast<uint32_t>(s);
-
-            RequestArgument arg_empty{};
-            arg_empty.hasNoValue = true;
-
+            RequestArgument arg = {
+                .location = {.poolIndex = INPUT, .offset = 0, .length = static_cast<uint32_t>(s)},
+                .dimensions = {},
+            };
+            RequestArgument arg_empty = {
+                .hasNoValue = true,
+            };
             inputs_info[index] = s ? arg : arg_empty;
             inputSize += s;
         });
@@ -197,11 +196,10 @@ std::vector<Request> createRequests(const std::vector<MixedTypedExampleType>& ex
         // Go through all outputs, initialize RequestArgument descriptors
         for_all(outputs, [&outputs_info, &outputSize](int index, auto, auto s) {
             if (outputs_info.size() <= static_cast<size_t>(index)) outputs_info.resize(index + 1);
-            RequestArgument arg{};
-            arg.location.poolIndex = OUTPUT;
-            arg.location.offset = 0;
-            arg.location.length = static_cast<uint32_t>(s);
-
+            RequestArgument arg = {
+                .location = {.poolIndex = OUTPUT, .offset = 0, .length = static_cast<uint32_t>(s)},
+                .dimensions = {},
+            };
             outputs_info[index] = arg;
             outputSize += s;
         });

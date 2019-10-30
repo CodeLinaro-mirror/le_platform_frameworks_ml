@@ -154,11 +154,11 @@ public:
     Timing mTiming = {};
 
     // Properties cannot be set once the execution has started.
-    std::atomic_bool mStarted = false;
+    std::atomic_bool mStarted = ATOMIC_VAR_INIT(false);
 
     // Timing and output shapes can only be queried after the execution is
     // finished.
-    std::atomic_bool mFinished = false;
+    std::atomic_bool mFinished = ATOMIC_VAR_INIT(false);
 };
 
 // class StepExecutor is used to execute a single "step" in a

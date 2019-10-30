@@ -20,12 +20,16 @@
 #include "NeuralNetworks.h"
 #include "Utils.h"
 
+#if defined(__LE_NN__)
+#include "external/cutils/native_handle.h"
+#else
+#include <cutils/native_handle.h>
+#include "vndk/hardware_buffer.h"
+#endif
+
 #include <sys/mman.h>
 #include <mutex>
 #include <unordered_map>
-#include "vndk/hardware_buffer.h"
-
-#include "external/cutils/native_handle.h"
 
 namespace android {
 namespace nn {
@@ -112,6 +116,7 @@ class MemoryFd : public Memory {
     mutable uint8_t* mMapping = nullptr;
 };
 
+#ifndef __LE_NN__
 // TODO(miaowang): move function definitions to Memory.cpp
 class MemoryAHWB : public Memory {
    public:
@@ -169,7 +174,7 @@ class MemoryAHWB : public Memory {
     const AHardwareBuffer* mHardwareBuffer = nullptr;
     AHardwareBuffer_Desc mBufferDesc;
 };
-
+#endif
 // A utility class to accumulate mulitple Memory objects and assign each
 // a distinct index number, starting with 0.
 //

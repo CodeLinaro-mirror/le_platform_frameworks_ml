@@ -20,13 +20,13 @@
 #define LOG_TAG "RefBase"
 // #define LOG_NDEBUG 0
 
-#if defined(_LE_NN_)
+#if defined(__LE_NN__)
 #include "external/android-base/logging.h"
 #include "external/utils/RefBase.h"
 #else
 #include <utils/CallStack.h>
 #include <utils/RefBase.h>
-#endif  // _LE_NN_
+#endif  // __LE_NN__
 
 #ifndef __unused
 #define __unused __attribute__((__unused__))
@@ -212,7 +212,7 @@ public:
         }
         if (dumpStack) {
             ALOGE("above errors at:");
-#if !defined(_LE_NN_)
+#if !defined(__LE_NN__)
             CallStack stack(LOG_TAG);
 #endif
         }
@@ -303,7 +303,7 @@ private:
         ref_entry* next;
         const void* id;
 #if DEBUG_REFS_CALLSTACK_ENABLED
-#if !defined(_LE_NN_)
+#if !defined(__LE_NN__)
         CallStack stack;
 #endif
 #endif
@@ -356,7 +356,7 @@ private:
                 ALOGD("\t%c ID %p (ref %d):", inc, ref->id, ref->ref);
                 ref = ref->next;
             }
-#if !defined(_LE_NN_)
+#if !defined(__LE_NN__)
             CallStack stack(LOG_TAG);
 #endif
         }

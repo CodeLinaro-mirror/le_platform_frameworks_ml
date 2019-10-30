@@ -1,14 +1,9 @@
-set (SAMPLE_DRIVER_TARGET_NAME NeuralNetworksSampleDriver_defaults)
-
-add_library(${SAMPLE_DRIVER_TARGET_NAME} STATIC SampleDriver.cpp)
-
-target_link_libraries(${SAMPLE_DRIVER_TARGET_NAME} neuralnetworks_common)
-target_link_libraries(${SAMPLE_DRIVER_TARGET_NAME} neuralnetworks_headers)
-target_link_libraries(${SAMPLE_DRIVER_TARGET_NAME} pthread)
-
 set (MINIMAL_NN_HAL_TARGET_NAME sample-minimal-nn-hal)
 
-add_library(${MINIMAL_NN_HAL_TARGET_NAME} SHARED SampleDriverMinimal.cpp)
+add_library(${MINIMAL_NN_HAL_TARGET_NAME} SHARED
+    SampleDriverMinimal.cpp
+    SampleDriver.cpp
+)
 
 target_link_libraries(${MINIMAL_NN_HAL_TARGET_NAME} neuralnetworks_common)
 target_link_libraries(${MINIMAL_NN_HAL_TARGET_NAME} neuralnetworks_headers)
@@ -22,12 +17,9 @@ target_link_libraries(${MINIMAL_NN_HAL_TARGET_NAME}
     cast_nn_hidl_base
     cast_nn_hidl_memory
     cast_nn_hidl_allocator
-)
-
-#Static libraries
-target_link_libraries(${MINIMAL_NN_HAL_TARGET_NAME}
-    NeuralNetworksSampleDriver_defaults
     neuralnetworks_common
+    neuralnetworks_headers
+    pthread
 )
 
 install(

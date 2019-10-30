@@ -21,11 +21,15 @@
 #include "Utils.h"
 #include "VersionedInterfaces.h"
 
+#if defined(__LE_NN__)
+#include "external/android-base/macros.h"
+#else
+#include <android-base/macros.h>
+#endif
+
 #include <map>
 #include <unordered_set>
 #include <vector>
-
-#include "external/android-base/macros.h"
 
 namespace android {
 namespace nn {
@@ -132,7 +136,6 @@ class DeviceManager {
    private:
     // Builds the list of available drivers and queries their capabilities.
     DeviceManager();
-
     ~DeviceManager();
 
     // Adds a device for the manager to use.

@@ -1,7 +1,7 @@
 set (TARGET_NAME textclassifier_hash)
 
 set (SOURCE_FILES
-    util/hash/farmhash.cc
+    utils/hash/farmhash.cc
     util/hash/hash.cc
 )
 
@@ -16,6 +16,13 @@ target_include_directories(${TARGET_NAME}
 install(
     DIRECTORY util/
     DESTINATION include/cast
+    FILES_MATCHING
+    PATTERN "*.h"
+)
+
+install(
+    DIRECTORY .
+    DESTINATION libtextclassifier
     FILES_MATCHING
     PATTERN "*.h"
 )

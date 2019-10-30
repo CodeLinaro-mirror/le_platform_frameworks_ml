@@ -20,13 +20,13 @@
 #ifndef ANDROID_NATIVE_HANDLE_H
 #define ANDROID_NATIVE_HANDLE_H
 
-#if defined(_LE_NN_)
+#if defined(__LE_NN__)
 #include "external/utils/RefBase.h"
 #include "external/utils/StrongPointer.h"
 #else
 #include <utils/RefBase.h>
 #include <utils/StrongPointer.h>
-#endif  // _LE_NN_
+#endif  // __LE_NN__
 
 typedef struct native_handle native_handle_t;
 

@@ -23,11 +23,15 @@
 #include <VtsHalTargetTestBase.h>
 #include <VtsHalTargetTestEnvBase.h>
 
+#if defined(__LE_NN__)
+#include "external/android-base/macros.h"
+#else
+#include <android-base/macros.h>
+#endif
+
 #include <gtest/gtest.h>
 #include <iostream>
 #include <vector>
-
-#include "external/android-base/macros.h"
 
 namespace android {
 namespace hardware {
@@ -72,14 +76,17 @@ class GeneratedTest : public NeuralnetworksHidlTest {};
 
 }  // namespace functional
 }  // namespace vts
+}  // namespace V1_0
+}  // namespace neuralnetworks
+}  // namespace hardware
+}  // namespace android
+
+namespace android::hardware::neuralnetworks::V1_0 {
 
 // pretty-print values for error messages
 ::std::ostream& operator<<(::std::ostream& os, ErrorStatus errorStatus);
 ::std::ostream& operator<<(::std::ostream& os, DeviceStatus deviceStatus);
 
-}  // namespace V1_0
-}  // namespace neuralnetworks
-}  // namespace hardware
-}  // namespace android
+}  // namespace android::hardware::neuralnetworks::V1_0
 
 #endif  // VTS_HAL_NEURALNETWORKS_V1_0_TARGET_TESTS_H

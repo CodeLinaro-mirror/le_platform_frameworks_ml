@@ -26,10 +26,16 @@
 
 #include "Eigen/Core"
 // b/109953668, disable OpenMP
+#ifdef __LE_NN__
+#undef NNAPI_OPENMP
+#else
+#include <android/hardware_buffer.h>
+#endif
+
 #ifdef NNAPI_OPENMP
 #include <omp.h>
 #endif  // NNAPI_OPENMP
-#include <android/hardware_buffer.h>
+
 #include <sys/mman.h>
 
 namespace android {
@@ -186,7 +192,23 @@ bool setInfoAndAllocateIfNeeded(RunTimeOperandInfo* info, const Shape& shape, in
         }
         uint32_t length = nonExtensionOperandSizeOfData(info->type, info->dimensions);
         if (length > 0) {
+#if defined(__LE_NN__)
+            void* data = nullptr;
+
+            // NOTE: over-align to 8 byte for shared memory to avoid unaligned
+            // access for arbitrary value types.
+            int ret = posix_memalign(&data, 8, length);
+            if (ret != 0) {
+              LOG(ERROR) << "posix_memalign failed with ret: " << ret << std::endl;
+              return false;
+            }
+            info->buffer = static_cast<uint8_t*>(data);
+            if (info->buffer == nullptr) {
+                return false;
+            }
+#else
             info->buffer = new uint8_t[length];
+#endif  // __LE_NN__
             if (info->buffer == nullptr) {
                 *result = ANEURALNETWORKS_OUT_OF_MEMORY;
                 return false;
@@ -251,7 +273,11 @@ RunTimePoolInfo::RunTimePoolInfo(const hidl_memory& hidlMemory, bool* fail) {
     uint8_t* buffer = nullptr;
 
     const auto& memType = hidlMemory.name();
+#if defined(__LE_NN__)
+    if (memType == "shpmem") {
+#else
     if (memType == "ashmem") {
+#endif  // defined(__LE_NN__)
         memory = mapMemory(hidlMemory);
         if (memory == nullptr) {
             LOG(ERROR) << "Can't map shared memory.";
@@ -276,6 +302,7 @@ RunTimePoolInfo::RunTimePoolInfo(const hidl_memory& hidlMemory, bool* fail) {
             if (fail) *fail = true;
             return;
         }
+#if !defined(__LE_NN__)
     } else if (memType == "hardware_buffer_blob") {
         auto handle = hidlMemory.handle();
         auto format = AHARDWAREBUFFER_FORMAT_BLOB;
@@ -296,6 +323,7 @@ RunTimePoolInfo::RunTimePoolInfo(const hidl_memory& hidlMemory, bool* fail) {
             return;
         }
         buffer = static_cast<uint8_t*>(gBuffer);
+#endif
     } else {
         LOG(ERROR) << "RunTimePoolInfo::set(): unsupported hidl_memory type";
         if (fail) *fail = true;
@@ -337,16 +365,22 @@ void RunTimePoolInfo::release() {
     }
 
     auto memType = mHidlMemory.name();
+#if defined(__LE_NN__)
+    if (memType == "shpmem") {
+#else
     if (memType == "ashmem") {
+#endif  // defined(__LE_NN__)
         // nothing to do
     } else if (memType == "mmap_fd") {
         size_t size = mHidlMemory.size();
         if (munmap(mBuffer, size)) {
             LOG(ERROR) << "RunTimePoolInfo::release(): Can't munmap";
         }
+#if !defined(__LE_NN__)
     } else if (memType == "hardware_buffer_blob") {
         mGraphicBuffer->unlock();
         mGraphicBuffer = nullptr;
+#endif
     } else if (memType == "") {
         // Represents a POINTER argument; nothing to do
     } else {
@@ -361,7 +395,11 @@ void RunTimePoolInfo::release() {
 // Making sure the output data are correctly updated after execution.
 bool RunTimePoolInfo::update() const {
     auto memType = mHidlMemory.name();
+#if defined(__LE_NN__)
+    if (memType == "shpmem") {
+#else
     if (memType == "ashmem") {
+#endif  // defined(__LE_NN__)
         mMemory->commit();
         return true;
     } else if (memType == "mmap_fd") {
@@ -629,7 +667,11 @@ void CpuExecutor::freeNoLongerUsedOperands(const std::vector<uint32_t>& inputs) 
         }
         info.numberOfUsesLeft--;
         if (info.numberOfUsesLeft == 0 && info.buffer != nullptr) {
+#if defined(__LE_NN__)
+            free(info.buffer);
+#else
             delete[] info.buffer;
+#endif  // __LE_NN__
             info.buffer = nullptr;
         }
     }
@@ -1758,8 +1800,10 @@ void CpuExecutor::finish(int result) {
 // b/109953668, disable OpenMP
 #ifdef NNAPI_OPENMP
 ScopedOpenmpSettings::ScopedOpenmpSettings() {
+#if !defined(__LE_NN__)
     mBlocktimeInitial = kmp_get_blocktime();
     kmp_set_blocktime(20);  // ms, see b/109645291
+#endif
 
 #if NNAPI_LIMIT_CPU_THREADS
     // Code not yet enabled. Choosing the number of threads to be based on
@@ -1777,7 +1821,10 @@ ScopedOpenmpSettings::ScopedOpenmpSettings() {
 }
 
 ScopedOpenmpSettings::~ScopedOpenmpSettings() {
+#if !defined(__LE_NN__)
     kmp_set_blocktime(mBlocktimeInitial);
+#endif
+
 #if NNAPI_LIMIT_CPU_THREADS
     Eigen::setNbThreads(mMaxThreadsInitial);
 #endif

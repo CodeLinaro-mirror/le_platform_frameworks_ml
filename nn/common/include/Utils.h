@@ -21,9 +21,12 @@
 #include "NeuralNetworks.h"
 #include "ValidateHal.h"
 
-#include <vector>
-
+#ifdef __LE_NN__
 #include "external/android-base/logging.h"
+#else
+#include <android-base/logging.h>
+#endif
+#include <vector>
 
 namespace android {
 namespace nn {

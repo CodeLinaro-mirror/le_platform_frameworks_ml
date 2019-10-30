@@ -18,6 +18,7 @@
 
 #include "VtsHalTargetTestEnvBase.h"
 
+#include <iostream>
 #include <string>
 #include <dirent.h>
 #include <dlfcn.h>
@@ -39,7 +40,7 @@ namespace testing {
 void VtsHalTargetTestEnvBase::SetUp() {
   if (!inited_) {
     ALOGE("Environment not inited, did you forget to call init()?");
-    abort();
+    exit(-1);
   }
 
   if (listAvailableDevices_) {
@@ -149,7 +150,7 @@ void VtsHalTargetTestEnvBase::addHalInstance(
     }
   } else {
     ALOGE("Existing instance %s\n", halInstance.c_str());
-    abort();
+    exit(-1);
   }
 }
 

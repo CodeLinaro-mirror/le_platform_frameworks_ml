@@ -17,11 +17,15 @@
 #ifndef __VTS_HAL_TARGET_TEST_BASE_H
 #define __VTS_HAL_TARGET_TEST_BASE_H
 
+#include <VtsHalTargetTestEnvBase.h>
 #include <gtest/gtest.h>
-#include "VtsHalTargetTestEnvBase.h"
-#include "external/android-base/logging.h"
+#if defined(__LE_NN__)
 #include "external/utils/RefBase.h"
-
+#include "external/android-base/logging.h"
+#else
+#include <hidl/HidlSupport.h>
+#include <utils/RefBase.h>
+#endif
 #define VTS_HAL_HIDL_GET_STUB "VTS_HAL_GET_STUB"
 
 using namespace std;

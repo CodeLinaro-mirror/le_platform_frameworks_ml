@@ -21,6 +21,7 @@ limitations under the License.
 #define TENSORFLOW_CORE_LIB_RANDOM_PHILOX_RANDOM_H_
 
 #include <stdlib.h>
+#include <stdint.h>
 
 // Function qualifiers that need to work on both CPU and GPU.
 #if defined(__CUDACC__)

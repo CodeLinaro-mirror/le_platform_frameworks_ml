@@ -87,10 +87,11 @@ bool depthwiseConvFloat32(const float* inputData, const Shape& inputShape, const
             .dilation_height_factor = static_cast<int16>(dilationHeightFactor),
     };
     NNTRACE_COMP_SWITCH("optimized_ops::DepthwiseConv");
+    tflite::CpuFlags cpu_flags;
     tflite::optimized_ops::DepthwiseConv(params, convertShapeToTflshape(inputShape), inputData,
                                          convertShapeToTflshape(filterShape), filterData,
                                          convertShapeToTflshape(biasShape), biasData,
-                                         convertShapeToTflshape(outputShape), outputData);
+                                         convertShapeToTflshape(outputShape), outputData, cpu_flags);
 
     return true;
 }
@@ -136,7 +137,7 @@ bool depthwiseConvQuant8(const uint8_t* inputData, const Shape& inputShape,
             .output_multiplier = output_multiplier,
     };
     NNTRACE_COMP_SWITCH("optimized_ops::DepthwiseConv");
-    tflite::optimized_ops::DepthwiseConv(params, convertShapeToTflshape(inputShape), inputData,
+    tflite::reference_ops::DepthwiseConv(params, convertShapeToTflshape(inputShape), inputData,
                                          convertShapeToTflshape(filterShape), filterData,
                                          convertShapeToTflshape(biasShape), biasData,
                                          convertShapeToTflshape(outputShape), outputData);

@@ -16,7 +16,7 @@
 
 #define LOG_TAG "neuralnetworks_hidl_hal_test"
 
-#if defined(_LE_NN_)
+#if defined(__LE_NN__)
 #include "VtsHalNeuralnetworksLib.h"
 #else
 #include "VtsHalNeuralnetworks.h"

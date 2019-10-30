@@ -19,6 +19,7 @@
 
 #include "ActivationFunctor.h"
 #include "HalOperation.h"
+#include <vector>
 
 namespace android {
 namespace nn {

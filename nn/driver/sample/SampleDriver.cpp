@@ -24,8 +24,13 @@
 #include "Tracing.h"
 #include "ValidateHal.h"
 
+#if defined(__LE_NN__)
+#include "external/android-base/logging.h"
+#else
 #include <android-base/logging.h>
 #include <hidl/LegacySupport.h>
+#endif
+
 #include <chrono>
 #include <thread>
 
@@ -196,6 +201,7 @@ Return<DeviceStatus> SampleDriver::getStatus() {
 }
 
 int SampleDriver::run() {
+#if !defined(__LE_NN__)
     android::hardware::configureRpcThreadpool(4, true);
     if (registerAsService(mName) != android::OK) {
         LOG(ERROR) << "Could not register service";
@@ -203,6 +209,7 @@ int SampleDriver::run() {
     }
     android::hardware::joinRpcThreadpool();
     LOG(ERROR) << "Service exited!";
+#endif
     return 1;
 }
 

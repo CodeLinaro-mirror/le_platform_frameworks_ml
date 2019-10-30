@@ -21,6 +21,7 @@
 #include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
 
 #include "Tracing.h"
+#include <mutex>
 
 namespace android {
 namespace nn {
