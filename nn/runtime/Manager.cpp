@@ -427,15 +427,20 @@ void DeviceManager::findAvailableDevices() {
                 continue;
             }
             mLibHandles.push_back(lib_handle);
-            sp<V1_0::IDevice> (*NNHalDeviceNewFunc)();
+            std::vector<sp<V1_0::IDevice>> (*NNHalDeviceNewFunc)();
             NNHalDeviceNewFunc =
-                (sp<V1_0::IDevice> (*)()) dlsym(lib_handle, "NNHalDeviceNew");
+                (std::vector<sp<V1_0::IDevice>> (*)()) dlsym(lib_handle, "NNHalDeviceNew");
             if (dlsym_error) {
                 LOG(ERROR) << dlsym_error;
                 continue;
             }
-            sp<V1_0::IDevice> device(NNHalDeviceNewFunc());
-            registerDevice(entry->d_name, device);
+            std::vector<sp<V1_0::IDevice>> devices(NNHalDeviceNewFunc());
+            int device_enum = 0;
+            for (auto device : devices) {
+                std::string name = std::string(entry->d_name) + std::to_string(device_enum);
+                registerDevice(name.c_str(), device);
+                device_enum++;
+            }
         } catch (const std::exception &e) {
             LOG(ERROR) << e.what();
         }

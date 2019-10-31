@@ -94,8 +94,10 @@ Return<void> SampleDriverMinimal::getSupportedOperations_1_2(const V1_2::Model& 
 
 } // namespace sample_driver
 
-extern "C" sp<V1_0::IDevice> NNHalDeviceNew() {
-    return sp<V1_0::IDevice>(new sample_driver::SampleDriverMinimal());
+extern "C" std::vector<sp<V1_0::IDevice>> NNHalDeviceNew() {
+    std::vector<sp<V1_0::IDevice>> devices;
+    devices.push_back(new sample_driver::SampleDriverMinimal());
+    return devices;
 }
 
 } // namespace nn

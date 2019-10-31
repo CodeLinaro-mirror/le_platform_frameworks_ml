@@ -66,15 +66,17 @@ void VtsHalTargetTestEnvBase::SetUp() {
         continue;
       }
       device_handles_.push_back(lib_handle);
-      sp<IDevice> (*NNHalDeviceNewFunc)();
+      std::vector<sp<IDevice>> (*NNHalDeviceNewFunc)();
       NNHalDeviceNewFunc =
-        (sp<IDevice> (*)()) dlsym(lib_handle, "NNHalDeviceNew");
+        (std::vector<sp<IDevice>> (*)()) dlsym(lib_handle, "NNHalDeviceNew");
       if (dlsym_error) {
         ALOGE("%s\n", dlsym_error);
         continue;
       }
-      sp<IDevice> device(NNHalDeviceNewFunc());
-      devices_.push_back(device);
+      std::vector<sp<IDevice>> devices(NNHalDeviceNewFunc());
+      for (auto device : devices) {
+        devices_.push_back(device);
+      }
     } catch (const std::exception &e) {
       ALOGE("%s\n", e.what());
     }
@@ -130,10 +132,19 @@ bool VtsHalTargetTestEnvBase::parseVtsTestOption(const char* arg) {
     return true;
   }
 
+  std::string halName(kDefaultDevice);
+  std::string instanceName("0");
+
   if (strncmp(arg, kInstanceFlag, strlen(kInstanceFlag)) == 0) {
-    // value is the part after "--hal_instance="
-    const char* value = arg + strlen(kInstanceFlag) + 1;
-    addHalInstance(string(value));
+    std::string halInstance(arg);
+    halInstance = halInstance.substr(halInstance.find(kInstanceFlag) + strlen(kInstanceFlag) + 1);
+    halName = halInstance.substr(0, halInstance.find('/'));
+    if (halInstance.find('/') != string::npos) {
+        instanceName = halInstance.substr(halInstance.find('/') + 1);
+    }
+    // value is the part after "--hal_instance=<hal name>/<device name>"
+    addHalInstance(halName);
+    device_index_ = std::stoi(instanceName);
     return true;
   }
   return false;
@@ -181,9 +192,10 @@ void VtsHalTargetTestEnvBase::FindAvailableDevices() {
 }
 
 sp<IDevice> VtsHalTargetTestEnvBase::getDevice() {
-  if (devices_.size() > 0) {
-    return devices_[0];
+  if (devices_.size() > device_index_) {
+    return devices_[device_index_];
   }
+  return nullptr;
 }
 
 }  // namespace testing

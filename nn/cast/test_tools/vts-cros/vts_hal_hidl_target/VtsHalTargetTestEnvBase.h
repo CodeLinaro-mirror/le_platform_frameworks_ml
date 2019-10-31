@@ -107,6 +107,7 @@ class VtsHalTargetTestEnvBase : public ::testing::Environment {
 
   std::vector<std::string> halInstances_;
   std::vector<std::string> halAvailableDevices_;
+  int device_index_ = 0;
 
   bool listAvailableDevices_ = false;
   bool inited_ = false;
