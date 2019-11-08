@@ -117,6 +117,7 @@ set (SOURCE_FILES
     1.2/vts/functional/GeneratedTestsV1_1.cpp
     1.2/vts/functional/ValidateModel.cpp
     1.2/vts/functional/ValidateRequest.cpp
+    1.2/vts/functional/ValidateBurst.cpp
     1.2/vts/functional/VtsHalNeuralnetworksLib.cpp
 )
 
@@ -128,6 +129,7 @@ target_include_directories(${NNHAL_TEST_1_2_TARGET_NAME} PRIVATE
 
 target_compile_options(${NNHAL_TEST_1_2_TARGET_NAME} PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Os>
+    $<$<COMPILE_LANGUAGE:CXX>:-ffunction-sections>
 )
 
 target_link_libraries(${NNHAL_TEST_1_2_TARGET_NAME}
