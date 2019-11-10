@@ -17,11 +17,12 @@
 #ifndef ANDROID_FRAMEWORKS_ML_NN_DRIVER_SAMPLE_SAMPLE_DRIVER_H
 #define ANDROID_FRAMEWORKS_ML_NN_DRIVER_SAMPLE_SAMPLE_DRIVER_H
 
+#include <string>
+#include <vector>
+
 #include "CpuExecutor.h"
 #include "HalInterfaces.h"
 #include "NeuralNetworks.h"
-
-#include <string>
 
 namespace android {
 namespace nn {
@@ -44,6 +45,7 @@ class SampleDriver : public hal::IDevice {
     ~SampleDriver() override {}
     hal::Return<void> getCapabilities(getCapabilities_cb cb) override;
     hal::Return<void> getCapabilities_1_1(getCapabilities_1_1_cb cb) override;
+    hal::Return<void> getCapabilities_1_2(getCapabilities_1_2_cb cb) override;
     hal::Return<void> getVersionString(getVersionString_cb cb) override;
     hal::Return<void> getType(getType_cb cb) override;
     hal::Return<void> getSupportedExtensions(getSupportedExtensions_cb) override;
@@ -51,6 +53,8 @@ class SampleDriver : public hal::IDevice {
                                              getSupportedOperations_cb cb) override;
     hal::Return<void> getSupportedOperations_1_1(const hal::V1_1::Model& model,
                                                  getSupportedOperations_1_1_cb cb) override;
+    hal::Return<void> getSupportedOperations_1_2(const hal::V1_2::Model& model,
+                                                 getSupportedOperations_1_2_cb cb) override;
     hal::Return<void> getNumberOfCacheFilesNeeded(getNumberOfCacheFilesNeeded_cb cb) override;
     hal::Return<hal::ErrorStatus> prepareModel(
             const hal::V1_0::Model& model,
@@ -60,6 +64,11 @@ class SampleDriver : public hal::IDevice {
             const sp<hal::V1_0::IPreparedModelCallback>& callback) override;
     hal::Return<hal::ErrorStatus> prepareModel_1_2(
             const hal::V1_2::Model& model, hal::ExecutionPreference preference,
+            const hal::hidl_vec<hal::hidl_handle>& modelCache,
+            const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token,
+            const sp<hal::V1_2::IPreparedModelCallback>& callback) override;
+    hal::Return<hal::ErrorStatus> prepareModel_1_3(
+            const hal::V1_3::Model& model, hal::ExecutionPreference preference,
             const hal::hidl_vec<hal::hidl_handle>& modelCache,
             const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token,
             const sp<hal::V1_2::IPreparedModelCallback>& callback) override;
@@ -82,8 +91,9 @@ class SampleDriver : public hal::IDevice {
 
 class SamplePreparedModel : public hal::IPreparedModel {
    public:
-    SamplePreparedModel(const hal::Model& model, const SampleDriver* driver)
-        : mModel(model), mDriver(driver) {}
+    SamplePreparedModel(const hal::Model& model, const SampleDriver* driver,
+                        hal::ExecutionPreference preference)
+        : mModel(model), mDriver(driver), kPreference(preference) {}
     ~SamplePreparedModel() override {}
     bool initialize();
     hal::Return<hal::ErrorStatus> execute(
@@ -104,6 +114,7 @@ class SamplePreparedModel : public hal::IPreparedModel {
     hal::Model mModel;
     const SampleDriver* mDriver;
     std::vector<RunTimePoolInfo> mPoolInfos;
+    const hal::ExecutionPreference kPreference;
 };
 
 }  // namespace sample_driver

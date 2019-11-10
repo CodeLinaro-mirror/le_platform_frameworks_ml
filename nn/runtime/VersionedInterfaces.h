@@ -17,9 +17,8 @@
 #ifndef ANDROID_FRAMEWORKS_ML_NN_RUNTIME_VERSIONED_INTERFACES_H
 #define ANDROID_FRAMEWORKS_ML_NN_RUNTIME_VERSIONED_INTERFACES_H
 
-#include "HalInterfaces.h"
-
 #include <android-base/macros.h>
+
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -28,7 +27,10 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#include <vector>
+
 #include "Callbacks.h"
+#include "HalInterfaces.h"
 
 namespace android {
 namespace nn {
@@ -92,13 +94,9 @@ class VersionedIDevice {
     /**
      * Gets the capabilities of a driver.
      *
-     * @return status Error status of the call, must be:
-     *                - NONE if successful
-     *                - DEVICE_UNAVAILABLE if driver is offline or busy
-     *                - GENERAL_FAILURE if there is an unspecified error
      * @return capabilities Capabilities of the driver.
      */
-    std::pair<hal::ErrorStatus, hal::Capabilities> getCapabilities();
+    const hal::Capabilities& getCapabilities() const;
 
     /**
      * Gets information about extensions supported by the driver implementation.
@@ -109,13 +107,9 @@ class VersionedIDevice {
      * All extension operations and operands must be fully supported for the
      * extension to appear in the list of supported extensions.
      *
-     * @return status Error status of the call, must be:
-     *     - NONE if successful
-     *     - DEVICE_UNAVAILABLE if driver is offline or busy
-     *     - GENERAL_FAILURE if there is an unspecified error
      * @return extensions A list of supported extensions.
      */
-    std::pair<hal::ErrorStatus, hal::hidl_vec<hal::Extension>> getSupportedExtensions();
+    const std::vector<hal::Extension>& getSupportedExtensions() const;
 
     /**
      * Gets the supported operations in a MetaModel.
@@ -146,7 +140,7 @@ class VersionedIDevice {
      *                             it is describing.
      */
     std::pair<hal::ErrorStatus, hal::hidl_vec<bool>> getSupportedOperations(
-            const MetaModel& metaModel);
+            const MetaModel& metaModel) const;
 
     /**
      * Synchronously creates a prepared model for execution and optionally saves it
@@ -241,7 +235,7 @@ class VersionedIDevice {
     std::pair<hal::ErrorStatus, std::shared_ptr<VersionedIPreparedModel>> prepareModel(
             const hal::Model& model, hal::ExecutionPreference preference,
             const hal::hidl_vec<hal::hidl_handle>& modelCache,
-            const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token);
+            const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token) const;
 
     /**
      * Creates a prepared model from cache files for execution.
@@ -311,7 +305,7 @@ class VersionedIDevice {
      */
     std::pair<hal::ErrorStatus, std::shared_ptr<VersionedIPreparedModel>> prepareModelFromCache(
             const hal::hidl_vec<hal::hidl_handle>& modelCache,
-            const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token);
+            const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token) const;
 
     /**
      * Returns the current status of a driver.
@@ -322,7 +316,7 @@ class VersionedIDevice {
      *                - DeviceStatus::OFFLINE
      *                - DeviceStatus::UNKNOWN
      */
-    hal::DeviceStatus getStatus();
+    hal::DeviceStatus getStatus() const;
 
     /**
      * Returns the feature level of a driver.
@@ -333,19 +327,17 @@ class VersionedIDevice {
      *                      Return -1 if the driver is offline or busy, or the query resulted in
      *                      an unspecified error.
      */
-    int64_t getFeatureLevel();
+    int64_t getFeatureLevel() const;
 
     /**
      * Returns the device type of a driver.
      *
-     * @return deviceType The type of a given device, which can help application developers
-     *                    developers to distribute Machine Learning workloads and other workloads
-     *                    such as graphical rendering. E.g., for an app which renders AR scenes
-     *                    based on real time object detection results, the developer could choose
-     *                    an ACCELERATOR type device for ML workloads, and reserve GPU for
-     *                    graphical rendering.
-     *                    Return -1 if the driver is offline or busy, or the query resulted in
-     *                    an unspecified error.
+     * @return deviceType The type of a given device, which can help application
+     *     developers to distribute Machine Learning workloads and other
+     *     workloads such as graphical rendering. E.g., for an app which renders
+     *     AR scenes based on real time object detection results, the developer
+     *     could choose an ACCELERATOR type device for ML workloads, and reserve
+     *     GPU for graphical rendering.
      */
     int32_t getType() const;
 
@@ -369,15 +361,9 @@ class VersionedIDevice {
      *       the driver cannot meet that requirement because of bugs or certain optimizations.
      *       The application can filter out versions of these drivers.
      *
-     * @return status Error status returned from querying the version string. Must be:
-     *     - NONE if the query was successful
-     *     - DEVICE_UNAVAILABLE if driver is offline or busy
-     *     - GENERAL_FAILURE if the query resulted in an
-     *       unspecified error
      * @return version The version string of the device implementation.
-     *     Must have nonzero length if the query is successful, and must be an empty string if not.
      */
-    std::pair<hal::ErrorStatus, hal::hidl_string> getVersionString();
+    const std::string& getVersionString() const;
 
     /**
      * Gets the caching requirements of the driver implementation.
@@ -406,10 +392,6 @@ class VersionedIDevice {
      * IDevice::prepareModelFromCache or providing cache file descriptors to
      * IDevice::prepareModel_1_2.
      *
-     * @return status Error status of the call, must be:
-     *     - NONE if successful
-     *     - DEVICE_UNAVAILABLE if driver is offline or busy
-     *     - GENERAL_FAILURE if there is an unspecified error
      * @return numModelCache An unsigned integer indicating how many files for model cache
      *                       the driver needs to cache a single prepared model. It must
      *                       be less than or equal to Constant::MAX_NUMBER_OF_CACHE_FILES.
@@ -417,16 +399,35 @@ class VersionedIDevice {
      *                      the driver needs to cache a single prepared model. It must
      *                      be less than or equal to Constant::MAX_NUMBER_OF_CACHE_FILES.
      */
-    std::tuple<hal::ErrorStatus, uint32_t, uint32_t> getNumberOfCacheFilesNeeded();
+    std::pair<uint32_t, uint32_t> getNumberOfCacheFilesNeeded() const;
 
     /**
-     * Returns the name of the service that implements the driver
+     * Returns the name of the service.
      *
-     * @return serviceName The name of the service.
+     * @return Name of the service.
      */
-    std::string getServiceName() const { return mServiceName; }
+    const std::string& getName() const;
 
    private:
+    // initializeInternal is called once during VersionedIDevice creation.
+    // 'true' indicates successful initialization.
+    bool initializeInternal();
+
+    // internal helper methods
+    std::pair<hal::ErrorStatus, hal::Capabilities> getCapabilitiesInternal() const;
+    std::pair<hal::ErrorStatus, hal::hidl_vec<hal::Extension>> getSupportedExtensionsInternal()
+            const;
+    int32_t getTypeInternal() const;
+    std::pair<hal::ErrorStatus, hal::hidl_string> getVersionStringInternal() const;
+    std::tuple<hal::ErrorStatus, uint32_t, uint32_t> getNumberOfCacheFilesNeededInternal() const;
+
+    // internal members for the cached results of the internal methods above
+    hal::Capabilities mCapabilities;
+    std::vector<hal::Extension> mSupportedExtensions;
+    int32_t mType;
+    std::string mVersionString;
+    std::pair<uint32_t, uint32_t> mNumberOfCacheFilesNeeded;
+
     /**
      * This is a utility class for VersionedIDevice that encapsulates a
      * V1_0::IDevice, any appropriate downcasts to newer interfaces, and a
@@ -507,6 +508,10 @@ class VersionedIDevice {
         sp<hal::V1_2::IDevice> getDevice() const {
             return mDeviceV1_2;
         }
+        template <>
+        sp<hal::V1_3::IDevice> getDevice() const {
+            return mDeviceV1_3;
+        }
 
         /**
          * Returns sp<*::IDevice> (as per getDevice()) and the
@@ -540,6 +545,7 @@ class VersionedIDevice {
         sp<hal::V1_0::IDevice> mDeviceV1_0;
         sp<hal::V1_1::IDevice> mDeviceV1_1;
         sp<hal::V1_2::IDevice> mDeviceV1_2;
+        sp<hal::V1_3::IDevice> mDeviceV1_3;
 
         /**
          * HIDL callback to be invoked if the service for mDeviceV1_0 crashes.
@@ -681,25 +687,28 @@ class VersionedIPreparedModel {
      *         UINT64_MAX. A driver may choose to report any time as UINT64_MAX,
      *         indicating that measurement is not available.
      */
-    std::tuple<int, std::vector<hal::OutputShape>, hal::Timing> execute(const hal::Request& request,
-                                                                        hal::MeasureTiming measure,
-                                                                        bool preferSynchronous);
+    std::tuple<int, std::vector<hal::OutputShape>, hal::Timing> execute(
+            const hal::Request& request, hal::MeasureTiming measure, bool preferSynchronous) const;
 
     /**
      * Creates a burst controller on a prepared model.
      *
-     * @param blocking 'true' if the FMQ should block until data is available.
+     * @param preferPowerOverLatency 'true' if the Burst object should run in a
+     *                               more power efficient mode, 'false' if more
+     *                               power can be used to possibly reduce
+     *                               burst compute latency.
      * @return ExecutionBurstController Execution burst controller object.
      *                                  nullptr is returned if the burst cannot
      *                                  be configured for any reason.
      */
-    std::shared_ptr<ExecutionBurstController> configureExecutionBurst(bool blocking) const;
+    std::shared_ptr<ExecutionBurstController> configureExecutionBurst(
+            bool preferPowerOverLatency) const;
 
    private:
     std::tuple<int, std::vector<hal::OutputShape>, hal::Timing> executeAsynchronously(
-            const hal::Request& request, hal::MeasureTiming timing);
+            const hal::Request& request, hal::MeasureTiming timing) const;
     std::tuple<int, std::vector<hal::OutputShape>, hal::Timing> executeSynchronously(
-            const hal::Request& request, hal::MeasureTiming measure);
+            const hal::Request& request, hal::MeasureTiming measure) const;
 
     /**
      * All versions of IPreparedModel are necessary because the preparedModel could be v1.0,
