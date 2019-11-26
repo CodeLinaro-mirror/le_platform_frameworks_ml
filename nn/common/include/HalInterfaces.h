@@ -30,6 +30,8 @@
 #include <android/hardware/neuralnetworks/1.2/IPreparedModelCallback.h>
 #include <android/hardware/neuralnetworks/1.2/types.h>
 #include <android/hardware/neuralnetworks/1.3/IDevice.h>
+#include <android/hardware/neuralnetworks/1.3/IPreparedModel.h>
+#include <android/hardware/neuralnetworks/1.3/IPreparedModelCallback.h>
 #include <android/hardware/neuralnetworks/1.3/types.h>
 #include <android/hidl/memory/1.0/IMemory.h>
 #include <hidlmemory/mapping.h>
@@ -73,21 +75,21 @@ using V1_2::FmqResultDatum;
 using V1_2::IBurstCallback;
 using V1_2::IBurstContext;
 using V1_2::IExecutionCallback;
-using V1_2::IPreparedModel;
-using V1_2::IPreparedModelCallback;
 using V1_2::MeasureTiming;
-using V1_2::OperationType;
 using V1_2::OperationTypeRange;
 using V1_2::OutputShape;
 using V1_2::SymmPerChannelQuantParams;
 using V1_2::Timing;
 using V1_3::Capabilities;
 using V1_3::IDevice;
+using V1_3::IPreparedModel;
+using V1_3::IPreparedModelCallback;
 using V1_3::Model;
 using V1_3::Operand;
 using V1_3::OperandType;
 using V1_3::OperandTypeRange;
 using V1_3::Operation;
+using V1_3::OperationType;
 
 using CacheToken =
         hardware::hidl_array<uint8_t, static_cast<uint32_t>(Constant::BYTE_SIZE_OF_CACHE_TOKEN)>;
