@@ -141,25 +141,29 @@ struct Conv2dParam {
     }                                                                           \
                                                                                 \
     Type* im2colData = nullptr;                                                 \
-    uint64_t im2colByteSize = sizeof(Type);                                     \
-    std::unique_ptr<Type[]> im2colGuard;                                        \
-    for (int i=0; i<4; i++) {                                                   \
-        im2colByteSize *= im2colDim.sizes[i];                                   \
-    }                                                                           \
-    /* http://b/77982879, tflite::optimized_ops::Conv uses int for offsets */   \
-    if (im2colByteSize >= 0x7fffffff)  {                                        \
-        LOG(ERROR) << "Conv size is too large, not enough memory";              \
-        return false;                                                           \
-    }                                                                           \
-    if (im2colByteSize <= kStaticBufferSize) {                                  \
-        im2colData = reinterpret_cast<Type *>(static_scratch_buffer);           \
-    } else {                                                                    \
-        im2colData = new (std::nothrow) Type[im2colByteSize / sizeof(Type)];    \
-        if (im2colData == nullptr) {                                            \
-            LOG(ERROR) << "Conv size is too large, not enough memory";          \
-            return false;                                                       \
-        }                                                                       \
-        im2colGuard.reset(im2colData);                                          \
+    const bool need_im2col = stride_width != 1 || stride_height != 1 ||         \
+                             filterWidth != 1 || filterHeight != 1;             \
+    if (need_im2col) {                                                          \
+        uint64_t im2colByteSize = sizeof(Type);                                     \
+        std::unique_ptr<Type[]> im2colGuard;                                        \
+        for (int i=0; i<4; i++) {                                                   \
+            im2colByteSize *= im2colDim.sizes[i];                                   \
+        }                                                                           \
+        /* http://b/77982879, tflite::optimized_ops::Conv uses int for offsets */   \
+        if (im2colByteSize >= 0x7fffffff)  {                                        \
+            LOG(ERROR) << "Conv size is too large, not enough memory";              \
+            return false;                                                           \
+        }                                                                           \
+        if (im2colByteSize <= kStaticBufferSize) {                                  \
+            im2colData = reinterpret_cast<Type *>(static_scratch_buffer);           \
+        } else {                                                                    \
+            im2colData = new (std::nothrow) Type[im2colByteSize / sizeof(Type)];    \
+            if (im2colData == nullptr) {                                            \
+                LOG(ERROR) << "Conv size is too large, not enough memory";          \
+                return false;                                                       \
+            }                                                                       \
+            im2colGuard.reset(im2colData);                                          \
+        }                                                                           \
     }
 
 bool convNhwc(const float* inputData, const Shape& inputShape, const float* filterData,

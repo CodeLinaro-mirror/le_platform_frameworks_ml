@@ -1,5 +1,7 @@
 set (TARGET_NAME neuralnetworks_common)
 
+add_definitions(-DNN_INCLUDE_CPU_IMPLEMENTATION)
+
 set (SOURCE_FILES
     OperationResolver.cpp
     operations/Activation.cpp
