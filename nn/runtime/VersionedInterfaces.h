@@ -20,9 +20,14 @@
 #include "HalInterfaces.h"
 
 #include <android-base/macros.h>
+#include <cstddef>
+#include <functional>
 #include <memory>
+#include <optional>
+#include <shared_mutex>
 #include <string>
 #include <tuple>
+#include <utility>
 #include "Callbacks.h"
 
 namespace android {
@@ -31,7 +36,9 @@ namespace nn {
 // forward declarations
 class ExecutionBurstController;
 class IDeviceDeathHandler;
+class IModelSlicer;
 class IPreparedModelDeathHandler;
+class VersionedIPreparedModel;
 
 /**
  * Each class (VersionedIDevice, VersionedIPreparedModel) wraps a HIDL interface
@@ -51,6 +58,9 @@ class IPreparedModelDeathHandler;
 class VersionedIDevice {
     DISALLOW_IMPLICIT_CONSTRUCTORS(VersionedIDevice);
 
+    // forward declaration of nested class
+    class Core;
+
    public:
     /**
      * Create a VersionedIDevice object.
@@ -58,44 +68,26 @@ class VersionedIDevice {
      * Prefer using this function over the constructor, as it adds more
      * protections.
      *
-     * This call linksToDeath a hidl_death_recipient that can
-     * proactively handle the case when the service containing the IDevice
-     * object crashes.
-     *
+     * @param serviceName The name of the service that provides "device".
      * @param device A device object that is at least version 1.0 of the IDevice
      *               interface.
      * @return A valid VersionedIDevice object, otherwise nullptr.
      */
-    static std::shared_ptr<VersionedIDevice> create(sp<V1_0::IDevice> device);
+    static std::shared_ptr<VersionedIDevice> create(std::string serviceName,
+                                                    sp<V1_0::IDevice> device);
 
     /**
      * Constructor for the VersionedIDevice object.
      *
-     * VersionedIDevice is constructed with the V1_0::IDevice object, which
-     * represents a device that is at least v1.0 of the interface. The
-     * constructor downcasts to the latest version of the IDevice interface, and
-     * will default to using the latest version of all IDevice interface
-     * methods automatically.
+     * VersionedIDevice will default to using the latest version of all IDevice
+     * interface methods automatically.
      *
-     * @param device A device object that is at least version 1.0 of the IDevice
-     *               interface.
-     * @param deathHandler A hidl_death_recipient that will proactively handle
-     *                     the case when the service containing the IDevice
-     *                     object crashes.
+     * @param serviceName The name of the service that provides core.getDevice<V1_0::IDevice>().
+     * @param core An object that encapsulates a V1_0::IDevice, any appropriate downcasts to
+     *             newer interfaces, and a hidl_death_recipient that will proactively handle
+     *             the case when the service containing the IDevice object crashes.
      */
-#ifndef __LE_NN__
-    VersionedIDevice(sp<V1_0::IDevice> device, sp<IDeviceDeathHandler> deathHandler);
-#else
-    VersionedIDevice(sp<V1_0::IDevice> device);
-#endif
-
-    /**
-     * Destructor for the VersionedIDevice object.
-     *
-     * This destructor unlinksToDeath this object's hidl_death_recipient as it
-     * no longer needs to handle the case where the IDevice's service crashes.
-     */
-    ~VersionedIDevice();
+    VersionedIDevice(std::string serviceName, Core core);
 
     /**
      * Gets the capabilities of a driver.
@@ -128,12 +120,17 @@ class VersionedIDevice {
     /**
      * Gets the supported operations in a model.
      *
-     * getSupportedSubgraph indicates which operations of a model are fully
+     * getSupportedOperations indicates which operations of a model are fully
      * supported by the vendor driver. If an operation may not be supported for
      * any reason, getSupportedOperations must return false for that operation.
      *
      * @param model A model whose operations--and their corresponding
      *              operands--are to be verified by the driver.
+     * @param slicer When the model is not compliant with the HAL version of the
+     *               vendor driver, the slicer (if any) is employed to query the
+     *               vendor driver about which of the subset of compliant
+     *               operations are supported.  See the IModelSlicer class in
+     *               Utils.h for more details.
      * @return status Error status of the call, must be:
      *                - NONE if successful
      *                - DEVICE_UNAVAILABLE if driver is offline or busy
@@ -146,13 +143,14 @@ class VersionedIDevice {
      *                             corresponds with the index of the operation
      *                             it is describing.
      */
-    std::pair<ErrorStatus, hidl_vec<bool>> getSupportedOperations(const Model& model);
+    std::pair<ErrorStatus, hidl_vec<bool>> getSupportedOperations(const Model& model,
+                                                                  IModelSlicer* slicer = nullptr);
 
     /**
-     * Asynchronously creates a prepared model for execution and optionally saves it
+     * Synchronously creates a prepared model for execution and optionally saves it
      * into cache files.
      *
-     * prepareModel is used to make any necessary transformations to or alternative
+     * prepareModel is used to make any necessary transformations or alternative
      * representations to a model for execution, possibly including
      * transformations on the constant data, optimization on the model's graph,
      * or compilation into the device's native binary format. The model itself
@@ -172,35 +170,28 @@ class VersionedIDevice {
      * finished. The driver must dup a file descriptor if it wants to get access to
      * the cache file later.
      *
-     * The model is prepared asynchronously with respect to the caller. The
-     * prepareModel function must verify the inputs to the preparedModel function
-     * related to preparing the model (as opposed to saving the prepared model to
-     * cache) are correct. If there is an error, prepareModel must immediately invoke
-     * the callback with the appropriate ErrorStatus value and nullptr for the
-     * IPreparedModel, then return with the same ErrorStatus. If the inputs to the
-     * prepareModel function that are related to preparing the model are valid and
-     * there is no error, prepareModel must launch an asynchronous task
-     * to prepare the model in the background, and immediately return from
-     * prepareModel with ErrorStatus::NONE. If the asynchronous task fails to launch,
-     * prepareModel must immediately invoke the callback with
-     * ErrorStatus::GENERAL_FAILURE and nullptr for the IPreparedModel, then return
-     * with ErrorStatus::GENERAL_FAILURE.
+     * The model is prepared synchronously with respect to the caller. The
+     * prepareModel function must verify the inputs to the preparedModel
+     * function related to preparing the model (as opposed to saving the
+     * prepared model to cache) are correct. If there is an error, prepareModel
+     * must immediately return the appropriate ErrorStatus value and nullptr for
+     * the VersionedIPreparedModel. If the inputs to the prepareModel function
+     * that are related to preparing the model are valid and there is no error,
+     * prepareModel must prepare the model.
      *
-     * When the asynchronous task has finished preparing the model, it must
-     * immediately invoke the callback function provided as an input to
-     * prepareModel. If the model was prepared successfully, the callback object
-     * must be invoked with an error status of ErrorStatus::NONE and the
-     * produced IPreparedModel object. If an error occurred preparing the model,
-     * the callback object must be invoked with the appropriate ErrorStatus
-     * value and nullptr for the IPreparedModel.
+     * If the model was prepared successfully, prepareModel must return
+     * ErrorStatus::NONE and the produced VersionedIPreparedModel object. If an
+     * error occurred preparing the model, prepareModel must return the
+     * appropriate ErrorStatus value and nullptr for the
+     * VersionedIPreparedModel.
      *
-     * Optionally, the driver may save the prepared model to cache during the
-     * asynchronous preparation. Any error that occurs when saving to cache must
-     * not affect the status of preparing the model. Even if the input arguments
-     * related to the cache may be invalid, or the driver may fail to save to cache,
-     * the prepareModel function must finish preparing the model. The driver
-     * may choose not to save to cache even if the caching information is
-     * provided and valid.
+     * Optionally, the driver may save the prepared model to cache during
+     * preparation. Any error that occurs when saving to cache must not affect
+     * the status of preparing the model. Even if the input arguments related to
+     * the cache may be invalid, or the driver may fail to save to cache, the
+     * prepareModel function must finish preparing the model. The driver may
+     * choose not to save to cache even if the caching information is provided
+     * and valid.
      *
      * The only information that may be unknown to the model at this stage is
      * the shape of the tensors, which may only be known at execution time. As
@@ -235,24 +226,21 @@ class VersionedIDevice {
      *     in a failed execution or in a successful execution that produces incorrect
      *     output values. If both modelCache and dataCache are empty indicating that
      *     caching information is not provided, this token must be ignored.
-     * @param callback A callback object used to return the error status of
-     *     preparing the model for execution and the prepared model if
-     *     successful, nullptr otherwise. The callback object's notify function
-     *     must be called exactly once, even if the model could not be prepared.
-     * @return status Error status of launching a task which prepares the model
-     *     in the background; must be:
-     *     - NONE if preparation task is successfully launched
-     *     - DEVICE_UNAVAILABLE if driver is offline or busy
-     *     - GENERAL_FAILURE if there is an unspecified error
-     *     - INVALID_ARGUMENT if one of the input arguments related to preparing the
-     *       model is invalid
+     * @return A pair of:
+     *     - status Error status of preparing the model; must be:
+     *         - NONE if preparation succeeded
+     *         - DEVICE_UNAVAILABLE if driver is offline or busy
+     *         - GENERAL_FAILURE if there is an unspecified error
+     *         - INVALID_ARGUMENT if one of the input arguments related to
+     *             preparing the model is invalid
+     *     - preparedModel A VersionedIPreparedModel object representing a model
+     *         that has been prepared for execution, else nullptr.
      */
-    ErrorStatus prepareModel(
+    std::pair<ErrorStatus, std::shared_ptr<VersionedIPreparedModel>> prepareModel(
             const Model& model, ExecutionPreference preference,
             const hidl_vec<hidl_handle>& modelCache, const hidl_vec<hidl_handle>& dataCache,
             const hidl_array<uint8_t, static_cast<uint32_t>(Constant::BYTE_SIZE_OF_CACHE_TOKEN)>&
-                    token,
-            const sp<PreparedModelCallback>& callback);
+                    token);
 
     /**
      * Creates a prepared model from cache files for execution.
@@ -270,29 +258,23 @@ class VersionedIDevice {
      * finished. The driver must dup a file descriptor if it wants to get access to
      * the cache file later.
      *
-     * The model is prepared asynchronously with respect to the caller. The
+     * The model is prepared synchronously with respect to the caller. The
      * prepareModelFromCache function must verify the inputs to the
-     * prepareModelFromCache function are correct, and that the security-sensitive
-     * cache has not been modified since it was last written by the driver.
-     * If there is an error, or if compilation caching is not supported, or if the
-     * security-sensitive cache has been modified, prepareModelFromCache must
-     * immediately invoke the callback with the appropriate ErrorStatus value and
-     * nullptr for the IPreparedModel, then return with the same ErrorStatus. If
-     * the inputs to the prepareModelFromCache function are valid, the security-sensitive
-     * cache is not modified, and there is no error, prepareModelFromCache must launch an
-     * asynchronous task to prepare the model in the background, and immediately return
-     * from prepareModelFromCache with ErrorStatus::NONE. If the asynchronous task
-     * fails to launch, prepareModelFromCache must immediately invoke the callback
-     * with ErrorStatus::GENERAL_FAILURE and nullptr for the IPreparedModel, then
-     * return with ErrorStatus::GENERAL_FAILURE.
+     * prepareModelFromCache function are correct, and that the
+     * security-sensitive cache has not been modified since it was last written
+     * by the driver. If there is an error, or if compilation caching is not
+     * supported, or if the security-sensitive cache has been modified,
+     * prepareModelFromCache must return the appropriate ErrorStatus value and
+     * nullptr for the VersionedIPreparedModel. If the inputs to the
+     * prepareModelFromCache function are valid, the security-sensitive cache is
+     * not modified, and there is no error, prepareModelFromCache must prepare
+     * the model.
      *
-     * When the asynchronous task has finished preparing the model, it must
-     * immediately invoke the callback function provided as an input to
-     * prepareModelFromCache. If the model was prepared successfully, the
-     * callback object must be invoked with an error status of ErrorStatus::NONE
-     * and the produced IPreparedModel object. If an error occurred preparing
-     * the model, the callback object must be invoked with the appropriate
-     * ErrorStatus value and nullptr for the IPreparedModel.
+     * If the model was prepared successfully, prepareModelFromCache must return
+     * ErrorStatus::NONE and the produced VersionedIPreparedModel object. If an
+     * error occurred preparing the model, prepareModelFromCache must return the
+     * appropriate ErrorStatus value and nullptr for the
+     * VersionedIPreparedModel.
      *
      * The only information that may be unknown to the model at this stage is
      * the shape of the tensors, which may only be known at execution time. As
@@ -316,23 +298,20 @@ class VersionedIDevice {
      *     to have a low rate of collision for a particular application. The driver
      *     cannot detect a collision; a collision will result in a failed execution
      *     or in a successful execution that produces incorrect output values.
-     * @param callback A callback object used to return the error status of
-     *     preparing the model for execution and the prepared model if
-     *     successful, nullptr otherwise. The callback object's notify function
-     *     must be called exactly once, even if the model could not be prepared.
-     * @return status Error status of launching a task which prepares the model
-     *     in the background; must be:
-     *     - NONE if preparation task is successfully launched
-     *     - DEVICE_UNAVAILABLE if driver is offline or busy
-     *     - GENERAL_FAILURE if caching is not supported or if there is an
-     *       unspecified error
-     *     - INVALID_ARGUMENT if one of the input arguments is invalid
+     * @return A pair of:
+     *     - status Error status of preparing the model; must be:
+     *         - NONE if preparation succeeded
+     *         - DEVICE_UNAVAILABLE if driver is offline or busy
+     *         - GENERAL_FAILURE if caching is not supported or if there is an
+     *             unspecified error
+     *         - INVALID_ARGUMENT if one of the input arguments is invalid
+     *     - preparedModel A VersionedIPreparedModel object representing a model
+     *        that has been prepared for execution, else nullptr.
      */
-    ErrorStatus prepareModelFromCache(
+    std::pair<ErrorStatus, std::shared_ptr<VersionedIPreparedModel>> prepareModelFromCache(
             const hidl_vec<hidl_handle>& modelCache, const hidl_vec<hidl_handle>& dataCache,
             const hidl_array<uint8_t, static_cast<uint32_t>(Constant::BYTE_SIZE_OF_CACHE_TOKEN)>&
-                    token,
-            const sp<PreparedModelCallback>& callback);
+                    token);
 
     /**
      * Returns the current status of a driver.
@@ -441,6 +420,13 @@ class VersionedIDevice {
     std::tuple<ErrorStatus, uint32_t, uint32_t> getNumberOfCacheFilesNeeded();
 
     /**
+     * Returns the name of the service that implements the driver
+     *
+     * @return serviceName The name of the service.
+     */
+    std::string getServiceName() const { return mServiceName; }
+
+    /**
      * Returns whether this handle to an IDevice object is valid or not.
      *
      * @return bool true if V1_0::IDevice (which could be V1_1::IDevice) is
@@ -455,6 +441,96 @@ class VersionedIDevice {
      *              invalid, false otherwise.
      */
     bool operator==(std::nullptr_t) const;
+
+   private:
+    /**
+     * This is a utility class for VersionedIDevice that encapsulates a
+     * V1_0::IDevice, any appropriate downcasts to newer interfaces, and a
+     * hidl_death_recipient that will proactively handle the case when the
+     * service containing the IDevice object crashes.
+     *
+     * This is a convenience class to help VersionedIDevice recover from an
+     * IDevice object crash: It bundles together all the data that needs to
+     * change when recovering from a crash, and simplifies the process of
+     * instantiating that data (at VersionedIDevice creation time) and
+     * re-instantiating that data (at crash recovery time).
+     */
+    class Core {
+       public:
+        /**
+         * Constructor for the Core object.
+         *
+         * Core is constructed with a V1_0::IDevice object, which represents a
+         * device that is at least v1.0 of the interface. The constructor
+         * downcasts to the latest version of the IDevice interface, allowing
+         * VersionedIDevice to default to using the latest version of all
+         * IDevice interface methods automatically.
+         *
+         * @param device A device object that is at least version 1.0 of the IDevice
+         *               interface.
+         * @param deathHandler A hidl_death_recipient that will proactively handle
+         *                     the case when the service containing the IDevice
+         *                     object crashes.
+         */
+#ifndef __LE_NN__
+        Core(sp<V1_0::IDevice> device, sp<IDeviceDeathHandler> deathHandler);
+#else
+        Core(sp<V1_0::IDevice> device);
+#endif
+        /**
+         * Destructor for the Core object.
+         *
+         * This destructor unlinksToDeath this object's hidl_death_recipient as it
+         * no longer needs to handle the case where the IDevice's service crashes.
+         */
+        ~Core();
+
+        // Support move but not copy
+        Core(Core&&) noexcept;
+        Core& operator=(Core&&) noexcept;
+        Core(const Core&) = delete;
+        Core& operator=(const Core&) = delete;
+
+        /**
+         * Create a Core object.
+         *
+         * Prefer using this function over the constructor, as it adds more
+         * protections.
+         *
+         * This call linksToDeath a hidl_death_recipient that can
+         * proactively handle the case when the service containing the IDevice
+         * object crashes.
+         *
+         * @param device A device object that is at least version 1.0 of the IDevice
+         *               interface.
+         * @return A valid Core object, otherwise nullopt.
+         */
+        static std::optional<Core> create(sp<V1_0::IDevice> device);
+
+        /**
+         * Returns sp<*::IDevice> that is a downcast of the sp<V1_0::IDevice>
+         * passed to the constructor.  This will be nullptr if that IDevice is
+         * not actually of the specified downcast type.
+         */
+        sp<V1_0::IDevice> getDevice_1_0() const {
+            return mDeviceV1_0;
+        }
+
+        sp<V1_1::IDevice> getDevice_1_1() const {
+            return mDeviceV1_1;
+        }
+
+        sp<V1_2::IDevice> getDevice_1_2() const {
+            return mDeviceV1_2;
+        }
+
+        /**
+         * Returns sp<*::IDevice> (as per getDevice()) and the
+         * hidl_death_recipient that will proactively handle the case when the
+         * service containing the IDevice object crashes.
+         */
+        template <typename T_IDevice>
+        std::pair<sp<T_IDevice>, sp<IDeviceDeathHandler>> getDeviceAndDeathHandler() const;
 
    private:
     /**
@@ -484,9 +560,58 @@ class VersionedIDevice {
 #ifndef __LE_NN__
     /**
      * HIDL callback to be invoked if the service for mDeviceV1_0 crashes.
+         *
+         * nullptr if this Core instance is a move victim and hence has no
+         * callback to be unlinked.
      */
-    const sp<IDeviceDeathHandler> mDeathHandler;
+        sp<IDeviceDeathHandler> mDeathHandler;
 #endif
+    };
+
+    // This method retrieves the appropriate mCore.mDevice* field, under a read lock.
+    sp<V1_0::IDevice> getDevice_1_0() const EXCLUDES(mMutex) {
+        std::shared_lock lock(mMutex);
+        return mCore.getDevice_1_0();
+    }
+    sp<V1_1::IDevice> getDevice_1_1() const EXCLUDES(mMutex) {
+        std::shared_lock lock(mMutex);
+        return mCore.getDevice_1_1();
+    }
+    sp<V1_2::IDevice> getDevice_1_2() const EXCLUDES(mMutex) {
+        std::shared_lock lock(mMutex);
+        return mCore.getDevice_1_2();
+    }
+
+    // This method retrieves the appropriate mCore.mDevice* fields, under a read lock.
+    template <typename T_IDevice>
+    auto getDeviceAndDeathHandler() const EXCLUDES(mMutex) {
+        std::shared_lock lock(mMutex);
+        return mCore.getDeviceAndDeathHandler<T_IDevice>();
+    }
+
+    // This method calls the function fn in a manner that supports recovering
+    // from a driver crash: If the driver implementation is dead because the
+    // driver crashed either before the call to fn or during the call to fn, we
+    // will attempt to obtain a new instance of the same driver and call fn
+    // again.
+    //
+    // If a callback is provided, this method protects it against driver death
+    // and waits for it (callback->wait()).
+    template <typename T_Return, typename T_IDevice, typename T_Callback = std::nullptr_t>
+    Return<T_Return> recoverable(const char* context,
+                                 const std::function<Return<T_Return>(const sp<T_IDevice>&)>& fn,
+                                 const T_Callback& callback = nullptr) const EXCLUDES(mMutex);
+
+    // The name of the service that implements the driver.
+    const std::string mServiceName;
+
+    // Guards access to mCore.
+    mutable std::shared_mutex mMutex;
+
+    // Data that can be rewritten during driver recovery.  Guarded againt
+    // synchronous access by a mutex: Any number of concurrent read accesses is
+    // permitted, but a write access excludes all other accesses.
+    mutable Core mCore GUARDED_BY(mMutex);
 };
 
 /** This class wraps an IPreparedModel object of any version. */
@@ -495,21 +620,11 @@ class VersionedIPreparedModel {
 
    public:
     /**
-     * Create a VersionedIPreparedModel object.
-     *
-     * Prefer using this function over the constructor, as it adds more
-     * protections. Specifically, it linksToDeath a hidl_death_recipient that
-     * can proactively handle the case when the service containing the
-     * IPreparedModel object crashes.
-     *
-     * @param preparedModel A prepared model object that is least version 1.0 of the
-     *                      IPreparedModel interface.
-     * @return A valid VersionedIPreparedModelobject, otherwise nullptr.
-     */
-    static std::shared_ptr<VersionedIPreparedModel> create(sp<V1_0::IPreparedModel> preparedModel);
-
-    /**
      * Constructor for the VersionedIPreparedModel object.
+     *
+     * This constructor should not be used directly. Instead,
+     * VersionedIPreparedModel should be created via
+     * VersionedIDevice::prepareModel*.
      *
      * VersionedIPreparedModel is constructed with the V1_0::IPreparedModel object, which
      * represents a device that is at least v1.0 of the interface. The constructor downcasts
@@ -687,12 +802,10 @@ class VersionedIPreparedModel {
     sp<V1_0::IPreparedModel> mPreparedModelV1_0;
     sp<V1_2::IPreparedModel> mPreparedModelV1_2;
 
-#ifndef __LE_NN__
     /**
      * HIDL callback to be invoked if the service for mPreparedModelV1_0 crashes.
      */
     const sp<IPreparedModelDeathHandler> mDeathHandler;
-#endif
 };
 
 }  // namespace nn

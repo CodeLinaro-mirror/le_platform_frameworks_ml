@@ -14,23 +14,23 @@
 # limitations under the License.
 #
 
-input0 = Input("input0", "TENSOR_FLOAT32", "{1, 2, 3, 1}")
+# Quantized PAD with non-zero zeroPoint is supported since 1.2.
+# See http://b/132112227.
+
+input0 = Input("input0", "TENSOR_QUANT8_ASYMM", "{1, 2, 3, 1}, 2.3, 9")
 paddings = Parameter("paddings", "TENSOR_INT32", "{4, 2}", [0, 0,
                                                             0, 2,
                                                             1, 3,
                                                             0, 0])
-pad_value = Float32Scalar("pad_value", 9.3)
-output0 = Output("output0", "TENSOR_FLOAT32", "{1, 4, 7, 1}")
+output0 = Output("output0", "TENSOR_QUANT8_ASYMM", "{1, 4, 7, 1}, 2.3, 9")
 
-model = Model().Operation("PAD_V2", input0, paddings, pad_value).To(output0)
-model.RelaxedExecution(True)
+model = Model().Operation("PAD", input0, paddings).To(output0)
 
-Example(({
-    input0: [1.0, 2.0, 3.0,
-             4.0, 5.0, 6.0],
-}, {
-    output0: [9.3, 1.0, 2.0, 3.0, 9.3, 9.3, 9.3,
-              9.3, 4.0, 5.0, 6.0, 9.3, 9.3, 9.3,
-              9.3, 9.3, 9.3, 9.3, 9.3, 9.3, 9.3,
-              9.3, 9.3, 9.3, 9.3, 9.3, 9.3, 9.3],
-}))
+Example({
+    input0: [1, 2, 3,
+             4, 5, 6],
+    output0: [9, 1, 2, 3, 9, 9, 9,
+              9, 4, 5, 6, 9, 9, 9,
+              9, 9, 9, 9, 9, 9, 9,
+              9, 9, 9, 9, 9, 9, 9],
+})

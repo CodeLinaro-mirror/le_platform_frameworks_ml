@@ -113,7 +113,7 @@ inline bool roiPoolingNhwc(const T_Input* inputData, const Shape& inputShape, co
                 hEnd = std::min(hEnd, inHeight);
 
                 for (uint32_t k = 0; k < inDepth; k++) {
-                    T_Input maxValue;
+                    T_Input maxValue = static_cast<T_Input>(inputShape.offset);
                     bool first = true;
                     for (uint32_t h = hStart; h < hEnd; h++) {
                         for (uint32_t w = wStart; w < wEnd; w++) {
@@ -235,8 +235,7 @@ bool prepare(IOperationExecutionContext* context) {
         NN_RET_CHECK_EQ(roiShape.offset, 0);
     }
 
-    Shape output = context->getOutputShape(kOutputTensor);
-    output.type = input.type;
+    Shape output = input;
     if (useNchw) {
         output.dimensions = {numRois, inDepth, static_cast<uint32_t>(outputHeight),
                              static_cast<uint32_t>(outputWidth)};

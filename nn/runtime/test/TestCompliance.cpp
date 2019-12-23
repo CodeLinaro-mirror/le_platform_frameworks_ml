@@ -14,75 +14,134 @@
  * limitations under the License.
  */
 
+#include "TestCompliance.h"
+
+#include <gtest/gtest.h>
+
 #include "ModelBuilder.h"
 #include "TestNeuralNetworksWrapper.h"
 #include "Utils.h"
 
-#include <gtest/gtest.h>
-
 namespace compliance_test {
 
 using namespace ::android::nn;
+using HidlModel = V1_2::Model;
+using WrapperModel = test_wrapper::Model;
+using WrapperOperandType = test_wrapper::OperandType;
+using WrapperType = test_wrapper::Type;
 
-class ComplianceTest : public ::testing::Test {
-   protected:
-    virtual void SetUp() {}
-};
-
-void CreateHidlModel(std::function<void(test_wrapper::Model*)> CreateModel, Model* model) {
-    test_wrapper::Model wrapperModel;
-    CreateModel(&wrapperModel);
+// Creates a HIDL model from a creator of the wrapper model.
+static HidlModel createHidlModel(std::function<void(WrapperModel*)> createModel) {
+    HidlModel hidlModel;
+    WrapperModel wrapperModel;
+    createModel(&wrapperModel);
+    EXPECT_EQ(wrapperModel.finish(), test_wrapper::Result::NO_ERROR);
     ModelBuilder* modelBuilder = reinterpret_cast<ModelBuilder*>(wrapperModel.getHandle());
-    modelBuilder->setHidlModel(model);
+    modelBuilder->setHidlModel(&hidlModel);
+    return hidlModel;
+}
+
+void ComplianceTest::testAvailableSinceV1_2(std::function<void(WrapperModel*)> createModel) {
+    HidlModel model = createHidlModel(createModel);
+    ASSERT_FALSE(compliantWithV1_1(model));
+    ASSERT_FALSE(compliantWithV1_0(model));
+}
+
+void ComplianceTest::testAvailableSinceV1_1(std::function<void(WrapperModel*)> createModel) {
+    HidlModel model = createHidlModel(createModel);
+    ASSERT_TRUE(compliantWithV1_1(model));
+    ASSERT_FALSE(compliantWithV1_0(model));
+}
+
+void ComplianceTest::testAvailableSinceV1_0(std::function<void(WrapperModel*)> createModel) {
+    HidlModel model = createHidlModel(createModel);
+    ASSERT_TRUE(compliantWithV1_1(model));
+    ASSERT_TRUE(compliantWithV1_0(model));
+}
+
+static const WrapperOperandType kTypeTensorFloat(WrapperType::TENSOR_FLOAT32, {1});
+static const WrapperOperandType kTypeTensorFloatRank0(WrapperType::TENSOR_FLOAT32, {});
+static const WrapperOperandType kTypeInt32(WrapperType::INT32, {});
+
+TEST_F(ComplianceTest, Rank0TensorModelInput) {
+    int32_t act_init = 0;
+    // A simple ADD operation: op1 ADD op2 = op3, with op1 and op2 of rank 0.
+    testAvailableSinceV1_2([&act_init](WrapperModel* model) {
+        auto op1 = model->addOperand(&kTypeTensorFloatRank0);
+        auto op2 = model->addOperand(&kTypeTensorFloatRank0);
+        auto act = model->addOperand(&kTypeInt32);
+        auto op3 = model->addOperand(&kTypeTensorFloat);
+        model->setOperandValue(act, &act_init, sizeof(act_init));
+        model->addOperation(ANEURALNETWORKS_ADD, {op1, op2, act}, {op3});
+        model->identifyInputsAndOutputs({op1, op2}, {op3});
+        assert(model->isValid());
+    });
+}
+
+TEST_F(ComplianceTest, Rank0TensorModelOutput) {
+    int32_t act_init = 0;
+    // A simple ADD operation: op1 ADD op2 = op3, with op3 of rank 0.
+    testAvailableSinceV1_2([&act_init](WrapperModel* model) {
+        auto op1 = model->addOperand(&kTypeTensorFloat);
+        auto op2 = model->addOperand(&kTypeTensorFloat);
+        auto act = model->addOperand(&kTypeInt32);
+        auto op3 = model->addOperand(&kTypeTensorFloatRank0);
+        model->setOperandValue(act, &act_init, sizeof(act_init));
+        model->addOperation(ANEURALNETWORKS_ADD, {op1, op2, act}, {op3});
+        model->identifyInputsAndOutputs({op1, op2}, {op3});
+        assert(model->isValid());
+    });
+}
+
+TEST_F(ComplianceTest, Rank0TensorTemporaryVariable) {
+    int32_t act_init = 0;
+    // Two ADD operations: op1 ADD op2 = op3, op3 ADD op4 = op5, with op3 of rank 0.
+    testAvailableSinceV1_2([&act_init](WrapperModel* model) {
+        auto op1 = model->addOperand(&kTypeTensorFloat);
+        auto op2 = model->addOperand(&kTypeTensorFloat);
+        auto op3 = model->addOperand(&kTypeTensorFloatRank0);
+        auto op4 = model->addOperand(&kTypeTensorFloat);
+        auto op5 = model->addOperand(&kTypeTensorFloat);
+        auto act = model->addOperand(&kTypeInt32);
+        model->setOperandValue(act, &act_init, sizeof(act_init));
+        model->addOperation(ANEURALNETWORKS_ADD, {op1, op2, act}, {op3});
+        model->addOperation(ANEURALNETWORKS_ADD, {op3, op4, act}, {op5});
+        model->identifyInputsAndOutputs({op1, op2, op4}, {op5});
+        assert(model->isValid());
+    });
+}
+
+TEST_F(ComplianceTest, HardwareBuffer) {
+    const size_t memorySize = 20;
+    AHardwareBuffer_Desc desc{
+            .width = memorySize,
+            .height = 1,
+            .layers = 1,
+            .format = AHARDWAREBUFFER_FORMAT_BLOB,
+            .usage = AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
+    };
+
+    AHardwareBuffer* buffer = nullptr;
+    ASSERT_EQ(AHardwareBuffer_allocate(&desc, &buffer), 0);
+    test_wrapper::Memory memory(buffer);
+    ASSERT_TRUE(memory.isValid());
+
+    int32_t act_init = 0;
+
+    // A simple ADD operation: op1 ADD op2 = op3, with op2 using a const hardware buffer.
+    testAvailableSinceV1_2([&memory, &act_init](WrapperModel* model) {
+        auto op1 = model->addOperand(&kTypeTensorFloat);
+        auto op2 = model->addOperand(&kTypeTensorFloat);
+        auto act = model->addOperand(&kTypeInt32);
+        auto op3 = model->addOperand(&kTypeTensorFloat);
+        model->setOperandValueFromMemory(op2, &memory, 0, sizeof(float));
+        model->setOperandValue(act, &act_init, sizeof(act_init));
+        model->addOperation(ANEURALNETWORKS_ADD, {op1, op2, act}, {op3});
+        model->identifyInputsAndOutputs({op1}, {op3});
+        assert(model->isValid());
+    });
+
+    AHardwareBuffer_release(buffer);
 }
 
 }  // namespace compliance_test
-
-#define CONCAT_NAME_1(name) name
-#define CONCAT_NAME_2(name, suffix) name##_##suffix
-#define GET_CONCAT_NAME(_0, _1, macro, ...) macro
-#define CONCAT_NAME(...) GET_CONCAT_NAME(__VA_ARGS__, CONCAT_NAME_2, CONCAT_NAME_1)(__VA_ARGS__)
-
-#define FORWARD_DECLARE_GENERATED_OBJECTS(NamespaceName, ...)                               \
-    namespace NamespaceName {                                                               \
-    void CONCAT_NAME(CreateModel, ##__VA_ARGS__)(android::nn::test_wrapper::Model * model); \
-    }
-
-#define TEST_AVAILABLE_SINCE_V1_2(NamespaceName, ...)                                    \
-    FORWARD_DECLARE_GENERATED_OBJECTS(NamespaceName, ##__VA_ARGS__)                      \
-    namespace compliance_test {                                                          \
-    TEST_F(ComplianceTest, CONCAT_NAME(NamespaceName, ##__VA_ARGS__)) {                  \
-        Model model;                                                                     \
-        CreateHidlModel(NamespaceName::CONCAT_NAME(CreateModel, ##__VA_ARGS__), &model); \
-        ASSERT_FALSE(compliantWithV1_1(model));                                          \
-        ASSERT_FALSE(compliantWithV1_0(model));                                          \
-    }                                                                                    \
-    }
-
-TEST_AVAILABLE_SINCE_V1_2(tanh_v1_2)
-TEST_AVAILABLE_SINCE_V1_2(sub_v1_2, quant8)
-TEST_AVAILABLE_SINCE_V1_2(conv2d_v1_2, nchw)
-TEST_AVAILABLE_SINCE_V1_2(conv2d_v1_2, quant_output_multiplier_gt_1)
-TEST_AVAILABLE_SINCE_V1_2(depthwise_conv2d_v1_2, nchw)
-TEST_AVAILABLE_SINCE_V1_2(avg_pool_v1_2, nchw)
-TEST_AVAILABLE_SINCE_V1_2(l2_pool_v1_2, nchw)
-TEST_AVAILABLE_SINCE_V1_2(max_pool_v1_2, nchw)
-TEST_AVAILABLE_SINCE_V1_2(resize_bilinear_v1_2, shape_nchw)
-TEST_AVAILABLE_SINCE_V1_2(resize_bilinear_v1_2, scale_nhwc)
-TEST_AVAILABLE_SINCE_V1_2(depth_to_space_v1_2, nchw)
-TEST_AVAILABLE_SINCE_V1_2(space_to_depth_v1_2, nchw)
-TEST_AVAILABLE_SINCE_V1_2(batch_to_space_v1_2, nchw)
-TEST_AVAILABLE_SINCE_V1_2(space_to_batch_v1_2, nchw)
-TEST_AVAILABLE_SINCE_V1_2(l2_normalization_v1_2, dim2_axis1)
-TEST_AVAILABLE_SINCE_V1_2(l2_normalization_axis, dim4_axis0)
-TEST_AVAILABLE_SINCE_V1_2(local_response_normalization_v1_2, dim2_axis1)
-TEST_AVAILABLE_SINCE_V1_2(local_response_normalization_v1_2, axis_dim4_axis0)
-TEST_AVAILABLE_SINCE_V1_2(softmax_v1_2, dim1_axis0)
-TEST_AVAILABLE_SINCE_V1_2(softmax_v1_2, axis_dim4_axis0)
-
-#undef TEST_AVAILABLE_SINCE_V1_2
-#undef FORWARD_DECLARE_GENERATED_OBJECTS
-#undef CONCAT_NAME
-#undef GET_CONCAT_NAME
-#undef CONCAT_NAME_2
-#undef CONCAT_NAME_1

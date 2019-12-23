@@ -98,10 +98,11 @@ struct Conv2dParam {
             int32_t input_height = getSizeOfDimension(inputShape, useNchw ? 2 : 1);
             int32_t filter_width = getSizeOfDimension(filterShape, 2);
             int32_t filter_height = getSizeOfDimension(filterShape, 1);
-            calculateExplicitPadding(input_width, stride_width, filter_width, padding_implicit,
-                                     &padding_left, &padding_right);
-            calculateExplicitPadding(input_height, stride_height, filter_height, padding_implicit,
-                                     &padding_top, &padding_bottom);
+            calculateExplicitPadding(input_width, stride_width, dilation_width_factor, filter_width,
+                                     padding_implicit, &padding_left, &padding_right);
+            calculateExplicitPadding(input_height, stride_height, dilation_height_factor,
+                                     filter_height, padding_implicit, &padding_top,
+                                     &padding_bottom);
         }
         NN_RET_CHECK_GE(padding_left, 0);
         NN_RET_CHECK_GE(padding_right, 0);
@@ -200,7 +201,7 @@ bool convNhwc(const uint8_t* inputData, const Shape& inputShape, const uint8_t* 
     int32_t filterOffset = -filterShape.offset;
     int32_t outputOffset = outputShape.offset;
 
-    float real_multiplier = 0.0;
+    double real_multiplier = 0.0;
     int32_t output_multiplier = 0;
     int32_t output_shift = 0;
     int32_t output_activation_min = 0;
@@ -303,7 +304,7 @@ bool convQuant8PerChannelNhwc(const uint8_t* inputData, const Shape& inputShape,
     int32_t inputOffset = -inputShape.offset;
     int32_t outputOffset = outputShape.offset;
 
-    auto realMultiplier = std::vector<float>(outputDepth, .0f);
+    auto realMultiplier = std::vector<double>(outputDepth, .0f);
     auto outputMultiplier = std::vector<int32_t>(outputDepth, 0);
     auto outputShift = std::vector<int32_t>(outputDepth, .0f);
 
@@ -522,10 +523,13 @@ bool prepare(IOperationExecutionContext* context) {
     NN_RET_CHECK_GT(width, 0);
     NN_RET_CHECK_GT(channels_in, 0);
     NN_RET_CHECK_GT(channels_out, 0);
-    NN_RET_CHECK_GT(filterWidth, param.padding_left);
-    NN_RET_CHECK_GT(filterWidth, param.padding_right);
-    NN_RET_CHECK_GT(filterHeight, param.padding_top);
-    NN_RET_CHECK_GT(filterHeight, param.padding_bottom);
+
+    int32_t effectiveFilterWidth = (filterWidth - 1) * param.dilation_width_factor + 1;
+    int32_t effectiveFilterHeight = (filterHeight - 1) * param.dilation_height_factor + 1;
+    NN_RET_CHECK_GT(effectiveFilterWidth, param.padding_left);
+    NN_RET_CHECK_GT(effectiveFilterWidth, param.padding_right);
+    NN_RET_CHECK_GT(effectiveFilterHeight, param.padding_top);
+    NN_RET_CHECK_GT(effectiveFilterHeight, param.padding_bottom);
 
     uint32_t outWidth =
             computeOutSize(width, filterWidth, param.stride_width, param.dilation_width_factor,

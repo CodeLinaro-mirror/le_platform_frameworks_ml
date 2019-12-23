@@ -71,10 +71,10 @@ struct TransposeConv2dParam {
             const int32_t* outputShapeData = context->getInputBuffer<int32_t>(3);
             int32_t outputWidth = useNchw ? outputShapeData[3] : outputShapeData[2];
             int32_t outputHeight = useNchw ? outputShapeData[2] : outputShapeData[1];
-            calculateExplicitPadding(outputWidth, strideWidth, filterWidth, paddingImplicit,
-                                     &paddingLeft, &paddingRight);
-            calculateExplicitPadding(outputHeight, strideHeight, filterHeight, paddingImplicit,
-                                     &paddingTop, &paddingBottom);
+            calculateExplicitPaddingTransposeConv(outputWidth, strideWidth, filterWidth,
+                                                  paddingImplicit, &paddingLeft, &paddingRight);
+            calculateExplicitPaddingTransposeConv(outputHeight, strideHeight, filterHeight,
+                                                  paddingImplicit, &paddingTop, &paddingBottom);
         } else if (inCount == 11) {
             paddingLeft = context->getInputValue<int32_t>(3);
             paddingRight = context->getInputValue<int32_t>(4);
@@ -87,10 +87,10 @@ struct TransposeConv2dParam {
         } else {
             NN_RET_CHECK_FAIL() << "Unsupported input spec for operation " << kOperationName;
         }
+        // paddingRight and paddingBottom in transpose conv may be less than 0 to resolve the
+        // ambiguous output shape issue in the case of stride > 1.
         NN_RET_CHECK_GE(paddingLeft, 0);
-        NN_RET_CHECK_GE(paddingRight, 0);
         NN_RET_CHECK_GE(paddingTop, 0);
-        NN_RET_CHECK_GE(paddingBottom, 0);
         NN_RET_CHECK_GT(strideWidth, 0);
         NN_RET_CHECK_GT(strideHeight, 0);
         NN_RET_CHECK_GE(activation, 0);
@@ -194,7 +194,7 @@ bool transposeConvNhwc(const uint8_t* inputData, const Shape& inputShape, const 
     int32_t filterOffset = -filterShape.offset;
     int32_t outputOffset = outputShape.offset;
 
-    float realMultiplier = 0.0;
+    double realMultiplier = 0.0;
     int32_t outputMultiplier = 0;
     int32_t outputShift = 0;
     NN_RET_CHECK(GetQuantizedConvolutionMultipler(inputShape, filterShape, biasShape, outputShape,
@@ -328,7 +328,7 @@ bool transposeConvQuant8PerChannelNhwc(const uint8_t* inputData, const Shape& in
     int32_t inputOffset = -inputShape.offset;
     int32_t outputOffset = outputShape.offset;
 
-    std::vector<float> realMultiplier(outputDepth, 0.0);
+    std::vector<double> realMultiplier(outputDepth, 0.0);
     std::vector<int32_t> outputMultiplier(outputDepth, 0);
     std::vector<int32_t> outputShift(outputDepth, 0);
     for (int i = 0; i < outputDepth; ++i) {

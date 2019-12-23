@@ -17,29 +17,163 @@
 #ifndef ANDROID_ML_NN_RUNTIME_EXECUTION_BURST_CONTROLLER_H
 #define ANDROID_ML_NN_RUNTIME_EXECUTION_BURST_CONTROLLER_H
 
+#include "HalInterfaces.h"
+
 #include <android-base/macros.h>
 #include <fmq/MessageQueue.h>
 #include <hidl/MQDescriptor.h>
+
 #include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <stack>
 #include <tuple>
-#include "HalInterfaces.h"
 
 namespace android::nn {
-
-using ::android::hardware::kSynchronizedReadWrite;
-using ::android::hardware::MessageQueue;
-using ::android::hardware::MQDescriptorSync;
-using FmqRequestChannel = MessageQueue<FmqRequestDatum, kSynchronizedReadWrite>;
-using FmqResultChannel = MessageQueue<FmqResultDatum, kSynchronizedReadWrite>;
 
 /**
  * Number of elements in the FMQ.
  */
 constexpr const size_t kExecutionBurstChannelLength = 1024;
+
+/**
+ * Function to serialize a request.
+ *
+ * Prefer calling RequestChannelSender::send.
+ *
+ * @param request Request object without the pool information.
+ * @param measure Whether to collect timing information for the execution.
+ * @param memoryIds Slot identifiers corresponding to memory resources for the
+ *     request.
+ * @return Serialized FMQ request data.
+ */
+std::vector<FmqRequestDatum> serialize(const Request& request, MeasureTiming measure,
+                                       const std::vector<int32_t>& slots);
+
+/**
+ * Deserialize the FMQ result data.
+ *
+ * The three resulting fields are the status of the execution, the dynamic
+ * shapes of the output tensors, and the timing information of the execution.
+ *
+ * @param data Serialized FMQ result data.
+ * @return Result object if successfully deserialized, std::nullopt otherwise.
+ */
+std::optional<std::tuple<ErrorStatus, std::vector<OutputShape>, Timing>> deserialize(
+        const std::vector<FmqResultDatum>& data);
+
+/**
+ * ResultChannelReceiver is responsible for waiting on the channel until the
+ * packet is available, extracting the packet from the channel, and
+ * deserializing the packet.
+ *
+ * Because the receiver can wait on a packet that may never come (e.g., because
+ * the sending side of the packet has been closed), this object can be
+ * invalidating, unblocking the receiver.
+ */
+class ResultChannelReceiver {
+    using FmqResultDescriptor = ::android::hardware::MQDescriptorSync<FmqResultDatum>;
+    using FmqResultChannel =
+            hardware::MessageQueue<FmqResultDatum, hardware::kSynchronizedReadWrite>;
+
+   public:
+    /**
+     * Create the receiving end of a result channel.
+     *
+     * Prefer this call over the constructor.
+     *
+     * @param channelLength Number of elements in the FMQ.
+     * @param blocking 'true' if FMQ should use futex, 'false' if it should
+     *     spin-wait.
+     * @return A pair of ResultChannelReceiver and the FMQ descriptor on
+     *     successful creation, both nullptr otherwise.
+     */
+    static std::pair<std::unique_ptr<ResultChannelReceiver>, const FmqResultDescriptor*> create(
+            size_t channelLength, bool blocking);
+
+    /**
+     * Get the result from the channel.
+     *
+     * This method will block until either:
+     * 1) The packet has been retrieved, or
+     * 2) The receiver has been invalidated
+     *
+     * @return Result object if successfully received, std::nullopt if error or
+     *     if the receiver object was invalidated.
+     */
+    std::optional<std::tuple<ErrorStatus, std::vector<OutputShape>, Timing>> getBlocking();
+
+    /**
+     * Method to mark the channel as invalid, unblocking any current or future
+     * calls to ResultChannelReceiver::getBlocking.
+     */
+    void invalidate();
+
+    // prefer calling ResultChannelReceiver::getBlocking
+    std::optional<std::vector<FmqResultDatum>> getPacketBlocking();
+
+    ResultChannelReceiver(std::unique_ptr<FmqResultChannel> fmqResultChannel, bool blocking);
+
+   private:
+    const std::unique_ptr<FmqResultChannel> mFmqResultChannel;
+    std::atomic<bool> mValid{true};
+    const bool mBlocking;
+};
+
+/**
+ * RequestChannelSender is responsible for serializing the result packet of
+ * information, sending it on the result channel, and signaling that the data is
+ * available.
+ */
+class RequestChannelSender {
+    using FmqRequestDescriptor = ::android::hardware::MQDescriptorSync<FmqRequestDatum>;
+    using FmqRequestChannel =
+            hardware::MessageQueue<FmqRequestDatum, hardware::kSynchronizedReadWrite>;
+
+   public:
+    /**
+     * Create the sending end of a request channel.
+     *
+     * Prefer this call over the constructor.
+     *
+     * @param channelLength Number of elements in the FMQ.
+     * @param blocking 'true' if FMQ should use futex, 'false' if it should
+     *     spin-wait.
+     * @return A pair of ResultChannelReceiver and the FMQ descriptor on
+     *     successful creation, both nullptr otherwise.
+     */
+    static std::pair<std::unique_ptr<RequestChannelSender>, const FmqRequestDescriptor*> create(
+            size_t channelLength, bool blocking);
+
+    /**
+     * Send the request to the channel.
+     *
+     * @param request Request object without the pool information.
+     * @param measure Whether to collect timing information for the execution.
+     * @param memoryIds Slot identifiers corresponding to memory resources for
+     *     the request.
+     * @return 'true' on successful send, 'false' otherwise.
+     */
+    bool send(const Request& request, MeasureTiming measure, const std::vector<int32_t>& slots);
+
+    /**
+     * Method to mark the channel as invalid, causing all future calls to
+     * RequestChannelSender::send to immediately return false without attempting
+     * to send a message across the FMQ.
+     */
+    void invalidate();
+
+    // prefer calling RequestChannelSender::send
+    bool sendPacket(const std::vector<FmqRequestDatum>& packet);
+
+    RequestChannelSender(std::unique_ptr<FmqRequestChannel> fmqRequestChannel, bool blocking);
+
+   private:
+    const std::unique_ptr<FmqRequestChannel> mFmqRequestChannel;
+    std::atomic<bool> mValid{true};
+    const bool mBlocking;
+};
 
 /**
  * The ExecutionBurstController class manages both the serialization and
@@ -50,6 +184,7 @@ constexpr const size_t kExecutionBurstChannelLength = 1024;
 class ExecutionBurstController {
     DISALLOW_IMPLICIT_CONSTRUCTORS(ExecutionBurstController);
 
+   public:
     /**
      * NN runtime burst callback object and memory cache.
      *
@@ -73,10 +208,24 @@ class ExecutionBurstController {
 
         Return<void> getMemories(const hidl_vec<int32_t>& slots, getMemories_cb cb) override;
 
+        /**
+         * This function performs one of two different actions:
+         * 1) If a key corresponding to a memory resource is unrecognized by the
+         *    ExecutionBurstCallback object, the ExecutionBurstCallback object
+         *    will allocate a slot, bind the memory to the slot, and return the
+         *    slot identifier.
+         * 2) If a key corresponding to a memory resource is recognized by the
+         *    ExecutionBurstCallback object, the ExecutionBurstCallback object
+         *    will return the existing slot identifier.
+         *
+         * @param memories Memory resources used in an inference.
+         * @param keys Unique identifiers where each element corresponds to a
+         *     memory resource element in "memories".
+         * @return Unique slot identifiers where each returned slot element
+         *     corresponds to a memory resource element in "memories".
+         */
         std::vector<int32_t> getSlots(const hidl_vec<hidl_memory>& memories,
                                       const std::vector<intptr_t>& keys);
-
-        int32_t getSlot(const hidl_memory& memory, intptr_t key);
 
         /*
          * This function performs two different actions:
@@ -102,7 +251,6 @@ class ExecutionBurstController {
         std::vector<hidl_memory> mMemoryCache;
     };
 
-   public:
     /**
      * Creates a burst controller on a prepared model.
      *
@@ -119,10 +267,15 @@ class ExecutionBurstController {
     static std::unique_ptr<ExecutionBurstController> create(const sp<IPreparedModel>& preparedModel,
                                                             bool blocking);
 
-    ExecutionBurstController(std::unique_ptr<FmqRequestChannel> fmqRequestChannel,
-                             std::unique_ptr<FmqResultChannel> fmqResultChannel,
+    // prefer calling ExecutionBurstController::create
+    ExecutionBurstController(const std::shared_ptr<RequestChannelSender>& requestChannelSender,
+                             const std::shared_ptr<ResultChannelReceiver>& resultChannelReceiver,
                              const sp<IBurstContext>& burstContext,
-                             const sp<ExecutionBurstCallback>& callback, bool blocking);
+                             const sp<ExecutionBurstCallback>& callback,
+                             const sp<hardware::hidl_death_recipient>& deathHandler = nullptr);
+
+    // explicit destructor to unregister the death recipient
+    ~ExecutionBurstController();
 
     /**
      * Execute a request on a model.
@@ -131,10 +284,34 @@ class ExecutionBurstController {
      * @param measure Whether to collect timing measurements, either YES or NO
      * @param memoryIds Identifiers corresponding to each memory object in the
      *     request's pools.
-     * @return status and output shape of the execution and any execution time
-     *     measurements.
+     * @return A tuple of:
+     *     - status of the execution
+     *     - dynamic output shapes from the execution
+     *     - any execution time measurements of the execution
      */
     std::tuple<ErrorStatus, std::vector<OutputShape>, Timing> compute(
+            const Request& request, MeasureTiming measure, const std::vector<intptr_t>& memoryIds);
+
+    // TODO: combine "compute" and "tryCompute" back into a single function.
+    // "tryCompute" was created later to return the "fallback" boolean. This
+    // could not be done directly in "compute" because the VTS test cases (which
+    // test burst using "compute") had already been locked down and could not be
+    // changed.
+    /**
+     * Execute a request on a model.
+     *
+     * @param request Arguments to be executed on a model.
+     * @param measure Whether to collect timing measurements, either YES or NO
+     * @param memoryIds Identifiers corresponding to each memory object in the
+     *     request's pools.
+     * @return A tuple of:
+     *     - status of the execution
+     *     - dynamic output shapes from the execution
+     *     - any execution time measurements of the execution
+     *     - whether or not a failed burst execution should be re-run using a
+     *       different path (e.g., IPreparedModel::executeSynchronously)
+     */
+    std::tuple<ErrorStatus, std::vector<OutputShape>, Timing, bool> tryCompute(
             const Request& request, MeasureTiming measure, const std::vector<intptr_t>& memoryIds);
 
     /**
@@ -145,19 +322,12 @@ class ExecutionBurstController {
     void freeMemory(intptr_t key);
 
    private:
-    std::vector<FmqResultDatum> getPacketBlocking();
-    bool sendPacket(const std::vector<FmqRequestDatum>& packet);
-    std::vector<FmqRequestDatum> serialize(const Request& request, MeasureTiming measure,
-                                           const std::vector<intptr_t>& memoryIds);
-    std::tuple<ErrorStatus, std::vector<OutputShape>, Timing> deserialize(
-            const std::vector<FmqResultDatum>& data);
-
     std::mutex mMutex;
-    const std::unique_ptr<FmqRequestChannel> mFmqRequestChannel;
-    const std::unique_ptr<FmqResultChannel> mFmqResultChannel;
+    const std::shared_ptr<RequestChannelSender> mRequestChannelSender;
+    const std::shared_ptr<ResultChannelReceiver> mResultChannelReceiver;
     const sp<IBurstContext> mBurstContext;
     const sp<ExecutionBurstCallback> mMemoryCache;
-    const bool mUsesFutex;
+    const sp<hardware::hidl_death_recipient> mDeathHandler;
 };
 
 }  // namespace android::nn

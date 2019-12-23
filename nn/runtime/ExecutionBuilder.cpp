@@ -29,6 +29,7 @@
 #include "Utils.h"
 
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -594,7 +595,7 @@ int ExecutionBuilder::compute(sp<ExecutionCallback>* synchronizationCallback,
             VLOG(EXECUTION) << "ExecutionBuilder::compute (asynchronous API)";
             std::thread thread(asyncStartComputePartitioned, this, mPlan, controller, allowFallback,
                                executionCallback);
-            executionCallback->bind_thread(std::move(thread));
+            executionCallback->bindThread(std::move(thread));
         }
         *synchronizationCallback = executionCallback;
         return ANEURALNETWORKS_NO_ERROR;
@@ -823,30 +824,18 @@ int StepExecutor::startComputeOnDevice(
         Model model;
         mModel->setHidlModel(&model);
 
-        // TODO Dangerous!  In async, the model will outlive it here. Safe for now
-        sp<PreparedModelCallback> preparedModelCallback = new PreparedModelCallback();
         // TODO(butlermichael): Propagate user preference to this point instead of
         // using default value of ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER, or
         // remove this entire block of code since it is a stale path that is only
         // encountered on an #if-removed code.
         ExecutionPreference preference =
                 static_cast<ExecutionPreference>(ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER);
-        ErrorStatus prepareLaunchStatus = mDevice->getInterface()->prepareModel(
-                model, preference, hidl_vec<hidl_handle>(), hidl_vec<hidl_handle>(), HidlToken(),
-                preparedModelCallback);
-        if (prepareLaunchStatus != ErrorStatus::NONE) {
-            return convertErrorStatusToResultCode(prepareLaunchStatus);
-        }
 
-        // Immediately synchronize with callback object for now
-        // TODO: change to asynchronous later
-        preparedModelCallback->wait();
-        ErrorStatus prepareReturnStatus = preparedModelCallback->getStatus();
-        if (auto preparedModel = preparedModelCallback->getPreparedModel()) {
-            mPreparedModel = VersionedIPreparedModel::create(preparedModel);
-        }
-        if (prepareReturnStatus != ErrorStatus::NONE) {
-            return convertErrorStatusToResultCode(prepareReturnStatus);
+        ErrorStatus status = ErrorStatus::GENERAL_FAILURE;
+        std::tie(status, mPreparedModel) =
+                mDevice->getInterface()->prepareModel(model, preference, {}, {}, {});
+        if (status != ErrorStatus::NONE) {
+            return convertErrorStatusToResultCode(status);
         }
         if (mPreparedModel == nullptr) {
             return ANEURALNETWORKS_OP_FAILED;
@@ -909,7 +898,10 @@ int StepExecutor::startComputeOnDevice(
     // in the design document.
     sp<ExecutionCallback> executionCallback = new ExecutionCallback();
 
-    if (burstController != nullptr) {
+    // compute using burst if present
+    const bool burstCompute = (burstController != nullptr);
+    bool burstFallback = false;
+    if (burstCompute) {
         std::vector<intptr_t> memoryIds;
         memoryIds.reserve(mMemories.size());
         for (const Memory* memory : mMemories) {
@@ -917,34 +909,46 @@ int StepExecutor::startComputeOnDevice(
             memoryIds.push_back(memory->getKey());
         }
 
-        VLOG(EXECUTION) << "Before ExecutionBurstController->compute() "
+        VLOG(EXECUTION) << "Before ExecutionBurstController->tryCompute() "
                         << SHOW_IF_DEBUG(toString(request));
-        auto burstExecuteResult =
-                burstController->compute(request, measureTiming(mExecutionBuilder), memoryIds);
-        executionCallback->notify(std::get<0>(burstExecuteResult), std::get<1>(burstExecuteResult),
-                                  std::get<2>(burstExecuteResult));
-    } else if (DeviceManager::get()->syncExecHal()) {
-        VLOG(EXECUTION) << "Before mPreparedModel->executeSynchronously() "
-                        << SHOW_IF_DEBUG(toString(request));
-        auto syncExecuteResult =
-                mPreparedModel->executeSynchronously(request, measureTiming(mExecutionBuilder));
-        executionCallback->notify(std::get<0>(syncExecuteResult), std::get<1>(syncExecuteResult),
-                                  std::get<2>(syncExecuteResult));
-    } else {
-        VLOG(EXECUTION) << "Before mPreparedModel->execute() " << SHOW_IF_DEBUG(toString(request));
-        // Execute.
-        // TODO: What happens to the Callback if the service dies abnormally
-        // -- won't that keep the Callback live forever, because the service
-        // never has the opportunity to bump the reference count down? Or
-        // maybe the HIDL infrastructure handles this magically? At worst,
-        // it seems like this is a small memory leak, if the Callback stays
-        // alive forever.
-        Return<ErrorStatus> executeStatus = mPreparedModel->execute(
-                request, measureTiming(mExecutionBuilder), executionCallback);
-        if (!executeStatus.isOk() || executeStatus != ErrorStatus::NONE) {
-            VLOG(EXECUTION) << "**Execute launch failed**";
-            return executeStatus.isOk() ? convertErrorStatusToResultCode(executeStatus)
-                                        : ANEURALNETWORKS_OP_FAILED;
+        auto [status, outputShapes, timing, fallback] =
+                burstController->tryCompute(request, measureTiming(mExecutionBuilder), memoryIds);
+
+        burstFallback = fallback;
+        if (!fallback) {
+            executionCallback->notify(status, outputShapes, timing);
+        }
+    }
+
+    // compute from IPreparedModel if either:
+    // (1) burst was not supplied, or
+    // (2) the burst execution failed and requested a fallback execution
+    if (!burstCompute || burstFallback) {
+        if (DeviceManager::get()->syncExecHal()) {
+            VLOG(EXECUTION) << "Before mPreparedModel->executeSynchronously() "
+                            << SHOW_IF_DEBUG(toString(request));
+            auto syncExecuteResult =
+                    mPreparedModel->executeSynchronously(request, measureTiming(mExecutionBuilder));
+            executionCallback->notify(std::get<0>(syncExecuteResult),
+                                      std::get<1>(syncExecuteResult),
+                                      std::get<2>(syncExecuteResult));
+        } else {
+            VLOG(EXECUTION) << "Before mPreparedModel->execute() "
+                            << SHOW_IF_DEBUG(toString(request));
+            // Execute.
+            // TODO: What happens to the Callback if the service dies abnormally
+            // -- won't that keep the Callback live forever, because the service
+            // never has the opportunity to bump the reference count down? Or
+            // maybe the HIDL infrastructure handles this magically? At worst,
+            // it seems like this is a small memory leak, if the Callback stays
+            // alive forever.
+            Return<ErrorStatus> executeStatus = mPreparedModel->execute(
+                    request, measureTiming(mExecutionBuilder), executionCallback);
+            if (!executeStatus.isOk() || executeStatus != ErrorStatus::NONE) {
+                VLOG(EXECUTION) << "**Execute launch failed**";
+                return executeStatus.isOk() ? convertErrorStatusToResultCode(executeStatus)
+                                            : ANEURALNETWORKS_OP_FAILED;
+            }
         }
     }
 
@@ -1021,12 +1025,13 @@ int StepExecutor::startComputeOnCpu(sp<ExecutionCallback>* synchronizationCallba
 
     std::vector<RunTimePoolInfo> requestPoolInfos;
     requestPoolInfos.reserve(mMemories.size());
-    bool fail = false;
     for (const Memory* mem : mMemories) {
-        requestPoolInfos.emplace_back(mem->getHidlMemory(), &fail);
-    }
-    if (fail) {
-        return ANEURALNETWORKS_UNMAPPABLE;
+        if (std::optional<RunTimePoolInfo> poolInfo =
+                    RunTimePoolInfo::createFromHidlMemory(mem->getHidlMemory())) {
+            requestPoolInfos.emplace_back(*poolInfo);
+        } else {
+            return ANEURALNETWORKS_UNMAPPABLE;
+        }
     }
     // Create as many pools as there are input / output.
     auto fixPointerArguments = [&requestPoolInfos](std::vector<ModelArgumentInfo>& argumentInfos) {
@@ -1035,7 +1040,8 @@ int StepExecutor::startComputeOnCpu(sp<ExecutionCallback>* synchronizationCallba
                 argumentInfo.locationAndLength.poolIndex =
                         static_cast<uint32_t>(requestPoolInfos.size());
                 argumentInfo.locationAndLength.offset = 0;
-                requestPoolInfos.emplace_back(static_cast<uint8_t*>(argumentInfo.buffer));
+                requestPoolInfos.emplace_back(RunTimePoolInfo::createFromExistingBuffer(
+                        static_cast<uint8_t*>(argumentInfo.buffer)));
             }
         }
     };
@@ -1052,7 +1058,7 @@ int StepExecutor::startComputeOnCpu(sp<ExecutionCallback>* synchronizationCallba
         // TODO: should model be moved with a std::cref?
         std::thread thread(computeOnCpu, model, std::move(request), std::move(modelPoolInfos),
                            std::move(requestPoolInfos), executionCallback);
-        executionCallback->bind_thread(std::move(thread));
+        executionCallback->bindThread(std::move(thread));
     }
 
     *synchronizationCallback = executionCallback;
