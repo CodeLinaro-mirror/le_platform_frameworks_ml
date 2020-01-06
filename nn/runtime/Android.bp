@@ -34,6 +34,10 @@ cc_library {
     host_supported: false,
     // b/109953668, disable OpenMP
     // openmp: true,
+    apex_available: [
+        "com.android.neuralnetworks",
+        "test_com.android.neuralnetworks",
+    ],
 
     srcs: [
         "BurstBuilder.cpp",
@@ -52,7 +56,7 @@ cc_library {
 
     stubs: {
         versions: [
-            "29",
+            "30",
         ],
         symbol_file: "libneuralnetworks.map.txt",
     },
