@@ -1573,8 +1573,8 @@ int ModelBuilder::findBestDeviceForEachOperation(
             if (canDo[deviceIndex].check(operationIndex)) {
                 const PerformanceInfo perf = getPerformanceInfo(device, operationIndex);
                 const float perfVal =
-                            (preference == ANEURALNETWORKS_PREFER_LOW_POWER ? perf.powerUsage
-                                                                            : perf.execTime);
+                        ((preference & kPublicPreferencesMask) == ANEURALNETWORKS_PREFER_LOW_POWER ?
+                        perf.powerUsage : perf.execTime);
                 if (bestChoice < 0 || perfVal < bestPerfVal ||
                     (perfVal == bestPerfVal && device == DeviceManager::getCpuDevice())) {
                     bestChoice = deviceIndex;

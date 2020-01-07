@@ -357,7 +357,9 @@ int CpuDevice::prepareModel(const Model& hidlModel, ExecutionPreference executio
     CHECK(modelCache.size() == 0 && dataCache.size() == 0)
             << "Should never call prepareModel with cache information on CpuDevice";
     *preparedModel = nullptr;
-    if (!validateModel(hidlModel) || !validateExecutionPreference(executionPreference)) {
+    auto preference = static_cast<ExecutionPreference>(
+        static_cast<int32_t>(executionPreference) & kPublicPreferencesMask);
+    if (!validateModel(hidlModel) || !validateExecutionPreference(preference)) {
         return ANEURALNETWORKS_OP_FAILED;
     }
     return ANEURALNETWORKS_NO_ERROR;

@@ -94,7 +94,7 @@ int CompilationBuilder::setPreference(int32_t preference) {
                 "ANeuralNetworksCompilation_setPreference can't modify after compilation finished";
         return ANEURALNETWORKS_BAD_STATE;
     }
-    if (preference >= kNumberOfPreferences) {
+    if ((preference & kPublicPreferencesMask) >= kNumberOfPreferences) {
         LOG(ERROR) << "ANeuralNetworksCompilation_setPreference invalid preference " << preference;
         return ANEURALNETWORKS_BAD_DATA;
     }
