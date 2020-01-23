@@ -6,24 +6,27 @@ set (SOURCE_FILES
     vts_hal_hidl_target/VtsHalTargetTestEnvBase.cpp
 )
 
-add_library(${VTS_TARGET_TEST_BASE_NAME} STATIC ${SOURCE_FILES})
+add_library(${VTS_TARGET_TEST_BASE_NAME} ${SOURCE_FILES})
 
 target_include_directories(${VTS_TARGET_TEST_BASE_NAME} PRIVATE vts_hal_hidl_target)
 
 target_link_libraries(${VTS_TARGET_TEST_BASE_NAME}
+    platform_includes
     cast_nn_hidl_base
 )
 
 set (TEST_UTILS_TARGET_NAME nnhal_test_utils)
 
 set (SOURCE_FILES
-    1.0/vts/functional/Callbacks.cpp
-    1.0/vts/functional/GeneratedTestHarness.cpp
+    utils/Callbacks.cpp
+    utils/GeneratedTestHarness.cpp
 )
 
-add_library(${TEST_UTILS_TARGET_NAME} STATIC ${SOURCE_FILES})
+add_library(${TEST_UTILS_TARGET_NAME} ${SOURCE_FILES})
 
-target_include_directories(${TEST_UTILS_TARGET_NAME} PRIVATE vts_hal_hidl_target)
+target_include_directories(${TEST_UTILS_TARGET_NAME}
+    PRIVATE vts_hal_hidl_target
+    PUBLIC utils)
 
 target_link_libraries(${TEST_UTILS_TARGET_NAME}
     neuralnetworks
@@ -49,6 +52,7 @@ target_include_directories(${NNHAL_TEST_1_0_TARGET_NAME} PRIVATE
 )
 
 target_link_libraries(${NNHAL_TEST_1_0_TARGET_NAME}
+    test_gnerated_includes
     neuralnetworks_common
     nnhal_test_utils
     vts_hal_hidl_target_test_base
@@ -87,6 +91,7 @@ target_include_directories(${NNHAL_TEST_1_1_TARGET_NAME} PRIVATE
 )
 
 target_link_libraries(${NNHAL_TEST_1_1_TARGET_NAME}
+    test_gnerated_includes
     neuralnetworks_common
     nnhal_test_utils
     vts_hal_hidl_target_test_base
@@ -133,6 +138,7 @@ target_compile_options(${NNHAL_TEST_1_2_TARGET_NAME} PRIVATE
 )
 
 target_link_libraries(${NNHAL_TEST_1_2_TARGET_NAME}
+    test_gnerated_includes
     neuralnetworks_common
     nnhal_test_utils
     vts_hal_hidl_target_test_base

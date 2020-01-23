@@ -17,23 +17,7 @@ include_directories(${SYSROOT_INCDIR}/tflite)
 include_directories(${SYSROOT_INCDIR}/eigen3)
 link_directories(${SYSROOT_LIBDIR})
 
-#EXPORT_HEADERS
-install(
-    DIRECTORY cast/include/
-    DESTINATION include/cast
-)
-
-include_directories(.)
-include_directories(cast/include)
-include_directories(cast/hidl_base_shlib/include)
-include_directories(cast/hidl_base_shlib/include/external)
-include_directories(cast/hidl_memory_shlib/include)
-include_directories(runtime)
-include_directories(runtime/include)
-include_directories(runtime/test/generated)
-include_directories(runtime/test/generated/examples)
-include_directories(tools/test_generator/include)
-
+add_subdirectory(cast/include)
 add_subdirectory(cast/android/hardware/neuralnetworks/1.2)
 add_subdirectory(cast/hidl_base_shlib)
 add_subdirectory(cast/hidl_memory_shlib)
@@ -41,5 +25,6 @@ add_subdirectory(cast/libtextclassifier)
 add_subdirectory(tools/test_generator)
 add_subdirectory(cast/test_tools/vts-cros)
 add_subdirectory(runtime)
+add_subdirectory(runtime/test/generated)
 add_subdirectory(common)
 add_subdirectory(common/random)

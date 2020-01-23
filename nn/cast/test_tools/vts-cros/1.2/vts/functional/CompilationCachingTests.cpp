@@ -18,12 +18,11 @@
 
 #if defined(__LE_NN__)
 #include "VtsHalNeuralnetworksLib.h"
-#include "external/android-base/logging.h"
 #else
 #include "VtsHalNeuralnetworks.h"
-#include <android-base/logging.h>
 #endif
 
+#include <android-base/logging.h>
 #include <android/hidl/memory/1.0/IMemory.h>
 #include <ftw.h>
 #include <gtest/gtest.h>

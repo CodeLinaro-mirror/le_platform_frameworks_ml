@@ -18,11 +18,10 @@
 
 #if defined(_LE_NN_)
 #include "VtsHalNeuralnetworksLib.h"
-#include "external/android-base/logging.h"
 #else
 #include "VtsHalNeuralnetworks.h"
-#include <android-base/logging.h>
 #endif
+#include <android-base/logging.h>
 
 #include "Callbacks.h"
 #include "TestHarness.h"

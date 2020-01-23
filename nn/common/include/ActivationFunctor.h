@@ -17,7 +17,7 @@
 #ifndef ANDROID_ML_NN_ACTIVATION_FUNCTOR_H
 #define ANDROID_ML_NN_ACTIVATION_FUNCTOR_H
 
-#include "external/android-base/logging.h"
+#include <android-base/logging.h>
 
 #include <algorithm>
 #include <cmath>

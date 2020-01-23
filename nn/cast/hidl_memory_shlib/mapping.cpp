@@ -24,7 +24,7 @@
 
 #include <hidlmemory/mapping.h>
 
-#include "external/android-base/logging.h"
+#include "android-base/logging.h"
 #include <android/hidl/memory/1.0/IMapper.h>
 #include <hidl/HidlSupport.h>
 

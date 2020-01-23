@@ -13,6 +13,8 @@ target_include_directories(${TARGET_NAME} PRIVATE .)
 target_include_directories(${TARGET_NAME}
   INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 
+target_link_libraries(${TARGET_NAME} external_includes)
+
 install(
     TARGETS ${TARGET_NAME}
     LIBRARY DESTINATION ${NNAPI_LIB_DIR}

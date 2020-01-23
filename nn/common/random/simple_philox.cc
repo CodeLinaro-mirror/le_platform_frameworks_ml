@@ -16,7 +16,7 @@ limitations under the License.
 #include "simple_philox.h"
 #include "exact_uniform_int.h"
 
-#include "external/android-base/logging.h"
+#include <android-base/logging.h>
 
 namespace tensorflow {
 namespace random {

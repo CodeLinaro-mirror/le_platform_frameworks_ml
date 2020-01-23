@@ -21,7 +21,7 @@
 
 #include <hidl/HidlInternal.h>
 
-#include "external/android-base/logging.h"
+#include "android-base/logging.h"
 
 #ifdef LIBHIDL_TARGET_DEBUGGABLE
 #include <dirent.h>

@@ -23,12 +23,7 @@
 #include <VtsHalHidlTargetTestBase.h>
 #include <VtsHalHidlTargetTestEnvBase.h>
 
-#if defined(__LE_NN__)
-#include "external/android-base/macros.h"
-#else
 #include <android-base/macros.h>
-#endif
-
 #include <gtest/gtest.h>
 #include <iostream>
 #include <vector>
