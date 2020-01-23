@@ -311,7 +311,9 @@ struct hidl_memory {
     }
 
     // @return true if it's valid
-    inline bool valid() const { return handle() != nullptr; }
+    inline bool valid() const {
+        return handle() != nullptr || shpmem() != nullptr;
+    }
 
     // offsetof(hidl_memory, mHandle) exposed since mHandle is private.
     static const size_t kOffsetOfHandle;
