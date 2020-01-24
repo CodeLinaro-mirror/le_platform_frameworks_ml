@@ -393,9 +393,11 @@ bool prepare(IOperationExecutionContext* context) {
     if (context->getInputType(kInputTensor) == OperandType::TENSOR_FLOAT16) {
         heightScale = context->getInputValue<_Float16>(kHeightStrideSalar);
         widthScale = context->getInputValue<_Float16>(kWidthStrideScalar);
-    } else {
+    } else if (context->getInputType(kInputTensor) == OperandType::TENSOR_FLOAT32) {
         heightScale = context->getInputValue<float>(kHeightStrideSalar);
         widthScale = context->getInputValue<float>(kWidthStrideScalar);
+    } else {
+        NN_RET_CHECK_FAIL() << "Unsupported input type " << static_cast<int>(context->getInputType(kInputTensor));
     }
     NN_RET_CHECK_GT(outputHeight, 0);
     NN_RET_CHECK_GT(outputWidth, 0);
