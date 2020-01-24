@@ -19,10 +19,12 @@
 #include "CompilationBuilder.h"
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
+
 #include "BurstBuilder.h"
 #include "ExecutionBuilder.h"
 #include "ExecutionBurstController.h"
@@ -33,6 +35,8 @@
 
 namespace android {
 namespace nn {
+
+using namespace hal;
 
 CompilationBuilder::CompilationBuilder(const ModelBuilder* model,
                                        const std::vector<std::shared_ptr<Device>>& devices,
@@ -52,12 +56,15 @@ int CompilationBuilder::finish() {
     }
     // TODO validate the rest
 
+    const auto [n, timeout] = makeTimePoint(mTimeoutDuration);
+    NN_RETURN_IF_ERROR(n);
+
     mFinished = true;
     if (mIsCacheInfoProvided) {
         mPlan.setCaching(&mCacheDir, mToken);
     }
     if (mPartitioning) {
-        int n = mModel->partitionTheWork(mDevices, mPreference, &mPlan);
+        int n = mModel->partitionTheWork(mDevices, mPreference, mPriority, timeout, &mPlan);
         switch (n) {
             case ANEURALNETWORKS_NO_ERROR:
                 return n;
@@ -90,7 +97,7 @@ int CompilationBuilder::finish() {
     VLOG(COMPILATION) << "CompilationBuilder::finish with CPU fallback";
     mPlan.reset();
     mPlan.becomeSingleStep(DeviceManager::getCpuDevice(), mModel);
-    return mPlan.finish(mModel, mPreference);
+    return mPlan.finish(mModel, mPreference, mPriority, timeout);
 }
 
 int CompilationBuilder::setPreference(int32_t preference) {
@@ -121,6 +128,46 @@ int CompilationBuilder::setCaching(const std::string& cacheDir, const uint8_t* t
     }
     std::copy(token, token + ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN, mToken);
     mIsCacheInfoProvided = true;
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
+int CompilationBuilder::setPriority(int32_t priority) {
+    if (mFinished) {
+        LOG(ERROR) << "ANeuralNetworksCompilation_setPriority can't modify after compilation "
+                      "finished";
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    if (priority != ANEURALNETWORKS_PRIORITY_LOW && priority != ANEURALNETWORKS_PRIORITY_MEDIUM &&
+        priority != ANEURALNETWORKS_PRIORITY_HIGH) {
+        LOG(ERROR) << "ANeuralNetworksCompilation_setPriority invalid priority " << priority;
+        return ANEURALNETWORKS_BAD_DATA;
+    }
+
+    mPriority = priority;
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
+int CompilationBuilder::setTimeoutDuration(uint64_t duration) {
+    if (mFinished) {
+        LOG(ERROR) << "ANeuralNetworksCompilation_setTimeout can't modify after compilation "
+                      "finished";
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    if (!mExplicitDeviceList || (mDevices.size() != 1)) {
+        LOG(ERROR) << "ANeuralNetworksCompilation_setTimeout called on an "
+                      "ANeuralNetworksCompilation that was not created by "
+                      "ANeuralNetworksCompilation_createForDevices with numDevices = 1";
+        return ANEURALNETWORKS_BAD_DATA;
+    }
+    const auto& device = mDevices.front();
+    const bool supportsCompilationDeadline = device->supportsDeadlines().first;
+    if (!supportsCompilationDeadline) {
+        LOG(ERROR)
+                << "ANeuralNetworksCompilation_setTimeout called on device that does not support "
+                   "compilation timeouts.";
+        return ANEURALNETWORKS_BAD_DATA;
+    }
+    mTimeoutDuration = duration;
     return ANEURALNETWORKS_NO_ERROR;
 }
 
@@ -165,6 +212,44 @@ int CompilationBuilder::createBurst(BurstBuilder** burst) {
             mPlan.makeBursts(mPreference);
     *burst = new (std::nothrow) BurstBuilder(this, std::move(burstControllers));
     return (*burst ? ANEURALNETWORKS_NO_ERROR : ANEURALNETWORKS_OUT_OF_MEMORY);
+}
+
+int CompilationBuilder::forEachStepRoleOfInput(uint32_t index,
+                                               const StepRoleCallback& callback) const {
+    if (!mFinished) {
+        LOG(ERROR) << "ANeuralNetworksMemoryDesc_addInputRole passed an unfinished compilation";
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    if (!mPlan.isValid()) {
+        LOG(ERROR) << "ANeuralNetworksMemoryDesc_addInputRole passed an invalid compilation";
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    if (index >= mModel->inputCount()) {
+        LOG(ERROR) << "ANeuralNetworksMemoryDesc_addInputRole passed an invalid input index "
+                   << index;
+        return ANEURALNETWORKS_BAD_DATA;
+    }
+    mPlan.forEachStepRoleOfInput(index, callback);
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
+int CompilationBuilder::forEachStepRoleOfOutput(uint32_t index,
+                                                const StepRoleCallback& callback) const {
+    if (!mFinished) {
+        LOG(ERROR) << "ANeuralNetworksMemoryDesc_addOutputRole passed an unfinished compilation";
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    if (!mPlan.isValid()) {
+        LOG(ERROR) << "ANeuralNetworksMemoryDesc_addOutputRole passed an invalid compilation";
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    if (index >= mModel->outputCount()) {
+        LOG(ERROR) << "ANeuralNetworksMemoryDesc_addOutputRole passed an invalid output index "
+                   << index;
+        return ANEURALNETWORKS_BAD_DATA;
+    }
+    mPlan.forEachStepRoleOfOutput(index, callback);
+    return ANEURALNETWORKS_NO_ERROR;
 }
 
 }  // namespace nn

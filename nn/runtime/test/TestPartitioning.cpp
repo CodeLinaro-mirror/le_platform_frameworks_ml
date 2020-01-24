@@ -91,10 +91,10 @@
 // In order to determine whether or not a partitioning matches the
 // expected partitioning, we check the number of partitions, check
 // which device each partition targets, and compare each partition's
-// subgraph, model inputs, model outputs, submodel inputs, and
-// submodel outputs against what is expected.  In order to perform
+// subgraph, model inputs, model outputs, step model inputs, and
+// step model outputs against what is expected.  In order to perform
 // that comparison, we build a model to compare against a partition's
-// submodel and run a graph comparison algorithm on it.  The graph
+// step model and run a graph comparison algorithm on it.  The graph
 // comparison and the inputs and outputs comparisons are syntactic
 // rather than semantic comparisons -- they don't allow for
 // reorderings of inputs and outputs.  Because of this, we need to
@@ -108,20 +108,20 @@
 //   operands in index order (input followed by output) when that
 //   operation is added.  (It does not add an input that has already
 //   been added.)
-// - It finds model inputs, model outputs, and submodel inputs in
+// - It finds model inputs, model outputs, and step model inputs in
 //   the order the corresponding operands were added to the subgraph
 //   (see ExecutionStep methods getModelInputs(), getModelOutputs(),
-//   getTempsAsSubModelInputs(), getOutputsAsSubModelInputs()).
-// - It finds temps as submodel outputs in numerical order of corresponding
+//   getTempsAsStepModelInputs(), getOutputsAsStepModelInputs()).
+// - It finds temps as step model outputs in numerical order of corresponding
 //   operand number in the original model (see ExecutionStep method
-//   getTempsAsSubModelOutputs()).
-// - When it calls identifyInputsAndOutputs() on the submodel, it
+//   getTempsAsStepModelOutputs()).
+// - When it calls identifyInputsAndOutputs() on the step model, it
 //   passes inputs from getModelInputs() in order, followed by temps as
-//   submodel inputs from getTempsAsSubModelInputs() in order,
-//   followed by outputs as submodel inputs from
-//   getOutputsAsSubModelInputs() in order; and it passes outputs from
-//   getModelOutputs() in order followed by submodel outputs from
-//   getTempsAsSubModelOutputs() in order.
+//   step model inputs from getTempsAsStepModelInputs() in order,
+//   followed by outputs as step model inputs from
+//   getOutputsAsStepModelInputs() in order; and it passes outputs from
+//   getModelOutputs() in order followed by step model outputs from
+//   getTempsAsStepModelOutputs() in order.
 //
 // TODO: Maybe the logic for comparing a partition to an expected
 //       model should be changed to tolerate reorderings of inputs and
@@ -129,9 +129,9 @@
 //       against, we don't need to worry about input and output
 //       orderings.  But is there a way to do this that still lets us
 //       verify that we have the correct relationships between
-//       an (original) model's inputs and outputs and each submodel's
+//       an (original) model's inputs and outputs and each step model's
 //       inputs and outputs, as well as the correct relationship
-//       between submodel inputs and outputs across partitions?
+//       between step model inputs and outputs across partitions?
 
 namespace {
 
@@ -156,7 +156,8 @@ using WrapperType = ::android::nn::test_wrapper::Type;
 template <typename T>
 using MQDescriptorSync = ::android::hardware::MQDescriptorSync<T>;
 
-const Timing kBadTiming = {.timeOnDevice = UINT64_MAX, .timeInDriver = UINT64_MAX};
+constexpr Timing kBadTiming = {.timeOnDevice = UINT64_MAX, .timeInDriver = UINT64_MAX};
+constexpr int32_t kDefaultRuntimePriority = ANEURALNETWORKS_PRIORITY_DEFAULT;
 
 Capabilities makeCapabilities(float perf) {
     PerformanceInfo perfInfo = {.execTime = perf, .powerUsage = perf};
@@ -260,8 +261,8 @@ uint32_t lookupOperation(std::function<const Operation&(uint32_t)> getOperation,
 
 uint32_t lookupOperation(const HidlModel& model, uint32_t operationIndex) {
     return lookupOperation(
-            [&model](uint32_t index) -> const Operation& { return model.operations[index]; },
-            [&model](uint32_t index) -> const Operand& { return model.operands[index]; },
+            [&model](uint32_t index) -> const Operation& { return model.main.operations[index]; },
+            [&model](uint32_t index) -> const Operand& { return model.main.operands[index]; },
             [&model](uint32_t offset) { return &model.operandValues[offset]; }, operationIndex);
 }
 
@@ -270,10 +271,11 @@ uint32_t lookupOperation(const HidlModel& model, uint32_t operationIndex) {
 void dump(const char* name, const ModelBuilder* model) {
     const HidlModel hidlModel = model->makeHidlModel();
     std::cout << name << ": " << toString(hidlModel) << std::endl;
-    std::cout << "inputs: " << toString(hidlModel.inputIndexes) << std::endl;
-    std::cout << "outputs: " << toString(hidlModel.outputIndexes) << std::endl;
-    for (size_t i = 0, e = hidlModel.operations.size(); i < e; i++) {
-        std::cout << "operation[" << i << "]: " << toString(hidlModel.operations[i]) << std::endl;
+    std::cout << "inputs: " << toString(hidlModel.main.inputIndexes) << std::endl;
+    std::cout << "outputs: " << toString(hidlModel.main.outputIndexes) << std::endl;
+    for (size_t i = 0, e = hidlModel.main.operations.size(); i < e; i++) {
+        std::cout << "operation[" << i << "]: " << toString(hidlModel.main.operations[i])
+                  << std::endl;
     }
 }
 #endif
@@ -289,25 +291,28 @@ class PartitioningDriver : public SampleDriver {
     // Dummy class -- a prepared model must not be nullptr.
     class PartitioningPreparedModel : public IPreparedModel {
        public:
-        Return<ErrorStatus> execute(const Request&, const sp<V1_0::IExecutionCallback>&) override {
-            return ErrorStatus::DEVICE_UNAVAILABLE;
+        Return<V1_0::ErrorStatus> execute(const V1_0::Request&,
+                                          const sp<V1_0::IExecutionCallback>&) override {
+            return V1_0::ErrorStatus::DEVICE_UNAVAILABLE;
         }
-        Return<ErrorStatus> execute_1_2(const Request&, MeasureTiming,
-                                        const sp<V1_2::IExecutionCallback>&) override {
-            return ErrorStatus::DEVICE_UNAVAILABLE;
+        Return<V1_0::ErrorStatus> execute_1_2(const V1_0::Request&, MeasureTiming,
+                                              const sp<V1_2::IExecutionCallback>&) override {
+            return V1_0::ErrorStatus::DEVICE_UNAVAILABLE;
         }
-        Return<ErrorStatus> execute_1_3(const Request&, MeasureTiming,
-                                        const sp<V1_2::IExecutionCallback>&) override {
-            return ErrorStatus::DEVICE_UNAVAILABLE;
+        Return<V1_3::ErrorStatus> execute_1_3(const V1_3::Request&, MeasureTiming,
+                                              const OptionalTimePoint&,
+                                              const sp<V1_3::IExecutionCallback>&) override {
+            return V1_3::ErrorStatus::DEVICE_UNAVAILABLE;
         }
-        Return<void> executeSynchronously(const Request&, MeasureTiming,
+        Return<void> executeSynchronously(const V1_0::Request&, MeasureTiming,
                                           executeSynchronously_cb cb) override {
-            cb(ErrorStatus::DEVICE_UNAVAILABLE, {}, kBadTiming);
+            cb(V1_0::ErrorStatus::DEVICE_UNAVAILABLE, {}, kBadTiming);
             return Void();
         }
-        Return<void> executeSynchronously_1_3(const Request&, MeasureTiming,
+        Return<void> executeSynchronously_1_3(const V1_3::Request&, MeasureTiming,
+                                              const OptionalTimePoint&,
                                               executeSynchronously_1_3_cb cb) override {
-            cb(ErrorStatus::DEVICE_UNAVAILABLE, {}, kBadTiming);
+            cb(V1_3::ErrorStatus::DEVICE_UNAVAILABLE, {}, kBadTiming);
             return Void();
         }
         Return<void> configureExecutionBurst(
@@ -315,7 +320,7 @@ class PartitioningDriver : public SampleDriver {
                 const MQDescriptorSync<V1_2::FmqRequestDatum>& /*requestChannel*/,
                 const MQDescriptorSync<V1_2::FmqResultDatum>& /*resultChannel*/,
                 configureExecutionBurst_cb cb) override {
-            cb(ErrorStatus::DEVICE_UNAVAILABLE, nullptr);
+            cb(V1_0::ErrorStatus::DEVICE_UNAVAILABLE, nullptr);
             return Void();
         }
     };
@@ -337,19 +342,19 @@ class PartitioningDriver : public SampleDriver {
     ~PartitioningDriver() override {}
 
     Return<void> getVersionString(getVersionString_cb cb) override {
-        cb(ErrorStatus::NONE, mVersionString);
+        cb(V1_0::ErrorStatus::NONE, mVersionString);
         return Void();
     }
 
-    Return<ErrorStatus> prepareModel_1_3(const Model& model, ExecutionPreference,
-                                         const hidl_vec<hidl_handle>&, const hidl_vec<hidl_handle>&,
-                                         const CacheToken&,
-                                         const sp<IPreparedModelCallback>& cb) override {
-        ErrorStatus status = ErrorStatus::NONE;
+    Return<V1_3::ErrorStatus> prepareModel_1_3(
+            const Model& model, ExecutionPreference, Priority, const OptionalTimePoint&,
+            const hidl_vec<hidl_handle>&, const hidl_vec<hidl_handle>&, const CacheToken&,
+            const sp<V1_3::IPreparedModelCallback>& cb) override {
+        V1_3::ErrorStatus status = V1_3::ErrorStatus::NONE;
         if (mOEM != OEMYes) {
-            for (const auto& operation : model.operations) {
+            for (const auto& operation : model.main.operations) {
                 if (operation.type == OperationType::OEM_OPERATION) {
-                    status = ErrorStatus::INVALID_ARGUMENT;
+                    status = V1_3::ErrorStatus::INVALID_ARGUMENT;
                     break;
                 }
             }
@@ -361,21 +366,21 @@ class PartitioningDriver : public SampleDriver {
     Return<DeviceStatus> getStatus() override { return DeviceStatus::AVAILABLE; }
 
     Return<void> getCapabilities_1_3(getCapabilities_1_3_cb cb) override {
-        cb(ErrorStatus::NONE, mCapabilities);
+        cb(V1_3::ErrorStatus::NONE, mCapabilities);
         return Void();
     }
 
     Return<void> getSupportedOperations_1_3(const Model& model,
-                                            getSupportedOperations_cb cb) override {
+                                            getSupportedOperations_1_3_cb cb) override {
         if (!android::nn::validateModel(model)) {
-            cb(ErrorStatus::INVALID_ARGUMENT, std::vector<bool>());
+            cb(V1_3::ErrorStatus::INVALID_ARGUMENT, std::vector<bool>());
             return Void();
         }
 
-        const size_t count = model.operations.size();
+        const size_t count = model.main.operations.size();
         std::vector<bool> supported(count);
         for (size_t i = 0; i < count; i++) {
-            if (model.operations[i].type == OperationType::OEM_OPERATION) {
+            if (model.main.operations[i].type == OperationType::OEM_OPERATION) {
                 supported[i] = (mOEM != OEMNo);
                 continue;
             }
@@ -385,20 +390,20 @@ class PartitioningDriver : public SampleDriver {
                 supported[i] = true;
             }
         }
-        cb(ErrorStatus::NONE, supported);
+        cb(V1_3::ErrorStatus::NONE, supported);
         return Void();
     }
 
     Return<void> getNumberOfCacheFilesNeeded(getNumberOfCacheFilesNeeded_cb cb) override {
-        cb(ErrorStatus::NONE, /*numModelCache=*/1, /*numDataCache=*/1);
+        cb(V1_0::ErrorStatus::NONE, /*numModelCache=*/1, /*numDataCache=*/1);
         return Void();
     }
 
-    Return<ErrorStatus> prepareModelFromCache(
+    Return<V1_0::ErrorStatus> prepareModelFromCache(
             const hidl_vec<hidl_handle>&, const hidl_vec<hidl_handle>&, const CacheToken&,
             const sp<V1_2::IPreparedModelCallback>& callback) override {
-        callback->notify_1_2(ErrorStatus::NONE, new PartitioningPreparedModel);
-        return ErrorStatus::NONE;
+        callback->notify_1_2(V1_0::ErrorStatus::NONE, new PartitioningPreparedModel);
+        return V1_0::ErrorStatus::NONE;
     }
 
    private:
@@ -422,7 +427,7 @@ class PartitioningDriverV1_2 : public V1_2::IDevice {
                                             getSupportedOperations_1_2_cb _hidl_cb) override {
         return mLatestDriver->getSupportedOperations_1_2(model, _hidl_cb);
     }
-    Return<ErrorStatus> prepareModel_1_2(
+    Return<V1_0::ErrorStatus> prepareModel_1_2(
             const V1_2::Model& model, ExecutionPreference preference,
             const hidl_vec<hidl_handle>& modelCache, const hidl_vec<hidl_handle>& dataCache,
             const CacheToken& token,
@@ -440,10 +445,9 @@ class PartitioningDriverV1_2 : public V1_2::IDevice {
     Return<void> getNumberOfCacheFilesNeeded(getNumberOfCacheFilesNeeded_cb _hidl_cb) {
         return mLatestDriver->getNumberOfCacheFilesNeeded(_hidl_cb);
     }
-    Return<ErrorStatus> prepareModelFromCache(const hidl_vec<hidl_handle>& modelCache,
-                                              const hidl_vec<hidl_handle>& dataCache,
-                                              const CacheToken& token,
-                                              const sp<V1_2::IPreparedModelCallback>& callback) {
+    Return<V1_0::ErrorStatus> prepareModelFromCache(
+            const hidl_vec<hidl_handle>& modelCache, const hidl_vec<hidl_handle>& dataCache,
+            const CacheToken& token, const sp<V1_2::IPreparedModelCallback>& callback) {
         return mLatestDriver->prepareModelFromCache(modelCache, dataCache, token, callback);
     }
     Return<void> getCapabilities_1_1(getCapabilities_1_1_cb _hidl_cb) override {
@@ -453,7 +457,7 @@ class PartitioningDriverV1_2 : public V1_2::IDevice {
                                             getSupportedOperations_1_1_cb _hidl_cb) override {
         return mLatestDriver->getSupportedOperations_1_1(model, _hidl_cb);
     }
-    Return<ErrorStatus> prepareModel_1_1(
+    Return<V1_0::ErrorStatus> prepareModel_1_1(
             const V1_1::Model& model, ExecutionPreference preference,
             const sp<V1_0::IPreparedModelCallback>& actualCallback) override {
         return mLatestDriver->prepareModel_1_1(model, preference, actualCallback);
@@ -466,7 +470,7 @@ class PartitioningDriverV1_2 : public V1_2::IDevice {
                                         getSupportedOperations_cb _hidl_cb) override {
         return mLatestDriver->getSupportedOperations(model, _hidl_cb);
     }
-    Return<ErrorStatus> prepareModel(
+    Return<V1_0::ErrorStatus> prepareModel(
             const V1_0::Model& model,
             const sp<V1_0::IPreparedModelCallback>& actualCallback) override {
         return mLatestDriver->prepareModel(model, actualCallback);
@@ -490,7 +494,7 @@ class PartitioningDriverV1_1 : public V1_1::IDevice {
                                             getSupportedOperations_1_1_cb _hidl_cb) override {
         return mLatestDriver->getSupportedOperations_1_1(model, _hidl_cb);
     }
-    Return<ErrorStatus> prepareModel_1_1(
+    Return<V1_0::ErrorStatus> prepareModel_1_1(
             const V1_1::Model& model, ExecutionPreference preference,
             const sp<V1_0::IPreparedModelCallback>& actualCallback) override {
         return mLatestDriver->prepareModel_1_1(model, preference, actualCallback);
@@ -503,7 +507,7 @@ class PartitioningDriverV1_1 : public V1_1::IDevice {
                                         getSupportedOperations_cb _hidl_cb) override {
         return mLatestDriver->getSupportedOperations(model, _hidl_cb);
     }
-    Return<ErrorStatus> prepareModel(
+    Return<V1_0::ErrorStatus> prepareModel(
             const V1_0::Model& model,
             const sp<V1_0::IPreparedModelCallback>& actualCallback) override {
         return mLatestDriver->prepareModel(model, actualCallback);
@@ -527,7 +531,7 @@ class PartitioningDriverV1_0 : public V1_0::IDevice {
                                         getSupportedOperations_cb _hidl_cb) override {
         return mLatestDriver->getSupportedOperations(model, _hidl_cb);
     }
-    Return<ErrorStatus> prepareModel(
+    Return<V1_0::ErrorStatus> prepareModel(
             const V1_0::Model& model,
             const sp<V1_0::IPreparedModelCallback>& actualCallback) override {
         return mLatestDriver->prepareModel(model, actualCallback);
@@ -565,6 +569,7 @@ class PartitioningModel : private WrapperModel {
             case ANEURALNETWORKS_FLOAT32:
             case ANEURALNETWORKS_INT32:
             case ANEURALNETWORKS_UINT32:
+            case ANEURALNETWORKS_MODEL:
             case ANEURALNETWORKS_OEM_SCALAR: {
                 WrapperOperandType wrapperOperandType(wrapperType, {});
                 mWrapperOperandType.push_back(wrapperOperandType);
@@ -648,9 +653,11 @@ class PartitioningModel : private WrapperModel {
 
     // Run the partitioning algorithm to create an ExecutionPlan.
     int partitionTheWork(const std::vector<std::shared_ptr<Device>>& devices,
-                         ExecutePreference preference, ExecutionPlan* plan) {
+                         ExecutePreference preference, int32_t priority,
+                         const OptionalTimePoint& deadline, ExecutionPlan* plan) {
         return reinterpret_cast<ModelBuilder*>(getHandle())
-                ->partitionTheWork(devices, static_cast<uint32_t>(preference), plan);
+                ->partitionTheWork(devices, static_cast<uint32_t>(preference), priority, deadline,
+                                   plan);
     }
 
 #ifdef VERBOSE
@@ -758,7 +765,7 @@ class PartitioningCompilation : public WrapperCompilation {
 class PartitioningTest : public ::testing::Test {
    protected:
     using RemapVectorType = ExecutionStep::RemapVectorType;
-    using SubModelOutputSetType = ExecutionStep::SubModelOutputSetType;
+    using StepModelOutputSetType = ExecutionStep::StepModelOutputSetType;
 
     virtual void SetUp() {}
 
@@ -900,7 +907,7 @@ class PartitioningTest : public ::testing::Test {
     // comparison algorithm, we encode the "defining operation" index of
     // such an operand as follows:
     // - NO_VALUE       kPseudoDefiningOperationNoValue
-    // - MODEL_INPUT    kPseudoDefiningOperationModelInput0 + (position in list of inputs)
+    // - SUBGRAPH_INPUT kPseudoDefiningOperationModelInput0 + (position in list of inputs)
     // - CONSTANT_COPY  kPseudoDefiningOperationConstantCopy0 + (constant value)
     //                    Note: For the graphs we build in this test, we
     //                          only expect to see 4-byte constants within
@@ -959,8 +966,8 @@ class PartitioningTest : public ::testing::Test {
                     break;
                 }
                 case OperandLifeTime::TEMPORARY_VARIABLE:
-                case OperandLifeTime::MODEL_INPUT:
-                case OperandLifeTime::MODEL_OUTPUT:
+                case OperandLifeTime::SUBGRAPH_INPUT:
+                case OperandLifeTime::SUBGRAPH_OUTPUT:
                     // already handled
                     break;
                 default:
@@ -1187,22 +1194,22 @@ class PartitioningTest : public ::testing::Test {
     // As a side effect of the comparison, we produce a map
     // *inputsAndOutputsModelToStep that maps from each of the model input and
     // output operand numbers of "model" to the corresponding operand numbers of
-    // the submodel from "step".  If the comparison returns false, the contents
+    // the step model from "step".  If the comparison returns false, the contents
     // of the map are undefined.
     bool compare(std::shared_ptr<const ExecutionStep> step, const PartitioningModel* model,
                  std::shared_ptr<Device> device,
                  std::map<uint32_t, uint32_t>* inputsAndOutputsModelToStep) {
         return (step->getDevice() == device) &&
-               compare(step->getSubModel(),
+               compare(step->getStepModel(),
                        reinterpret_cast<const ModelBuilder*>(model->getHandle()),
                        inputsAndOutputsModelToStep);
     }
 
     void compare(std::shared_ptr<const ExecutionStep> step, const PartitioningModel* model,
                  std::shared_ptr<Device> device, const RemapVectorType& modelInputs,
-                 const RemapVectorType& modelOutputs, const RemapVectorType& tempsAsSubModelInputs,
-                 const SubModelOutputSetType& tempsAsSubModelOutputs,
-                 const RemapVectorType& outputsAsSubModelInputs) {
+                 const RemapVectorType& modelOutputs, const RemapVectorType& tempsAsStepModelInputs,
+                 const StepModelOutputSetType& tempsAsStepModelOutputs,
+                 const RemapVectorType& outputsAsStepModelInputs) {
         std::map<uint32_t, uint32_t> inputsAndOutputsModelToStep;
         ASSERT_NO_FATAL_FAILURE(
                 ASSERT_TRUE(compare(step, model, device, &inputsAndOutputsModelToStep)));
@@ -1211,13 +1218,13 @@ class PartitioningTest : public ::testing::Test {
         ASSERT_TRUE(compareRemapVectors(inputsAndOutputsModelToStep, step->getModelOutputs(),
                                         modelOutputs));
         ASSERT_TRUE(compareRemapVectors(inputsAndOutputsModelToStep,
-                                        step->getTempsAsSubModelInputs(), tempsAsSubModelInputs));
-        ASSERT_TRUE(compareSubModelOutputSets(inputsAndOutputsModelToStep,
-                                              step->getTempsAsSubModelOutputs(),
-                                              tempsAsSubModelOutputs));
+                                        step->getTempsAsStepModelInputs(), tempsAsStepModelInputs));
+        ASSERT_TRUE(compareStepModelOutputSets(inputsAndOutputsModelToStep,
+                                               step->getTempsAsStepModelOutputs(),
+                                               tempsAsStepModelOutputs));
         ASSERT_TRUE(compareRemapVectors(inputsAndOutputsModelToStep,
-                                        step->getOutputsAsSubModelInputs(),
-                                        outputsAsSubModelInputs));
+                                        step->getOutputsAsStepModelInputs(),
+                                        outputsAsStepModelInputs));
     }
 
    private:
@@ -1231,13 +1238,13 @@ class PartitioningTest : public ::testing::Test {
         return step == model;
     }
 
-    static bool compareSubModelOutputSets(
+    static bool compareStepModelOutputSets(
             const std::map<uint32_t, uint32_t>& inputsAndOutputsModelToStep,
-            const SubModelOutputSetType& step, const SubModelOutputSetType& model) {
-        SubModelOutputSetType modelTransformed;
+            const StepModelOutputSetType& step, const StepModelOutputSetType& model) {
+        StepModelOutputSetType modelTransformed;
         std::transform(
                 model.begin(), model.end(), std::inserter(modelTransformed, modelTransformed.end()),
-                [&inputsAndOutputsModelToStep](const SubModelOutputSetType::value_type& val) {
+                [&inputsAndOutputsModelToStep](const StepModelOutputSetType::value_type& val) {
                     return std::make_pair(val.first, inputsAndOutputsModelToStep.at(val.second));
                 });
         return step == modelTransformed;
@@ -1260,7 +1267,8 @@ TEST_F(PartitioningTest, SimpleModel) {
     // didn't actually do any partitioning.
     const auto devicesA = makeDevices({{"bad", 0.9, ~0U}, {"good", 0.5, ~0U}});
     ExecutionPlan planA;
-    ASSERT_EQ(model.partitionTheWork(devicesA, ExecutePreference::PREFER_LOW_POWER, &planA),
+    ASSERT_EQ(model.partitionTheWork(devicesA, ExecutePreference::PREFER_LOW_POWER,
+                                     kDefaultRuntimePriority, {}, &planA),
               ANEURALNETWORKS_NO_ERROR);
     ASSERT_EQ(planA.forTest_getKind(), ExecutionPlan::Kind::SIMPLE);
     ASSERT_NE(planA.forTest_simpleGetDevice().get(), nullptr);
@@ -1271,7 +1279,8 @@ TEST_F(PartitioningTest, SimpleModel) {
     // didn't actually do any partitioning.
     const auto devicesC = makeDevices({{"bad", 1.1, ~0U}, {"bad2", 1.0, ~0U}});
     ExecutionPlan planC;
-    ASSERT_EQ(model.partitionTheWork(devicesC, ExecutePreference::PREFER_LOW_POWER, &planC),
+    ASSERT_EQ(model.partitionTheWork(devicesC, ExecutePreference::PREFER_LOW_POWER,
+                                     kDefaultRuntimePriority, {}, &planC),
               ANEURALNETWORKS_NO_ERROR);
     ASSERT_EQ(planC.forTest_getKind(), ExecutionPlan::Kind::SIMPLE);
     ASSERT_EQ(planC.forTest_simpleGetDevice(), DeviceManager::getCpuDevice());
@@ -1279,16 +1288,17 @@ TEST_F(PartitioningTest, SimpleModel) {
     // Compound partition (two devices, each is capable of one of the
     // two operations).  We could do more extensive checking here --
     // for example, verify that each step within the plan has the
-    // correct (model and submodel)x(inputs and outputs).
+    // correct (model and step model)x(inputs and outputs).
     const auto devicesB = makeDevices({{"0", 0.9, 1 << 0}, {"1", 0.5, 1 << 1}});
     ExecutionPlan planB;
-    ASSERT_EQ(model.partitionTheWork(devicesB, ExecutePreference::PREFER_LOW_POWER, &planB),
+    ASSERT_EQ(model.partitionTheWork(devicesB, ExecutePreference::PREFER_LOW_POWER,
+                                     kDefaultRuntimePriority, {}, &planB),
               ANEURALNETWORKS_NO_ERROR);
     ASSERT_EQ(planB.forTest_getKind(), ExecutionPlan::Kind::COMPOUND);
     const auto& stepsB = planB.forTest_compoundGetSteps();
     ASSERT_EQ(stepsB.size(), size_t(2));
     {
-        // Build a model to compare against the submodel from stepsB[0].
+        // Build a model to compare against the step model from stepsB[0].
         PartitioningModel modelB0;
         uint32_t b0Opnd0 = modelB0.addFloatOperand();
         uint32_t b0Opnd1 = modelB0.addFloatOperand();
@@ -1301,31 +1311,31 @@ TEST_F(PartitioningTest, SimpleModel) {
                 compare(stepsB[0], &modelB0, devicesB[0],
                         RemapVectorType{{opnd0, b0Opnd0}, {opnd1, b0Opnd1}},  // modelInputs
                         RemapVectorType{},                                    // modelOutputs
-                        RemapVectorType{},                        // tempsAsSubModelInputs
-                        SubModelOutputSetType{{opnd2, b0Opnd2}},  // tempsAsSubModelOutputs
-                        RemapVectorType{}));                      // outputsAsSubModelInputs;
+                        RemapVectorType{},                         // tempsAsStepModelInputs
+                        StepModelOutputSetType{{opnd2, b0Opnd2}},  // tempsAsStepModelOutputs
+                        RemapVectorType{}));                       // outputsAsStepModelInputs;
     }
     {
-        // Build a model to compare against the submodel from stepsB[1].
+        // Build a model to compare against the step model from stepsB[1].
         PartitioningModel modelB1;
         uint32_t b1Opnd2 = modelB1.addFloatOperand();
         uint32_t b1Opnd3 = modelB1.addFloatOperand();
         uint32_t b1Opnd4 = modelB1.addOperation2To1V1_0(1, b1Opnd2, b1Opnd3);
-        // Note: In the partitioning algorithm, submodel inputs follow
+        // Note: In the partitioning algorithm, step model inputs follow
         // model inputs.  In the original model "model", opnd2 is not
-        // an input; so in the submodel "modelB1", the corresponding
-        // input b1Opnd2 is a submodel input, and must follow the
+        // an input; so in the step model "modelB1", the corresponding
+        // input b1Opnd2 is a step model input, and must follow the
         // model input b1Opnd3.
         modelB1.identifyInputsAndOutputs({b1Opnd3, b1Opnd2}, {b1Opnd4});
         modelB1.finish();
         ASSERT_TRUE(modelB1.isValid());
 
-        ASSERT_NO_FATAL_FAILURE(compare(stepsB[1], &modelB1, devicesB[1],
-                                        RemapVectorType{{opnd3, b1Opnd3}},  // modelInputs
-                                        RemapVectorType{{opnd4, b1Opnd4}},  // modelOutputs
-                                        RemapVectorType{{opnd2, b1Opnd2}},  // tempsAsSubModelInputs
-                                        SubModelOutputSetType{},  // tempsAsSubModelOutputs
-                                        RemapVectorType{}));      // outputsAsSubModelInputs
+        ASSERT_NO_FATAL_FAILURE(compare(
+                stepsB[1], &modelB1, devicesB[1], RemapVectorType{{opnd3, b1Opnd3}},  // modelInputs
+                RemapVectorType{{opnd4, b1Opnd4}},  // modelOutputs
+                RemapVectorType{{opnd2, b1Opnd2}},  // tempsAsStepModelInputs
+                StepModelOutputSetType{},           // tempsAsStepModelOutputs
+                RemapVectorType{}));                // outputsAsStepModelInputs
     }
 }
 
@@ -1348,7 +1358,8 @@ TEST_F(PartitioningTest, SliceModel) {
                                        {"V1_1", 0.7, HalVersion::V1_1, ~0U, ~0U},
                                        {"V1_2", 0.6, HalVersion::V1_2, ~0U, ~0U, ~0U}});
     ExecutionPlan planA;
-    ASSERT_EQ(model.partitionTheWork(devicesA, ExecutePreference::PREFER_LOW_POWER, &planA),
+    ASSERT_EQ(model.partitionTheWork(devicesA, ExecutePreference::PREFER_LOW_POWER,
+                                     kDefaultRuntimePriority, {}, &planA),
               ANEURALNETWORKS_NO_ERROR);
     ASSERT_EQ(planA.forTest_getKind(), ExecutionPlan::Kind::SIMPLE);
     ASSERT_NE(planA.forTest_simpleGetDevice().get(), nullptr);
@@ -1360,13 +1371,14 @@ TEST_F(PartitioningTest, SliceModel) {
                                        {"V1_1", 0.7, HalVersion::V1_1, ~0U, ~0U},
                                        {"V1_2", 0.8, HalVersion::V1_2, ~0U, ~0U, ~0U}});
     ExecutionPlan planB;
-    ASSERT_EQ(model.partitionTheWork(devicesB, ExecutePreference::PREFER_LOW_POWER, &planB),
+    ASSERT_EQ(model.partitionTheWork(devicesB, ExecutePreference::PREFER_LOW_POWER,
+                                     kDefaultRuntimePriority, {}, &planB),
               ANEURALNETWORKS_NO_ERROR);
     ASSERT_EQ(planB.forTest_getKind(), ExecutionPlan::Kind::COMPOUND);
     const auto& stepsB = planB.forTest_compoundGetSteps();
     ASSERT_EQ(stepsB.size(), size_t(3));
     {
-        // Build a model to compare against the submodel from stepsB[0].
+        // Build a model to compare against the step model from stepsB[0].
         PartitioningModel modelB0;
         uint32_t b0Opnd0 = modelB0.addFloatOperand();
         uint32_t b0Opnd1 = modelB0.addFloatOperand();
@@ -1379,12 +1391,12 @@ TEST_F(PartitioningTest, SliceModel) {
                 compare(stepsB[0], &modelB0, devicesB[1],
                         RemapVectorType{{opnd0, b0Opnd0}, {opnd1, b0Opnd1}},  // modelInputs
                         RemapVectorType{{opnd4, b0Opnd2}},                    // modelOutputs
-                        RemapVectorType{},        // tempsAsSubModelInputs
-                        SubModelOutputSetType{},  // tempsAsSubModelOutputs
-                        RemapVectorType{}));      // outputsAsSubModelInputs
+                        RemapVectorType{},         // tempsAsStepModelInputs
+                        StepModelOutputSetType{},  // tempsAsStepModelOutputs
+                        RemapVectorType{}));       // outputsAsStepModelInputs
     }
     {
-        // Build a model to compare against the submodel from stepsB[1].
+        // Build a model to compare against the step model from stepsB[1].
         PartitioningModel modelB1;
         uint32_t b1Opnd0 = modelB1.addFloatOperand();
         uint32_t b1Opnd1 = modelB1.addFloatOperand();
@@ -1398,20 +1410,20 @@ TEST_F(PartitioningTest, SliceModel) {
                 compare(stepsB[1], &modelB1, devicesB[0],
                         RemapVectorType{{opnd0, b1Opnd0}, {opnd1, b1Opnd1}},  // modelInputs
                         RemapVectorType{{opnd2, b1Opnd2}},                    // modelOutputs
-                        RemapVectorType{},                        // tempsAsSubModelInputs
-                        SubModelOutputSetType{{opnd3, b1Opnd3}},  // tempsAsSubModelOutputs
-                        RemapVectorType{}));                      // outputsAsSubModelInputs
+                        RemapVectorType{},                         // tempsAsStepModelInputs
+                        StepModelOutputSetType{{opnd3, b1Opnd3}},  // tempsAsStepModelOutputs
+                        RemapVectorType{}));                       // outputsAsStepModelInputs
     }
     {
-        // Build a model to compare against the submodel from stepsB[2].
+        // Build a model to compare against the step model from stepsB[2].
         PartitioningModel modelB2;
         uint32_t b2Opnd0 = modelB2.addFloatOperand();
         uint32_t b2Opnd1 = modelB2.addFloatOperand();
         uint32_t b2Opnd2 = modelB2.addOperation2To1V1_2(0, b2Opnd0, b2Opnd1);
         // Note: In the partitioning algorithm, temps that are
-        // submodel inputs precede model outputs that are submodel
+        // step model inputs precede model outputs that are step model
         // inputs.  In the original model "model", opnd3 is a temp and
-        // opnd2 is a model output; so in the submodel "modelB2", the
+        // opnd2 is a model output; so in the step model "modelB2", the
         // corresponding inputs b2Opnd1 and b2Opnd0 must appear in
         // that order.
         modelB2.identifyInputsAndOutputs({b2Opnd1, b2Opnd0}, {b2Opnd2});
@@ -1421,9 +1433,9 @@ TEST_F(PartitioningTest, SliceModel) {
         ASSERT_NO_FATAL_FAILURE(
                 compare(stepsB[2], &modelB2, devicesB[2], RemapVectorType{},  // modelInputs
                         RemapVectorType{{opnd5, b2Opnd2}},                    // modelOutputs
-                        RemapVectorType{{opnd3, b2Opnd1}},    // tempsAsSubModelInputs
-                        SubModelOutputSetType{},              // tempsAsSubModelOutputs
-                        RemapVectorType{{opnd2, b2Opnd0}}));  // outputsAsSubModelInputs
+                        RemapVectorType{{opnd3, b2Opnd1}},    // tempsAsStepModelInputs
+                        StepModelOutputSetType{},             // tempsAsStepModelOutputs
+                        RemapVectorType{{opnd2, b2Opnd0}}));  // outputsAsStepModelInputs
     }
 
     // TODO: Make sure this still works when we have multiple devices
@@ -1448,7 +1460,8 @@ TEST_F(PartitioningTest, SliceModelToEmpty) {
                                       {"V1_1", 0.7, HalVersion::V1_1, ~0U, ~0U},
                                       {"V1_2", 0.8, HalVersion::V1_2, ~0U, ~0U, ~0U}});
     ExecutionPlan plan;
-    ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER, &plan),
+    ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER,
+                                     kDefaultRuntimePriority, {}, &plan),
               ANEURALNETWORKS_NO_ERROR);
     ASSERT_EQ(plan.forTest_getKind(), ExecutionPlan::Kind::SIMPLE);
     ASSERT_NE(plan.forTest_simpleGetDevice().get(), nullptr);
@@ -1486,7 +1499,8 @@ TEST_F(PartitioningTest, Cpu) {
     ASSERT_TRUE(model.isValid());
 
     ExecutionPlan plan;
-    ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER, &plan),
+    ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER,
+                                     kDefaultRuntimePriority, {}, &plan),
               ANEURALNETWORKS_NO_ERROR);
     ASSERT_EQ(plan.forTest_getKind(), ExecutionPlan::Kind::COMPOUND);
     const auto& steps = plan.forTest_compoundGetSteps();
@@ -1494,7 +1508,7 @@ TEST_F(PartitioningTest, Cpu) {
     {
         const auto& step0 = steps[0];
 
-        // Build a model to compare against the submodel from steps[0].
+        // Build a model to compare against the step model from steps[0].
         PartitioningModel model0;
         uint32_t m0Opnd0 = model0.addFloatOperand();
         uint32_t m0Opnd1 = model0.addFloatOperand();
@@ -1508,15 +1522,15 @@ TEST_F(PartitioningTest, Cpu) {
                 compare(step0, &model0, devices[0],
                         RemapVectorType{{opnd0, m0Opnd0}, {opnd1, m0Opnd1}},  // modelInputs
                         RemapVectorType{},                                    // modelOutputs
-                        RemapVectorType{},  // tempsAsSubModelInputs
-                        SubModelOutputSetType{{opnd2, m0Opnd2},
-                                              {opnd3, m0Opnd3}},  // tempsAsSubModelOutputs
-                        RemapVectorType{}));                      // outputsAsSubModelInputs
+                        RemapVectorType{},  // tempsAsStepModelInputs
+                        StepModelOutputSetType{{opnd2, m0Opnd2},
+                                               {opnd3, m0Opnd3}},  // tempsAsStepModelOutputs
+                        RemapVectorType{}));                       // outputsAsStepModelInputs
     }
     {
         const auto& step1 = steps[1];
 
-        // Build a model to compare against the submodel from steps[1].
+        // Build a model to compare against the step model from steps[1].
         PartitioningModel model1;
         uint32_t m1Opnd0 = model1.addFloatOperand();
         uint32_t m1Opnd3 = model1.addFloatOperand();
@@ -1531,14 +1545,14 @@ TEST_F(PartitioningTest, Cpu) {
                 step1, &model1, DeviceManager::getCpuDevice(),
                 RemapVectorType{{opnd0, m1Opnd0}},                    // modelInputs
                 RemapVectorType{{opnd4, m1Opnd4}},                    // modelOutputs
-                RemapVectorType{{opnd3, m1Opnd3}, {opnd2, m1Opnd2}},  // tempsAsSubModelInputs
-                SubModelOutputSetType{{opnd5, m1Opnd5}},              // tempsAsSubModelOutputs
-                RemapVectorType{}));                                  // outputsAsSubModelInputs
+                RemapVectorType{{opnd3, m1Opnd3}, {opnd2, m1Opnd2}},  // tempsAsStepModelInputs
+                StepModelOutputSetType{{opnd5, m1Opnd5}},             // tempsAsStepModelOutputs
+                RemapVectorType{}));                                  // outputsAsStepModelInputs
     }
     {
         const auto& step2 = steps[2];
 
-        // Build a model to compare against the submodel from steps[2].
+        // Build a model to compare against the step model from steps[2].
         PartitioningModel model2;
         uint32_t m2Opnd3 = model2.addFloatOperand();
         uint32_t m2Opnd5 = model2.addFloatOperand();
@@ -1552,9 +1566,9 @@ TEST_F(PartitioningTest, Cpu) {
         ASSERT_NO_FATAL_FAILURE(compare(
                 step2, &model2, devices[0], RemapVectorType{{opnd6, m2Opnd6}},  // modelInputs
                 RemapVectorType{{opnd8, m2Opnd8}},                              // modelOutputs
-                RemapVectorType{{opnd3, m2Opnd3}, {opnd5, m2Opnd5}},  // tempsAsSubModelInputs
-                SubModelOutputSetType{},                              // tempsAsSubModelOutputs
-                RemapVectorType{}));                                  // outputsAsSubModelInputs
+                RemapVectorType{{opnd3, m2Opnd3}, {opnd5, m2Opnd5}},  // tempsAsStepModelInputs
+                StepModelOutputSetType{},                             // tempsAsStepModelOutputs
+                RemapVectorType{}));                                  // outputsAsStepModelInputs
     }
 }
 
@@ -1608,14 +1622,14 @@ TEST_F(PartitioningTest, SetPartitioning) {
     ASSERT_EQ(cPWithoutFallback.setPartitioning(DeviceManager::kPartitioningWithoutFallback),
               Result::NO_ERROR);
     ASSERT_EQ(cPWithoutFallback.finish(), Result::OP_FAILED);
-    ASSERT_TRUE(cPWithoutFallback.getExecutionPlan().forTest_hasSubModelOutputsOfUnknownSize());
+    ASSERT_TRUE(cPWithoutFallback.getExecutionPlan().forTest_hasStepModelOutputsOfUnknownSize());
     ASSERT_EQ(cPWithoutFallback.getExecutionPlan().forTest_getKind(), ExecutionPlan::Kind::ERROR);
 }
 
 // Regression test for http://b/69166603:
-//     "partitioned compilation and execution yields wrong results when model output is submodel
+//     "partitioned compilation and execution yields wrong results when model output is step model
 //     input"
-TEST_F(PartitioningTest, ModelOutputAsSubmodelInput) {
+TEST_F(PartitioningTest, ModelOutputAsStepModelInput) {
     PartitioningModel model;
     uint32_t opnd0 = model.addFloatOperand();
     uint32_t opnd1 = model.addFloatOperand();
@@ -1628,16 +1642,17 @@ TEST_F(PartitioningTest, ModelOutputAsSubmodelInput) {
     // Compound partition (two devices, each is capable of one of the
     // two operations).  We could do more extensive checking here --
     // for example, verify that each step within the plan has the
-    // correct (model and submodel)x(inputs and outputs).
+    // correct (model and step model)x(inputs and outputs).
     const auto devices = makeDevices({{"0", 0.5, 1 << 0}, {"1", 0.5, 1 << 1}});
     ExecutionPlan plan;
-    ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER, &plan),
+    ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER,
+                                     kDefaultRuntimePriority, {}, &plan),
               ANEURALNETWORKS_NO_ERROR);
     ASSERT_EQ(plan.forTest_getKind(), ExecutionPlan::Kind::COMPOUND);
     const auto& steps = plan.forTest_compoundGetSteps();
     ASSERT_EQ(steps.size(), size_t(2));
     {
-        // Build a model to compare against the submodel from steps[0].
+        // Build a model to compare against the step model from steps[0].
         PartitioningModel model0;
         uint32_t m0Opnd0 = model0.addFloatOperand();
         uint32_t m0Opnd1 = model0.addFloatOperand();
@@ -1649,12 +1664,12 @@ TEST_F(PartitioningTest, ModelOutputAsSubmodelInput) {
                 compare(steps[0], &model0, devices[0],
                         RemapVectorType{{opnd0, m0Opnd0}, {opnd1, m0Opnd1}},  // modelInputs
                         RemapVectorType{{opnd2, m0Opnd2}},                    // modelOutputs
-                        RemapVectorType{},        // tempsAsSubModelInputs
-                        SubModelOutputSetType{},  // tempsAsSubModelOutputs
-                        RemapVectorType{}));      // outputsAsSubModelInputs
+                        RemapVectorType{},         // tempsAsStepModelInputs
+                        StepModelOutputSetType{},  // tempsAsStepModelOutputs
+                        RemapVectorType{}));       // outputsAsStepModelInputs
     }
     {
-        // Build a model to compare against the submodel from steps[1].
+        // Build a model to compare against the step model from steps[1].
         PartitioningModel model1;
         uint32_t m1Opnd2 = model1.addFloatOperand();
         uint32_t m1Opnd3 = model1.addOperation2To1V1_0(1, m1Opnd2, m1Opnd2);
@@ -1665,9 +1680,9 @@ TEST_F(PartitioningTest, ModelOutputAsSubmodelInput) {
         ASSERT_NO_FATAL_FAILURE(
                 compare(steps[1], &model1, devices[1], RemapVectorType{},  // modelInputs
                         RemapVectorType{{opnd3, m1Opnd3}},                 // modelOutputs
-                        RemapVectorType{},                                 // tempsAsSubModelInputs
-                        SubModelOutputSetType{},                           // tempsAsSubModelOutputs
-                        RemapVectorType{{opnd2, m1Opnd2}}));  // outputsAsSubModelInputs
+                        RemapVectorType{},                                 // tempsAsStepModelInputs
+                        StepModelOutputSetType{},             // tempsAsStepModelOutputs
+                        RemapVectorType{{opnd2, m1Opnd2}}));  // outputsAsStepModelInputs
     }
 }
 
@@ -1731,7 +1746,8 @@ TEST_F(PartitioningTest, RelaxedFP) {
         // No need to compare the original model to the model from the plan -- we
         // didn't actually do any partitioning.
         ExecutionPlan plan;
-        ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER, &plan),
+        ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER,
+                                         kDefaultRuntimePriority, {}, &plan),
                   ANEURALNETWORKS_NO_ERROR);
         ASSERT_EQ(plan.forTest_getKind(), ExecutionPlan::Kind::SIMPLE);
         ASSERT_EQ(plan.forTest_simpleGetDevice()->getName(), expectDevice);
@@ -1753,6 +1769,10 @@ TEST_F(PartitioningTest, Perf) {
     // full operand type (WrapperType plus dimensions plus other attributes).
 
     auto TestType = [](OperandType operandType) {
+        if (operandType == OperandType::SUBGRAPH) {
+            // SUBGRAPH capabilities are handled differently.
+            return;
+        }
         SCOPED_TRACE(toString(operandType));
         // Trivial model consisting solely of OEM operation.  We
         // pick OEM operation because this allows us to use
@@ -1779,7 +1799,8 @@ TEST_F(PartitioningTest, Perf) {
             // No need to compare the original model to the model from the plan -- we
             // didn't actually do any partitioning.
             ExecutionPlan plan;
-            ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER, &plan),
+            ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER,
+                                             kDefaultRuntimePriority, {}, &plan),
                       ANEURALNETWORKS_NO_ERROR);
             ASSERT_EQ(plan.forTest_getKind(), ExecutionPlan::Kind::SIMPLE);
             ASSERT_EQ(plan.forTest_simpleGetDevice()->getName(), "good");
@@ -1797,7 +1818,8 @@ TEST_F(PartitioningTest, Perf) {
             // No need to compare the original model to the model from the plan -- we
             // didn't actually do any partitioning.
             ExecutionPlan plan;
-            ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER, &plan),
+            ASSERT_EQ(model.partitionTheWork(devices, ExecutePreference::PREFER_LOW_POWER,
+                                             kDefaultRuntimePriority, {}, &plan),
                       ANEURALNETWORKS_NO_ERROR);
             ASSERT_EQ(plan.forTest_getKind(), ExecutionPlan::Kind::SIMPLE);
             ASSERT_EQ(plan.forTest_simpleGetDevice()->getName(), "base");

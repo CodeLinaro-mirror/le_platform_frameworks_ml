@@ -22,6 +22,7 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "HalInterfaces.h"
@@ -32,10 +33,10 @@ namespace android {
 namespace nn {
 
 // The number of data types (OperandCode) defined in NeuralNetworks.h.
-const int kNumberOfDataTypes = 15;
+const int kNumberOfDataTypes = 16;
 
 // The number of operation types (OperationCode) defined in NeuralNetworks.h.
-const int kNumberOfOperationTypes = 95;
+const int kNumberOfOperationTypes = 98;
 
 // The number of execution preferences defined in NeuralNetworks.h.
 const int kNumberOfPreferences = 3;
@@ -129,6 +130,12 @@ void initVLogMask();
 #define NN_RET_CHECK_LT(x, y) NN_RET_CHECK_OP(x, y, <)
 #define NN_RET_CHECK_GE(x, y) NN_RET_CHECK_OP(x, y, >=)
 #define NN_RET_CHECK_GT(x, y) NN_RET_CHECK_OP(x, y, >)
+
+// Make an optional time point from an optional duration. If the operation
+// succeeds, a pair of {ANEURALNETWORKS_NO_ERROR, timepoint} is returned. If an
+// overflow occurs in this function, {ANEURALNETWORKS_BAD_DATA, empty} is
+// returned.
+std::pair<int, hal::OptionalTimePoint> makeTimePoint(std::optional<uint64_t> duration);
 
 // Ensure that every user of FalseyErrorStream is linked to the
 // correct instance, using the correct LOG_TAG
@@ -337,6 +344,10 @@ int convertErrorStatusToResultCode(hal::ErrorStatus status);
 std::tuple<int, std::vector<hal::OutputShape>, hal::Timing> getExecutionResult(
         hal::ErrorStatus status, std::vector<hal::OutputShape> outputShapes, hal::Timing timing);
 
+// Combine two tensor dimensions, both may have unspecified dimensions or rank.
+std::optional<std::vector<uint32_t>> combineDimensions(const std::vector<uint32_t>& lhs,
+                                                       const std::vector<uint32_t>& rhs);
+
 // Versioning
 
 bool compliantWithV1_0(const hal::V1_0::Capabilities& capabilities);
@@ -380,6 +391,11 @@ bool compliantWithV1_2(const hal::V1_2::Model& model,
                        std::set<uint32_t>* noncompliantOperations = nullptr);
 bool compliantWithV1_2(const hal::V1_3::Model& model,
                        std::set<uint32_t>* noncompliantOperations = nullptr);
+
+hal::V1_0::ErrorStatus convertToV1_0(hal::V1_0::ErrorStatus status);
+hal::V1_0::ErrorStatus convertToV1_0(hal::V1_3::ErrorStatus status);
+hal::V1_3::ErrorStatus convertToV1_3(hal::V1_0::ErrorStatus status);
+hal::V1_3::ErrorStatus convertToV1_3(hal::V1_3::ErrorStatus status);
 
 hal::V1_0::Capabilities convertToV1_0(const hal::V1_0::Capabilities& capabilities);
 hal::V1_0::Capabilities convertToV1_0(const hal::V1_1::Capabilities& capabilities);
@@ -436,6 +452,37 @@ hal::hidl_vec<hal::V1_2::Operand> convertToV1_2(const hal::hidl_vec<hal::V1_3::O
 hal::hidl_vec<hal::V1_3::Operand> convertToV1_3(const hal::hidl_vec<hal::V1_0::Operand>& operands);
 hal::hidl_vec<hal::V1_3::Operand> convertToV1_3(const hal::hidl_vec<hal::V1_2::Operand>& operands);
 hal::hidl_vec<hal::V1_3::Operand> convertToV1_3(const hal::hidl_vec<hal::V1_3::Operand>& operands);
+
+bool compliantWithV1_0(const hal::V1_0::Request& request);
+bool compliantWithV1_0(const hal::V1_3::Request& request);
+
+hal::V1_0::Request convertToV1_0(const hal::V1_0::Request& request);
+hal::V1_0::Request convertToV1_0(const hal::V1_3::Request& request);
+hal::V1_3::Request convertToV1_3(const hal::V1_0::Request& request);
+hal::V1_3::Request convertToV1_3(const hal::V1_3::Request& request);
+
+bool compliantWithV1_0(hal::V1_0::OperandLifeTime lifetime);
+bool compliantWithV1_0(hal::V1_3::OperandLifeTime lifetime);
+bool compliantWithV1_3(hal::V1_0::OperandLifeTime lifetime);
+bool compliantWithV1_3(hal::V1_3::OperandLifeTime lifetime);
+
+hal::V1_0::OperandLifeTime convertToV1_0(hal::V1_0::OperandLifeTime lifetime);
+hal::V1_0::OperandLifeTime convertToV1_0(hal::V1_3::OperandLifeTime lifetime);
+hal::V1_3::OperandLifeTime convertToV1_3(hal::V1_0::OperandLifeTime lifetime);
+hal::V1_3::OperandLifeTime convertToV1_3(hal::V1_3::OperandLifeTime lifetime);
+
+constexpr hal::Priority convertToHalPriority(int32_t priority) {
+    switch (priority) {
+        case ANEURALNETWORKS_PRIORITY_LOW:
+            return hal::Priority::LOW;
+        case ANEURALNETWORKS_PRIORITY_MEDIUM:
+            return hal::Priority::MEDIUM;
+        case ANEURALNETWORKS_PRIORITY_HIGH:
+            return hal::Priority::HIGH;
+    }
+    LOG(FATAL) << "unrecognized priority: " << priority;
+    return {};
+}
 
 #ifdef NN_DEBUGGABLE
 uint32_t getProp(const char* str, uint32_t defaultValue = 0);

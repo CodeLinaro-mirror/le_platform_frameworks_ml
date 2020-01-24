@@ -19,6 +19,7 @@
 
 #include <atomic>
 #include <memory>
+#include <tuple>
 #include <vector>
 
 #include "Callbacks.h"
@@ -61,6 +62,10 @@ class ExecutionBuilder {
 
     int getDuration(int32_t durationCode, uint64_t* duration) const;
 
+    int setTimeoutDuration(uint64_t duration);
+
+    std::optional<uint64_t> getTimeoutDuration() const;
+
     int computeAsynchronously(sp<ExecutionCallback>* synchronizationCallback) {
         CHECK(synchronizationCallback != nullptr);
         return compute(synchronizationCallback);
@@ -102,6 +107,8 @@ class ExecutionBuilder {
     // Update output dimensional information from OutputShape to ModelArgumentInfo.
     bool updateOutputShapes(const std::vector<hal::OutputShape>& outputShapes);
 
+    bool updateMemories();
+
     const ModelBuilder* mModel;
     const ExecutionPlan* mPlan;
 
@@ -129,6 +136,9 @@ class ExecutionBuilder {
     // Timing reported from the driver
     hal::Timing mTiming = {};
 
+    // Amount of time to complete or abort the execution.
+    std::optional<uint64_t> mTimeoutDuration;
+
     // Properties cannot be set once the execution has started.
     std::atomic_bool mStarted = false;
 
@@ -146,8 +156,8 @@ class StepExecutor {
     // executionBuilder
     //     Describes the full (possibly multiple-"step") execution.
     // model
-    //     The model to be executed by the executor.  Possibly a
-    //     submodel of the model from executionBuilder.
+    //     The model to be executed by the executor.  Possibly a single
+    //     "step" model of a multiple-"step" executionBuilder.
     // driver, preparedModel
     //     The device on which to execute the "step", and the prepared
     //     model to execute on that device.  (Both are nullptr in the

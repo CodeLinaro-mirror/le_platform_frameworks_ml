@@ -60,7 +60,21 @@ class MemoryAccessVerifier {
             mPoolSizes[i] = pools[i].size();
         }
     }
-    bool validate(const DataLocation& location) {
+    MemoryAccessVerifier(const hidl_vec<V1_3::Request::MemoryPool>& pools)
+        : mPoolCount(pools.size()), mPoolSizes(mPoolCount) {
+        for (size_t i = 0; i < mPoolCount; i++) {
+            switch (pools[i].getDiscriminator()) {
+                case Request::MemoryPool::hidl_discriminator::hidlMemory:
+                    mPoolSizes[i] = pools[i].hidlMemory().size();
+                    break;
+                case Request::MemoryPool::hidl_discriminator::token:
+                    // Set size to 0 to enforce length == 0 && offset == 0.
+                    mPoolSizes[i] = 0;
+                    break;
+            }
+        }
+    }
+    bool validate(const DataLocation& location) const {
         if (location.poolIndex >= mPoolCount) {
             LOG(ERROR) << "Invalid poolIndex " << location.poolIndex << "/" << mPoolCount;
             return false;
@@ -350,8 +364,8 @@ static bool validateOperands(const hidl_vec<VersionedOperand>& operands,
                 }
                 break;
             case OperandLifeTime::TEMPORARY_VARIABLE:
-            case OperandLifeTime::MODEL_INPUT:
-            case OperandLifeTime::MODEL_OUTPUT:
+            case OperandLifeTime::SUBGRAPH_INPUT:
+            case OperandLifeTime::SUBGRAPH_OUTPUT:
             case OperandLifeTime::NO_VALUE:
                 if (location.poolIndex != 0 || location.offset != 0 || location.length != 0) {
                     LOG(ERROR) << "Operand " << index << ": Unexpected poolIndex "
@@ -427,7 +441,7 @@ static bool validateOperations(const hidl_vec<VersionedOperation>& operations,
         for (uint32_t i : op.outputs) {
             const Operand& operand = operands[i];
             if (operand.lifetime != OperandLifeTime::TEMPORARY_VARIABLE &&
-                operand.lifetime != OperandLifeTime::MODEL_OUTPUT) {
+                operand.lifetime != OperandLifeTime::SUBGRAPH_OUTPUT) {
                 LOG(ERROR) << "Writing to an operand with incompatible lifetime "
                            << toString(operand.lifetime);
                 return false;
@@ -445,7 +459,7 @@ static bool validateOperations(const hidl_vec<VersionedOperation>& operations,
         if (!writtenTo[i]) {
             const Operand& operand = operands[i];
             if (operand.lifetime == OperandLifeTime::TEMPORARY_VARIABLE ||
-                operand.lifetime == OperandLifeTime::MODEL_OUTPUT) {
+                operand.lifetime == OperandLifeTime::SUBGRAPH_OUTPUT) {
                 LOG(ERROR) << "Operand " << i << " with lifetime " << toString(operand.lifetime)
                            << " is not being written to.";
                 return false;
@@ -473,9 +487,21 @@ bool validatePool(const hidl_memory& pool, HalVersion ver) {
     return true;
 }
 
-static bool validatePools(const hidl_vec<hidl_memory>& pools, HalVersion ver) {
+bool validatePool(const V1_3::Request::MemoryPool& pool, HalVersion ver) {
+    switch (pool.getDiscriminator()) {
+        case Request::MemoryPool::hidl_discriminator::hidlMemory:
+            return validatePool(pool.hidlMemory(), ver);
+        case Request::MemoryPool::hidl_discriminator::token:
+            return pool.token() > 0;
+    }
+    LOG(FATAL) << "unknown MemoryPool discriminator";
+    return false;
+}
+
+template <class T_MemoryPool>
+static bool validatePools(const hidl_vec<T_MemoryPool>& pools, HalVersion ver) {
     return std::all_of(pools.begin(), pools.end(),
-                       [ver](const hidl_memory& pool) { return validatePool(pool, ver); });
+                       [ver](const auto& pool) { return validatePool(pool, ver); });
 }
 
 static bool validateModelInputOutputs(const hidl_vec<uint32_t> indexes,
@@ -519,16 +545,36 @@ bool validateModel(const T_Model& model) {
                              /*allowUnspecifiedRank=*/version >= HalVersion::V1_2) &&
             validateOperations(model.operations, latestVersionOperands) &&
             validateModelInputOutputs(model.inputIndexes, latestVersionOperands,
-                                      OperandLifeTime::MODEL_INPUT) &&
+                                      OperandLifeTime::SUBGRAPH_INPUT) &&
             validateModelInputOutputs(model.outputIndexes, latestVersionOperands,
-                                      OperandLifeTime::MODEL_OUTPUT) &&
+                                      OperandLifeTime::SUBGRAPH_OUTPUT) &&
             validatePools(model.pools, version));
 }
 
 template bool validateModel<V1_0::Model>(const V1_0::Model& model);
 template bool validateModel<V1_1::Model>(const V1_1::Model& model);
 template bool validateModel<V1_2::Model>(const V1_2::Model& model);
-template bool validateModel<V1_3::Model>(const V1_3::Model& model);
+
+template <>
+bool validateModel(const V1_3::Model& model) {
+    NNTRACE_FULL(NNTRACE_LAYER_UTILITY, NNTRACE_PHASE_UNSPECIFIED, "validateModel");
+    if (model.main.operations.size() == 0 || model.main.operands.size() == 0) {
+        LOG(ERROR) << "Invalid empty model.";
+        return false;
+    }
+    auto validateSubgraph = [&model](const Subgraph& subgraph) -> bool {
+        return (validateOperands(subgraph.operands, model.operandValues, model.pools,
+                                 /*allowUnspecifiedRank=*/true) &&
+                validateOperations(subgraph.operations, subgraph.operands) &&
+                validateModelInputOutputs(subgraph.inputIndexes, subgraph.operands,
+                                          OperandLifeTime::SUBGRAPH_INPUT) &&
+                validateModelInputOutputs(subgraph.outputIndexes, subgraph.operands,
+                                          OperandLifeTime::SUBGRAPH_OUTPUT));
+    };
+    return (validateSubgraph(model.main) &&
+            std::all_of(model.referenced.begin(), model.referenced.end(), validateSubgraph) &&
+            validatePools(model.pools, HalVersion::V1_3));
+}
 
 // Validates the arguments of a request. type is either "input" or "output" and is used
 // for printing error messages. The operandIndexes is the appropriate array of input
@@ -536,9 +582,8 @@ template bool validateModel<V1_3::Model>(const V1_3::Model& model);
 static bool validateRequestArguments(const hidl_vec<RequestArgument>& requestArguments,
                                      const hidl_vec<uint32_t>& operandIndexes,
                                      const hidl_vec<Operand>& operands,
-                                     const hidl_vec<hidl_memory>& pools, bool allowUnspecified,
-                                     const char* type) {
-    MemoryAccessVerifier poolVerifier(pools);
+                                     const MemoryAccessVerifier& poolVerifier,
+                                     bool allowUnspecified, const char* type) {
     // The request should specify as many arguments as were described in the model.
     const size_t requestArgumentCount = requestArguments.size();
     if (requestArgumentCount != operandIndexes.size()) {
@@ -609,27 +654,45 @@ static bool validateRequestArguments(const hidl_vec<RequestArgument>& requestArg
     return true;
 }
 
-template <class T_Model>
-bool validateRequest(const Request& request, const T_Model& model) {
+template <class T_Request, class T_Model>
+bool validateRequest(const T_Request& request, const T_Model& model) {
     HalVersion version = ModelToHalVersion<T_Model>::version;
+    MemoryAccessVerifier poolVerifier(request.pools);
     return (validateRequestArguments(request.inputs, model.inputIndexes,
-                                     convertToV1_3(model.operands), request.pools,
+                                     convertToV1_3(model.operands), poolVerifier,
                                      /*allowUnspecified=*/false, "input") &&
             validateRequestArguments(request.outputs, model.outputIndexes,
-                                     convertToV1_3(model.operands), request.pools,
+                                     convertToV1_3(model.operands), poolVerifier,
                                      /*allowUnspecified=*/version >= HalVersion::V1_2, "output") &&
             validatePools(request.pools, version));
 }
 
-template bool validateRequest<V1_0::Model>(const Request& request, const V1_0::Model& model);
-template bool validateRequest<V1_1::Model>(const Request& request, const V1_1::Model& model);
-template bool validateRequest<V1_2::Model>(const Request& request, const V1_2::Model& model);
-template bool validateRequest<V1_3::Model>(const Request& request, const V1_3::Model& model);
+template bool validateRequest<V1_0::Request, V1_0::Model>(const V1_0::Request& request,
+                                                          const V1_0::Model& model);
+template bool validateRequest<V1_0::Request, V1_1::Model>(const V1_0::Request& request,
+                                                          const V1_1::Model& model);
+template bool validateRequest<V1_0::Request, V1_2::Model>(const V1_0::Request& request,
+                                                          const V1_2::Model& model);
+
+template <>
+bool validateRequest(const V1_3::Request& request, const V1_3::Model& model) {
+    return (validateRequestArguments(request.inputs, model.main.inputIndexes, model.main.operands,
+                                     request.pools,
+                                     /*allowUnspecified=*/false, "input") &&
+            validateRequestArguments(request.outputs, model.main.outputIndexes, model.main.operands,
+                                     request.pools,
+                                     /*allowUnspecified=*/true, "output") &&
+            validatePools(request.pools, HalVersion::V1_3));
+}
 
 bool validateExecutionPreference(ExecutionPreference preference) {
     return preference == ExecutionPreference::LOW_POWER ||
            preference == ExecutionPreference::FAST_SINGLE_ANSWER ||
            preference == ExecutionPreference::SUSTAINED_SPEED;
+}
+
+bool validatePriority(Priority priority) {
+    return priority == Priority::LOW || priority == Priority::MEDIUM || priority == Priority::HIGH;
 }
 
 bool validOperandType(V1_0::OperandType operandType) {

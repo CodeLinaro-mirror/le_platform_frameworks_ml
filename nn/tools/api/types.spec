@@ -7,9 +7,14 @@
 %define Ann ANeuralNetworks
 %define DeclareOperation ANEURALNETWORKS_%{1} = %{2}
 %define DeclareOperation_1.2 ANEURALNETWORKS_%{1} = %{2}
+%define DeclareOperation_1.3 ANEURALNETWORKS_%{1} = %{2}
 %define FusedActivationFunc FuseCode
 %define OperandType OperandCode
 %define OperandTypeLinkPfx ANEURALNETWORKS_
+%define OperationTypeLinkPfx ANEURALNETWORKS_
+%define runtime_or_driver runtime
+%define model_or_subgraph model
+%define MODEL_or_SUBGRAPH MODEL
 %define APILevel29 API level 29
 %define APILevel30 API level 30
 %define BeforeAPILevel29For Before API level 29, for
@@ -51,6 +56,10 @@
 %define FusedActivationFunc FusedActivationFunc
 %define OperandType OperandType
 %define OperandTypeLinkPfx OperandType::
+%define OperationTypeLinkPfx OperationType::
+%define runtime_or_driver driver
+%define model_or_subgraph subgraph
+%define MODEL_or_SUBGRAPH SUBGRAPH
 %define APILevel29 HAL version 1.2
 %define APILevel30 HAL version 1.3
 %define-lines AVAIL27
@@ -83,6 +92,7 @@
 %define-lines ZeroBatchesAPI29
 %/define-lines
 %define DeclareOperation_1.2 @@@NOT_DEFINED@@@
+%define DeclareOperation_1.3 @@@NOT_DEFINED@@@
 %/kind
 
 %kind hal_1.2 hal_1.3
@@ -93,11 +103,13 @@
 %kind hal_1.2
 %define DeclareOperation %{1} = @1.1::OperationType:%{1}
 %define DeclareOperation_1.2 %{1} = %{2}
+%define DeclareOperation_1.3 @@@NOT_DEFINED@@@
 %/kind
 
 %kind hal_1.3
 %define DeclareOperation %{1} = @1.2::OperationType:%{1}
 %define DeclareOperation_1.2 %{1} = @1.2::OperationType:%{1}
+%define DeclareOperation_1.3 %{1} = %{2}
 %/kind
 
 %kind ndk hal_1.2 hal_1.3
@@ -1755,6 +1767,7 @@
      * * {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM}
 %kind ndk hal_1.3+
      * * {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED} (since %{APILevel30})
+     * * {@link %{OperandTypeLinkPfx}TENSOR_INT32} (since %{APILevel30})
 %/kind
      *
      * Supported tensor rank: up to 4
@@ -1766,6 +1779,10 @@
      * * 2: An {@link %{OperandTypeLinkPfx}INT32} scalar, and has to be one of the
      *      {@link %{FusedActivationFunc}} values. Specifies the activation to
      *      invoke on the result.
+%kind ndk hal_1.3+
+     *      For a {@link %{OperandTypeLinkPfx}TENSOR_INT32} tensor,
+     *      the {@link %{FusedActivationFunc}} must be "NONE".
+%/kind
      *
      * Outputs:
      * * 0: The product, a tensor of the same {@link %{OperandType}} as input0.
@@ -2381,6 +2398,13 @@
      * dimensions. The output is the result of dividing the first input tensor
      * by the second, optionally modified by an activation function.
      *
+%kind ndk hal_1.3+
+     * For inputs of {@link %{OperandTypeLinkPfx}TENSOR_INT32}, performs
+     * "floor division" ("//" in Python). For example,
+     *     5 // 2 = 2
+     *    -5 // 2 = -3
+     *
+%/kind
      * Two dimensions are compatible when:
      *     1. they are equal, or
      *     2. one of them is 1
@@ -2400,6 +2424,9 @@
      * * {@link %{OperandTypeLinkPfx}TENSOR_FLOAT16} (since %{APILevel29})
 %/kind
      * * {@link %{OperandTypeLinkPfx}TENSOR_FLOAT32}
+%kind ndk hal_1.3+
+     * * {@link %{OperandTypeLinkPfx}TENSOR_INT32} (since %{APILevel30})
+%/kind
      *
      * Supported tensor rank: up to 4
      *
@@ -2410,6 +2437,10 @@
      * * 2: An {@link %{OperandTypeLinkPfx}INT32} scalar, and has to be one of the
      *      {@link %{FusedActivationFunc}} values. Specifies the activation to
      *      invoke on the result.
+%kind ndk hal_1.3+
+     *      For a {@link %{OperandTypeLinkPfx}TENSOR_INT32} tensor,
+     *      the {@link %{FusedActivationFunc}} must be "NONE".
+%/kind
      *
      * Outputs:
      * * 0: A tensor of the same {@link %{OperandType}} as input0.
@@ -2724,6 +2755,7 @@
 %/kind
 %kind ndk hal_1.3+
      * * {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED} (since %{APILevel30})
+     * * {@link %{OperandTypeLinkPfx}TENSOR_INT32} (since %{APILevel30})
 %/kind
      *
      * Supported tensor rank: up to 4
@@ -2735,6 +2767,10 @@
      * * 2: An {@link %{OperandTypeLinkPfx}INT32} scalar, and has to be one of the
      *      {@link %{FusedActivationFunc}} values. Specifies the activation to
      *      invoke on the result.
+%kind ndk hal_1.3+
+     *      For a {@link %{OperandTypeLinkPfx}TENSOR_INT32} tensor,
+     *      the {@link %{FusedActivationFunc}} must be "NONE".
+%/kind
      *
      * Outputs:
      * * 0: A tensor of the same {@link %{OperandType}} as input0.
@@ -2907,6 +2943,9 @@
      * Supported tensor {@link %{OperandType}}:
      * * {@link %{OperandTypeLinkPfx}TENSOR_FLOAT16}
      * * {@link %{OperandTypeLinkPfx}TENSOR_FLOAT32}
+%kind ndk hal_1.3+
+     * * {@link %{OperandTypeLinkPfx}TENSOR_INT32} (since %{APILevel30})
+%/kind
      *
      * Supported tensor rank: from 1.
      *
@@ -4064,6 +4103,9 @@
      * * {@link %{OperandTypeLinkPfx}TENSOR_FLOAT16}
      * * {@link %{OperandTypeLinkPfx}TENSOR_FLOAT32}
      * * {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM}
+%kind ndk hal_1.3+
+     * * {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED} (since %{APILevel30})
+%/kind
      *
      * Supported tensor rank: 4, with "NHWC" or "NCHW" data layout.
      * With the default data layout NHWC, the data is stored in the order of:
@@ -4080,14 +4122,26 @@
      *      {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM}, this tensor should
      *      be of {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_ASYMM}, with zeroPoint
      *      of 0 and scale of 0.125.
+%kind ndk hal_1.3+
+     *      For input0 of type
+     *      {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED}, this tensor
+     *      should be of {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_ASYMM}, with
+     *      zeroPoint of -128 and scale of 0.125.
+%/kind
      * * 2: An {@link %{OperandTypeLinkPfx}BOOL} scalar, set to true to specify
      *      NCHW data layout for input0. Set to false for NHWC.
      *
      * Outputs:
      * * 0: A tensor of the same {@link %{OperandType}} as input0, with shape
      *      [num_boxes, num_keypoints], specifying score of the keypoints.
+%kind ndk hal_1.3+
+     *      For a {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM} or
+     *      {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED} tensor,
+     *      the scale and zeroPoint can be different from input0 scale and zeroPoint.
+%else
      *      For a {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM} tensor,
      *      the scale and zeroPoint can be different from input0 scale and zeroPoint.
+%/kind
      * * 1: A tensor of the same {@link %{OperandType}} as input1, with shape
      *      [num_boxes, num_keypoints, 2], specifying the location of
      *      the keypoints, the second dimension is organized as
@@ -5711,12 +5765,254 @@
 %insert-lines AVAIL30
      */
     %{ANN}TENSOR_QUANT8_ASYMM_SIGNED = 14,
+
+    /**
+     * A reference to a %{model_or_subgraph}.
+%kind ndk
+     *
+     * {@link ANeuralNetworksModel_setOperandValueFromModel} must be used to set
+     * the value for an Operand of this type.
+%/kind
+%kind hal*
+     *
+     * Must have the lifetime {@link OperandLifeTime::SUBGRAPH}.
+%/kind
+%insert-lines AVAIL30
+     */
+    %{ANN}%{MODEL_or_SUBGRAPH} = 15,
 %/section
 
 %section Operand_1.3_MAX
-    FUNDAMENTAL_MAX = 14,
+    FUNDAMENTAL_MAX = 15,
+%/section
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% HAL OperationType for 1.3
+%% NDK OperationCode for API 30
+
+%section Operation_1.3
+    /**
+     * Quantized version of {@link %{OperationTypeLinkPfx}LSTM}.
+     *
+     * The input and the output use asymmetric quantized types, while the rest
+     * use symmetric ones.
+     *
+     * Inputs:
+     * * 0: The input to the LSTM cell.
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED}
+     *      Shape: [batchSize, inputSize]
+     * * 1: The input-to-input weights. Optional.
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_SYMM}
+     *      Shape: [numUnits, inputSize]
+     * * 2: The input-to-forget weights.
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_SYMM}
+     *      Shape: [numUnits, inputSize]
+     * * 3: The input-to-cell weights.
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_SYMM}
+     *      Shape: [numUnits, inputSize]
+     * * 4: The input-to-output weights.
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_SYMM}
+     *      Shape: [numUnits, inputSize]
+     * * 5: The recurrent-to-input weights. Optional.
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_SYMM}
+     *      Shape: [numUnits, outputSize]
+     * * 6: The recurrent-to-forget weights.
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_SYMM}
+     *      Shape: [numUnits, outputSize]
+     * * 7: The recurrent-to-cell weights.
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_SYMM}
+     *      Shape: [numUnits, outputSize]
+     * * 8: The recurrent-to-output weights.
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_SYMM}
+     *      Shape: [numUnits, outputSize]
+     * * 9: The cell-to-input weights (for peephole). Optional.
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_SYMM}
+     *      Shape: [numUnits]
+     * * 10: The cell-to-forget weights (for peephole). Optional.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_SYMM}
+     *       Shape: [numUnits]
+     * * 11: The cell-to-output weights (for peephole). Optional.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_SYMM}
+     *       Shape: [numUnits]
+     * * 12: The input gate bias. Quantized with scale being the
+     *       product of input and weights scales and zeroPoint equal to 0.
+     *       Optional.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_INT32}
+     *       Shape: [numUnits]
+     * * 13: The forget gate bias. Quantized with scale being the
+     *       product of input and weights scales and zeroPoint equal to 0.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_INT32}
+     *       Shape: [numUnits]
+     * * 14: The cell bias. Quantized with scale being the
+     *       product of input and weights scales and zeroPoint equal to 0.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_INT32}
+     *       Shape: [numUnits]
+     * * 15: The output gate bias. Quantized with scale being the
+     *       product of input and weights scales and zeroPoint equal to 0.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_INT32}
+     *       Shape: [numUnits]
+     * * 16: The projection weights. Optional.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_SYMM}
+     *       Shape: [outputSize, numUnits]
+     * * 17: The projection bias. Quantized with scale being the
+     *       product of input and weights scales and zeroPoint equal to 0.
+     *       Optional.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_INT32}
+     *       Shape: [outputSize]
+     * * 18: The output from the previous time step.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED}
+     *       Shape: [batchSize, outputSize]
+     * * 19: The cell state from the previous time step.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_SYMM}
+     *       Shape: [batchSize, numUnits]
+     * * 20: The input layer normalization weights. Used to rescale
+     *       normalized inputs to activation at input gate. Optional.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_SYMM}
+     *       Shape: [numUnits]
+     * * 21: The forget layer normalization weights. Used to
+     *       rescale normalized inputs to activation at forget gate. Optional.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_SYMM}
+     *       Shape: [numUnits]
+     * * 22: The cell layer normalization weights. Used to rescale
+     *       normalized inputs to activation at cell gate. Optional.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_SYMM}
+     *       Shape: [numUnits]
+     * * 23: The output layer normalization weights. Used to
+     *       rescale normalized inputs to activation at output gate. Optional.
+     *       Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_SYMM}
+     *       Shape: [numUnits]
+     * * 24: The cell clip. If provided the cell state is clipped
+     *       by this value prior to the cell output activation. Optional.
+     *       Type: {@link %{OperandTypeLinkPfx}FLOAT32}.
+     * * 25: The projection clip. If provided and projection is enabled,
+     *       this is used for clipping the projected values. Optional.
+     *       Type: {@link %{OperandTypeLinkPfx}FLOAT32}.
+     * * 26: The scale of the intermediate result of matmul,
+     *       i.e. input to layer normalization, at input gate.
+     *       Type: {@link %{OperandTypeLinkPfx}FLOAT32}.
+     * * 27: The scale of the intermediate result of matmul,
+     *       i.e. input to layer normalization, at forget gate.
+     *       Type: {@link %{OperandTypeLinkPfx}FLOAT32}.
+     * * 28: The scale of the intermediate result of matmul,
+     *       i.e. input to layer normalization, at cell gate.
+     *       Type: {@link %{OperandTypeLinkPfx}FLOAT32}.
+     * * 29: The scale of the intermediate result of matmul,
+     *       i.e. input to layer normalization, at output gate.
+     *       Type: {@link %{OperandTypeLinkPfx}FLOAT32}.
+     * * 30: The zero point of the hidden state, i.e. input to
+     *       projection.
+     *       Type: {@link %{OperandTypeLinkPfx}INT32}.
+     * * 31: The scale of the hidden state, i.e. input to
+     *       projection.
+     *       Type: {@link %{OperandTypeLinkPfx}FLOAT32}.
+     *
+     * Outputs:
+     * * 0: The output state (out).
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED}
+     *      Shape: [batchSize, outputSize]
+     * * 1: The cell state (out).
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_SYMM}
+     *      Shape: [batchSize, numUnits]
+     * * 2: The output. This is effectively the same as the current
+     *      "output state (out)" value.
+     *      Type: {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED}
+     *      Shape: [batchSize, outputSize]
+%insert-lines AVAIL30
+     */
+    %{DeclareOperation_1.3 QUANTIZED_LSTM 95},
+
+    /**
+     * Executes one of the two referenced %{model_or_subgraph}s as determined by a boolean
+     * value.
+     *
+     * The inputs and outputs of the two referenced %{model_or_subgraph}s must agree with the
+     * signature of this operation. That is, if the operation has (3 + n) inputs
+     * and m outputs, both %{model_or_subgraph}s must have n inputs and m outputs with the same
+     * types as the corresponding operation inputs and outputs.
+     *
+     * Inputs:
+     * * 0: A value of type {@link %{OperandTypeLinkPfx}TENSOR_BOOL8} and shape [1]
+     *      that determines which of the two referenced %{model_or_subgraph}s to execute.
+     * * 1: A {@link %{OperandTypeLinkPfx}%{MODEL_or_SUBGRAPH}} reference to the %{model_or_subgraph} to be
+     *      executed if the condition is true.
+     * * 2: A {@link %{OperandTypeLinkPfx}%{MODEL_or_SUBGRAPH}} reference to the %{model_or_subgraph} to be
+     *      executed if the condition is false.
+     * * 3 ~ (n + 2): Inputs to be passed to the %{model_or_subgraph} selected for execution.
+     *
+     * Outputs:
+     * * 0 ~ (m - 1): Outputs produced by the selected %{model_or_subgraph}.
+%insert-lines AVAIL30
+     */
+    %{DeclareOperation_1.3 IF 96},
+
+    /**
+     * Executes the body %{model_or_subgraph} until the condition %{model_or_subgraph} outputs false.
+     *
+     * The inputs to this operation are the condition %{model_or_subgraph}, the body %{model_or_subgraph},
+     * and operand values for the first iteration of the loop. The values are
+     * implicitly split into three groups of input-output, state-only, and
+     * input-only values, as described below.
+     *
+     * The outputs of this operation are the final values of input-output
+     * operands.
+     *
+     * Both the condition and body %{model_or_subgraph} receive (m + k + n) inputs.
+     * * The first m (m >= 1) inputs are input-output operands. For the first
+     *   iteration, these are initialized from the corresponding inputs of the
+     *   WHILE operation. In subsequent iterations, their values come from the
+     *   corresponding outputs of the body %{model_or_subgraph} produced during the previous
+     *   iteration.
+     * * The next k (k >= 0) inputs are state-only operands. They are similar to
+     *   the input-output operands, except that their values are no longer
+     *   available after the loop terminates.
+     * * The last n (n >= 0) inputs are input-only operands. Their values come
+     *   from the corresponding inputs of the WHILE operation.
+     *
+     * The body %{model_or_subgraph} produces (m + k) outputs.
+     * * The first m outputs are input-output operands. They become the outputs
+     *   of the WHILE operation when a termination condition is reached.
+     * * The last k outputs are state-only operands. Their values are no longer
+     *   available after the loop terminates.
+     *
+     * The numbers m, k, and n are inferred by the %{runtime_or_driver} as follows:
+     *     m = (WHILE operation output count)
+     *     k = (body %{model_or_subgraph} output count) - m
+     *     n = (body %{model_or_subgraph} input count) - m - k
+     *
+     * The pseudo-code below illustrates the flow of a WHILE operation with
+     * inputs condition, body, initial_input_output, initial_state, input_only
+     * (m = 1, k = 1, n = 1):
+     *
+     *     input_output = initial_input_output
+     *     state = initial_state
+     *     while condition(input_output, state, input_only):
+     *         input_output, state = body(input_output, state, input_only)
+     *     return input_output
+     *
+     * Inputs:
+     * * 0: A {@link %{OperandTypeLinkPfx}%{MODEL_or_SUBGRAPH}} reference to the condition
+     *      %{model_or_subgraph}. The %{model_or_subgraph} must have (m + k + n) inputs with
+     *      the same types as the corresponding inputs of the WHILE operation
+     *      and exactly one output of {@link %{OperandTypeLinkPfx}TENSOR_BOOL8}
+     *      and shape [1].
+     * * 1: A {@link %{OperandTypeLinkPfx}%{MODEL_or_SUBGRAPH}} reference to the body %{model_or_subgraph}.
+     *      The %{model_or_subgraph} must have (m + k + n) inputs and (m + k) outputs with
+     *      the same types as the corresponding inputs and outputs of the WHILE
+     *      operation.
+     * * (m inputs): Initial values for input-output operands.
+     * * (k inputs): Initial values for state-only operands.
+     * * (n inputs): Values for input-only operands.
+     *
+     * Outputs:
+     * * 0 ~ (m - 1): Outputs produced by the loop.
+%insert-lines AVAIL30
+     */
+    %{DeclareOperation_1.3 WHILE 97},
 %/section
 
 %section Operation_1.3_MAX
-    FUNDAMENTAL_MAX = 94,
+    FUNDAMENTAL_MAX = 97,
 %/section
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

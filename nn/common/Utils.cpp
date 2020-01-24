@@ -90,6 +90,29 @@ void initVLogMask() {
     }
 }
 
+static std::pair<int, OptionalTimePoint> makeTimePoint(uint64_t duration) {
+    const auto currentTime = std::chrono::steady_clock::now();
+    const auto currentTimeInNanoseconds =
+            std::chrono::time_point_cast<std::chrono::nanoseconds>(currentTime);
+    const uint64_t nanosecondsSinceEpoch = currentTimeInNanoseconds.time_since_epoch().count();
+
+    // check for overflow
+    if (std::numeric_limits<uint64_t>::max() - nanosecondsSinceEpoch < duration) {
+        LOG(ERROR) << "Launching execution failed due to time point overflow";
+        return {ANEURALNETWORKS_BAD_DATA, {}};
+    }
+    const uint64_t nanosecondsAtTimeout = nanosecondsSinceEpoch + duration;
+
+    OptionalTimePoint otp;
+    otp.nanoseconds(nanosecondsAtTimeout);
+    return {ANEURALNETWORKS_NO_ERROR, otp};
+}
+
+std::pair<int, OptionalTimePoint> makeTimePoint(std::optional<uint64_t> duration) {
+    const std::pair<int, OptionalTimePoint> empty = {ANEURALNETWORKS_NO_ERROR, {}};
+    return duration.has_value() ? makeTimePoint(*duration) : empty;
+}
+
 static bool isExtensionOperandType(int32_t type) {
     return static_cast<uint32_t>(type) > static_cast<uint32_t>(OperandTypeRange::BASE_MAX);
 }
@@ -244,6 +267,7 @@ const uint32_t kSizeOfDataType[]{
         2,  // ANEURALNETWORKS_TENSOR_QUANT16_ASYMM
         1,  // ANEURALNETWORKS_TENSOR_QUANT8_SYMM
         1,  // ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED
+        0,  // ANEURALNETWORKS_MODEL
 };
 
 static_assert(COUNT(kSizeOfDataType) == kNumberOfDataTypes, "kSizeOfDataType is incorrect");
@@ -264,6 +288,7 @@ const bool kScalarDataType[]{
         false,  // ANEURALNETWORKS_TENSOR_QUANT16_ASYMM
         false,  // ANEURALNETWORKS_TENSOR_QUANT8_SYMM
         false,  // ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED
+        true,   // ANEURALNETWORKS_MODEL
 };
 
 static_assert(COUNT(kScalarDataType) == kNumberOfDataTypes, "kScalarDataType is incorrect");
@@ -355,7 +380,7 @@ void logModelToInfo(const V1_1::Model& model) {
     LOG(INFO) << "operations" << toString(model.operations);
     LOG(INFO) << "inputIndexes" << toString(model.inputIndexes);
     LOG(INFO) << "outputIndexes" << toString(model.outputIndexes);
-    LOG(INFO) << "operandValues size" << model.operandValues.size();
+    LOG(INFO) << "operandValues size " << model.operandValues.size();
     LOG(INFO) << "pools" << SHOW_IF_DEBUG(toString(model.pools));
 }
 
@@ -371,15 +396,22 @@ void logModelToInfo(const V1_2::Model& model) {
     LOG(INFO) << "extensionNameToPrefix" << toString(model.extensionNameToPrefix);
 }
 
+static void logSubgraphToInfo(std::string label, const V1_3::Subgraph& subgraph) {
+    LOG(INFO) << label << ".operands" << toString(subgraph.operands);
+    LOG(INFO) << label << ".operations" << toString(subgraph.operations);
+    LOG(INFO) << label << ".inputIndexes" << toString(subgraph.inputIndexes);
+    LOG(INFO) << label << ".outputIndexes" << toString(subgraph.outputIndexes);
+}
+
 void logModelToInfo(const V1_3::Model& model) {
     LOG(INFO) << "V1_3::Model start";
-    LOG(INFO) << "operands" << toString(model.operands);
-    LOG(INFO) << "operations" << toString(model.operations);
-    LOG(INFO) << "inputIndexes" << toString(model.inputIndexes);
-    LOG(INFO) << "outputIndexes" << toString(model.outputIndexes);
-    LOG(INFO) << "operandValues size" << model.operandValues.size();
+    logSubgraphToInfo("main", model.main);
+    for (uint32_t i = 0, n = model.referenced.size(); i < n; ++i) {
+        logSubgraphToInfo("referenced[" + std::to_string(i) + "]", model.referenced[i]);
+    }
+    LOG(INFO) << "operandValues size " << model.operandValues.size();
     LOG(INFO) << "pools" << SHOW_IF_DEBUG(toString(model.pools));
-    LOG(INFO) << "relaxComputationFloat32toFloat16" << model.relaxComputationFloat32toFloat16;
+    LOG(INFO) << "relaxComputationFloat32toFloat16 " << model.relaxComputationFloat32toFloat16;
     LOG(INFO) << "extensionNameToPrefix" << toString(model.extensionNameToPrefix);
 }
 
@@ -1649,40 +1681,51 @@ ErrorStatus convertResultCodeToErrorStatus(int resultCode) {
         case ANEURALNETWORKS_UNAVAILABLE_DEVICE:
             return ErrorStatus::DEVICE_UNAVAILABLE;
 
-        default:
-            LOG(ERROR) << "Unknown result code " << resultCode
-                       << " mapped to ErrorStatus::GENERAL_FAILURE";
-            return ErrorStatus::GENERAL_FAILURE;
         case ANEURALNETWORKS_BAD_STATE:
         case ANEURALNETWORKS_INCOMPLETE:
         case ANEURALNETWORKS_OP_FAILED:
         case ANEURALNETWORKS_OUT_OF_MEMORY:
         case ANEURALNETWORKS_UNMAPPABLE:
+        case ANEURALNETWORKS_DEAD_OBJECT:
             return ErrorStatus::GENERAL_FAILURE;
+
+        case ANEURALNETWORKS_MISSED_DEADLINE_TRANSIENT:
+            return ErrorStatus::MISSED_DEADLINE_TRANSIENT;
+        case ANEURALNETWORKS_MISSED_DEADLINE_PERSISTENT:
+            return ErrorStatus::MISSED_DEADLINE_PERSISTENT;
+        case ANEURALNETWORKS_RESOURCE_EXHAUSTED_TRANSIENT:
+            return ErrorStatus::RESOURCE_EXHAUSTED_TRANSIENT;
+        case ANEURALNETWORKS_RESOURCE_EXHAUSTED_PERSISTENT:
+            return ErrorStatus::RESOURCE_EXHAUSTED_PERSISTENT;
     }
+    LOG(ERROR) << "Unknown result code " << resultCode << " mapped to ErrorStatus::GENERAL_FAILURE";
+    return ErrorStatus::GENERAL_FAILURE;
 }
 
 int convertErrorStatusToResultCode(ErrorStatus status) {
     switch (status) {
         case ErrorStatus::NONE:
             return ANEURALNETWORKS_NO_ERROR;
-
-        case ErrorStatus::INVALID_ARGUMENT:
-            return ANEURALNETWORKS_BAD_DATA;
-
-        case ErrorStatus::OUTPUT_INSUFFICIENT_SIZE:
-            return ANEURALNETWORKS_OUTPUT_INSUFFICIENT_SIZE;
-
         case ErrorStatus::DEVICE_UNAVAILABLE:
             return ANEURALNETWORKS_UNAVAILABLE_DEVICE;
-
-        default:
-            LOG(ERROR) << "Unknown ErrorStatus " << toString(status)
-                       << " mapped to ANEURALNETWORKS_OP_FAILED";
-            return ANEURALNETWORKS_OP_FAILED;
         case ErrorStatus::GENERAL_FAILURE:
             return ANEURALNETWORKS_OP_FAILED;
+        case ErrorStatus::OUTPUT_INSUFFICIENT_SIZE:
+            return ANEURALNETWORKS_OUTPUT_INSUFFICIENT_SIZE;
+        case ErrorStatus::INVALID_ARGUMENT:
+            return ANEURALNETWORKS_BAD_DATA;
+        case ErrorStatus::MISSED_DEADLINE_TRANSIENT:
+            return ANEURALNETWORKS_MISSED_DEADLINE_TRANSIENT;
+        case ErrorStatus::MISSED_DEADLINE_PERSISTENT:
+            return ANEURALNETWORKS_MISSED_DEADLINE_PERSISTENT;
+        case ErrorStatus::RESOURCE_EXHAUSTED_TRANSIENT:
+            return ANEURALNETWORKS_RESOURCE_EXHAUSTED_TRANSIENT;
+        case ErrorStatus::RESOURCE_EXHAUSTED_PERSISTENT:
+            return ANEURALNETWORKS_RESOURCE_EXHAUSTED_PERSISTENT;
     }
+    LOG(ERROR) << "Unknown ErrorStatus " << toString(status)
+               << " mapped to ANEURALNETWORKS_OP_FAILED";
+    return ANEURALNETWORKS_OP_FAILED;
 }
 
 std::tuple<int, std::vector<OutputShape>, Timing> getExecutionResult(
@@ -1700,6 +1743,26 @@ std::tuple<int, std::vector<OutputShape>, Timing> getExecutionResult(
         timing = kNoTiming;
     }
     return {n, std::move(outputShapes), timing};
+}
+
+std::optional<std::vector<uint32_t>> combineDimensions(const std::vector<uint32_t>& lhs,
+                                                       const std::vector<uint32_t>& rhs) {
+    if (rhs.empty()) return lhs;
+    if (lhs.empty()) return rhs;
+    if (lhs.size() != rhs.size()) {
+        LOG(ERROR) << "Incompatible ranks: " << toString(lhs) << " and " << toString(rhs);
+        return std::nullopt;
+    }
+    std::vector<uint32_t> combined = lhs;
+    for (uint32_t i = 0; i < lhs.size(); i++) {
+        if (lhs[i] == 0) {
+            combined[i] = rhs[i];
+        } else if (rhs[i] != 0 && lhs[i] != rhs[i]) {
+            LOG(ERROR) << "Incompatible dimensions: " << toString(lhs) << " and " << toString(rhs);
+            return std::nullopt;
+        }
+    }
+    return combined;
 }
 
 // Capabilities::operandPerformance utilities.
@@ -1919,6 +1982,43 @@ bool compliantWithV1_3(const V1_2::Capabilities&) {
 
 bool compliantWithV1_3(const V1_3::Capabilities&) {
     return true;
+}
+
+V1_0::ErrorStatus convertToV1_0(V1_0::ErrorStatus status) {
+    return status;
+}
+
+V1_0::ErrorStatus convertToV1_0(V1_3::ErrorStatus status) {
+    switch (status) {
+        case V1_3::ErrorStatus::NONE:
+            return V1_0::ErrorStatus::NONE;
+        case V1_3::ErrorStatus::DEVICE_UNAVAILABLE:
+            return V1_0::ErrorStatus::DEVICE_UNAVAILABLE;
+        case V1_3::ErrorStatus::GENERAL_FAILURE:
+            return V1_0::ErrorStatus::GENERAL_FAILURE;
+        case V1_3::ErrorStatus::OUTPUT_INSUFFICIENT_SIZE:
+            return V1_0::ErrorStatus::OUTPUT_INSUFFICIENT_SIZE;
+        case V1_3::ErrorStatus::INVALID_ARGUMENT:
+            return V1_0::ErrorStatus::INVALID_ARGUMENT;
+        case V1_3::ErrorStatus::MISSED_DEADLINE_TRANSIENT:
+            return V1_0::ErrorStatus::GENERAL_FAILURE;
+        case V1_3::ErrorStatus::MISSED_DEADLINE_PERSISTENT:
+            return V1_0::ErrorStatus::GENERAL_FAILURE;
+        case V1_3::ErrorStatus::RESOURCE_EXHAUSTED_TRANSIENT:
+            return V1_0::ErrorStatus::GENERAL_FAILURE;
+        case V1_3::ErrorStatus::RESOURCE_EXHAUSTED_PERSISTENT:
+            return V1_0::ErrorStatus::GENERAL_FAILURE;
+    }
+    LOG(ERROR) << "Unknown ErrorStatus: " << toString(status) << " mapped to GENERAL_FAILURE";
+    return V1_0::ErrorStatus::GENERAL_FAILURE;
+}
+
+V1_3::ErrorStatus convertToV1_3(V1_0::ErrorStatus status) {
+    return static_cast<V1_3::ErrorStatus>(status);
+}
+
+V1_3::ErrorStatus convertToV1_3(V1_3::ErrorStatus status) {
+    return status;
 }
 
 static V1_0::OperationType uncheckedConvertToV1_0(V1_1::OperationType type) {
@@ -2170,11 +2270,13 @@ static hidl_vec<V1_1::Operation> convertToV1_1(const hidl_vec<V1_0::Operation>& 
 bool compliantWithV1_0(const V1_3::Operand& operand) {
     return validOperandType(static_cast<V1_0::OperandType>(operand.type)) &&
            (nonExtensionOperandTypeIsScalar(static_cast<int>(operand.type)) ||
-            operand.dimensions.size() != 0);
+            operand.dimensions.size() != 0) &&
+           compliantWithV1_0(operand.lifetime);
 }
 
 bool compliantWithV1_2(const V1_3::Operand& operand) {
-    return validOperandType(static_cast<V1_2::OperandType>(operand.type));
+    return validOperandType(static_cast<V1_2::OperandType>(operand.type)) &&
+           compliantWithV1_0(operand.lifetime);
 }
 
 bool compliantWithV1_3(const V1_3::Operand& operand) {
@@ -2189,9 +2291,9 @@ static bool compliantWith(HalVersion version, const V1_3::Model& model,
                    [version](const hidl_memory& pool) { return validatePool(pool, version); });
 
     // A boolean vector indicating whether each operand is compliant with the target HAL version.
-    std::vector<bool> isOperandCompliant(model.operands.size(), false);
-    std::transform(model.operands.begin(), model.operands.end(), isOperandCompliant.begin(),
-                   [&isPoolCompliant, version](const Operand& op) {
+    std::vector<bool> isOperandCompliant(model.main.operands.size(), false);
+    std::transform(model.main.operands.begin(), model.main.operands.end(),
+                   isOperandCompliant.begin(), [&isPoolCompliant, version](const Operand& op) {
                        bool is_operand_compliant = false;
                        switch (version) {
                            case HalVersion::UNKNOWN:
@@ -2228,20 +2330,20 @@ static bool compliantWith(HalVersion version, const V1_3::Model& model,
         int error = validateOperation(
                 static_cast<int32_t>(op.type), op.inputs.size(),
                 op.inputs.size() > 0 ? op.inputs.data() : nullptr, op.outputs.size(),
-                op.outputs.size() > 0 ? op.outputs.data() : nullptr, model.operands, version);
+                op.outputs.size() > 0 ? op.outputs.data() : nullptr, model.main.operands, version);
         return error == ANEURALNETWORKS_NO_ERROR;
     };
 
     if (noncompliantOperations) {
         CHECK(noncompliantOperations->empty());
-        for (uint32_t idx = 0; idx < model.operations.size(); ++idx) {
-            if (!localValidateOperation(model.operations[idx])) {
+        for (uint32_t idx = 0; idx < model.main.operations.size(); ++idx) {
+            if (!localValidateOperation(model.main.operations[idx])) {
                 noncompliantOperations->insert(idx);
             }
         }
         return noncompliantOperations->empty();
     } else {
-        return std::all_of(model.operations.begin(), model.operations.end(),
+        return std::all_of(model.main.operations.begin(), model.main.operations.end(),
                            localValidateOperation);
     }
 }
@@ -2489,10 +2591,6 @@ V1_0::OperandType convertToV1_0(const V1_3::OperandType& operandType) {
     return static_cast<V1_0::OperandType>(operandType);
 }
 
-V1_0::OperandLifeTime convertToV1_0(const V1_0::OperandLifeTime& operandLifeTime) {
-    return operandLifeTime;
-}
-
 template <typename InExtraParams, typename OutExtraParams>
 OutExtraParams copyExtraParams(const InExtraParams& extraParams) {
     OutExtraParams out;
@@ -2511,6 +2609,42 @@ OutExtraParams copyExtraParams(const InExtraParams& extraParams) {
         } break;
     }
     return out;
+}
+
+bool compliantWithV1_0(hal::V1_0::OperandLifeTime lifetime) {
+    return true;
+}
+
+bool compliantWithV1_0(hal::V1_3::OperandLifeTime lifetime) {
+    return lifetime != V1_3::OperandLifeTime::SUBGRAPH;
+}
+
+bool compliantWithV1_3(hal::V1_0::OperandLifeTime lifetime) {
+    return true;
+}
+
+bool compliantWithV1_3(hal::V1_3::OperandLifeTime lifetime) {
+    return true;
+}
+
+V1_0::OperandLifeTime convertToV1_0(V1_0::OperandLifeTime lifetime) {
+    return lifetime;
+}
+
+V1_0::OperandLifeTime convertToV1_0(V1_3::OperandLifeTime lifetime) {
+    if (!compliantWithV1_0(lifetime)) {
+        LOG(ERROR) << "Upcasting non-compliant lifetime " << toString(lifetime)
+                   << " from V1_3 to V1_0";
+    }
+    return static_cast<V1_0::OperandLifeTime>(lifetime);
+}
+
+V1_3::OperandLifeTime convertToV1_3(V1_0::OperandLifeTime lifetime) {
+    return static_cast<V1_3::OperandLifeTime>(lifetime);
+}
+
+V1_3::OperandLifeTime convertToV1_3(V1_3::OperandLifeTime lifetime) {
+    return lifetime;
 }
 
 V1_0::Operand convertToV1_0(const V1_2::Operand& operand) {
@@ -2561,7 +2695,7 @@ V1_3::Operand convertToV1_3(const V1_0::Operand& operand) {
             .numberOfConsumers = operand.numberOfConsumers,
             .scale = operand.scale,
             .zeroPoint = operand.zeroPoint,
-            .lifetime = operand.lifetime,
+            .lifetime = convertToV1_3(operand.lifetime),
             .location = operand.location};
 }
 
@@ -2571,7 +2705,7 @@ V1_3::Operand convertToV1_3(const V1_2::Operand& operand) {
             .numberOfConsumers = operand.numberOfConsumers,
             .scale = operand.scale,
             .zeroPoint = operand.zeroPoint,
-            .lifetime = operand.lifetime,
+            .lifetime = convertToV1_3(operand.lifetime),
             .location = operand.location,
             .extraParams = copyExtraParams<V1_2::Operand::ExtraParams, V1_3::Operand::ExtraParams>(
                     operand.extraParams)};
@@ -2670,10 +2804,10 @@ V1_0::Model convertToV1_0(const V1_3::Model& model) {
         LOG(ERROR) << "Upcasting non-compliant model " << SHOW_IF_DEBUG(toString(model))
                    << " from V1_3::Model to V1_0::Model";
     }
-    return {.operands = convertToV1_0(model.operands),
-            .operations = uncheckedConvertToV1_0(model.operations),
-            .inputIndexes = model.inputIndexes,
-            .outputIndexes = model.outputIndexes,
+    return {.operands = convertToV1_0(model.main.operands),
+            .operations = uncheckedConvertToV1_0(model.main.operations),
+            .inputIndexes = model.main.inputIndexes,
+            .outputIndexes = model.main.outputIndexes,
             .operandValues = model.operandValues,
             .pools = model.pools};
 }
@@ -2711,35 +2845,14 @@ V1_1::Model convertToV1_1(const V1_3::Model& model) {
         LOG(ERROR) << "Upcasting non-compliant model " << SHOW_IF_DEBUG(toString(model))
                    << " from V1_3::Model to V1_1::Model";
     }
-    return {.operands = convertToV1_0(model.operands),  // Operands in 1.1 and 1.0 are identical.
-            .operations = uncheckedConvertToV1_1(model.operations),
-            .inputIndexes = model.inputIndexes,
-            .outputIndexes = model.outputIndexes,
+    return {// Operands in 1.1 and 1.0 are identical.
+            .operands = convertToV1_0(model.main.operands),
+            .operations = uncheckedConvertToV1_1(model.main.operations),
+            .inputIndexes = model.main.inputIndexes,
+            .outputIndexes = model.main.outputIndexes,
             .operandValues = model.operandValues,
             .pools = model.pools,
             .relaxComputationFloat32toFloat16 = model.relaxComputationFloat32toFloat16};
-}
-
-static hidl_vec<V1_2::Model::ExtensionNameAndPrefix> convertToV1_2(
-        const hidl_vec<V1_3::Model::ExtensionNameAndPrefix>& extensionNameAndPrefix) {
-    hidl_vec<V1_2::Model::ExtensionNameAndPrefix> result(extensionNameAndPrefix.size());
-    std::transform(extensionNameAndPrefix.begin(), extensionNameAndPrefix.end(), result.begin(),
-                   [](const V1_3::Model::ExtensionNameAndPrefix& nameAndPrefix)
-                           -> V1_2::Model::ExtensionNameAndPrefix {
-                       return {.name = nameAndPrefix.name, .prefix = nameAndPrefix.prefix};
-                   });
-    return result;
-}
-
-static hidl_vec<V1_3::Model::ExtensionNameAndPrefix> convertToV1_3(
-        const hidl_vec<V1_2::Model::ExtensionNameAndPrefix>& extensionNameAndPrefix) {
-    hidl_vec<V1_3::Model::ExtensionNameAndPrefix> result(extensionNameAndPrefix.size());
-    std::transform(extensionNameAndPrefix.begin(), extensionNameAndPrefix.end(), result.begin(),
-                   [](const V1_2::Model::ExtensionNameAndPrefix& nameAndPrefix)
-                           -> V1_3::Model::ExtensionNameAndPrefix {
-                       return {.name = nameAndPrefix.name, .prefix = nameAndPrefix.prefix};
-                   });
-    return result;
 }
 
 V1_2::Model convertToV1_2(const V1_0::Model& model) {
@@ -2771,49 +2884,100 @@ V1_2::Model convertToV1_2(const V1_3::Model& model) {
         LOG(ERROR) << "Upcasting non-compliant model " << SHOW_IF_DEBUG(toString(model))
                    << " from V1_3::Model to V1_2::Model";
     }
-    return {.operands = convertToV1_2(model.operands),
-            .operations = uncheckedConvertToV1_2(model.operations),
-            .inputIndexes = model.inputIndexes,
-            .outputIndexes = model.outputIndexes,
+    return {.operands = convertToV1_2(model.main.operands),
+            .operations = uncheckedConvertToV1_2(model.main.operations),
+            .inputIndexes = model.main.inputIndexes,
+            .outputIndexes = model.main.outputIndexes,
             .operandValues = model.operandValues,
             .pools = model.pools,
             .relaxComputationFloat32toFloat16 = model.relaxComputationFloat32toFloat16,
-            .extensionNameToPrefix = convertToV1_2(model.extensionNameToPrefix)};
+            .extensionNameToPrefix = model.extensionNameToPrefix};
 }
 
 V1_3::Model convertToV1_3(const V1_0::Model& model) {
-    return {.operands = convertToV1_3(model.operands),
-            .operations = convertToV1_3(model.operations),
-            .inputIndexes = model.inputIndexes,
-            .outputIndexes = model.outputIndexes,
+    return {.main = {.operands = convertToV1_3(model.operands),
+                     .operations = convertToV1_3(model.operations),
+                     .inputIndexes = model.inputIndexes,
+                     .outputIndexes = model.outputIndexes},
             .operandValues = model.operandValues,
             .pools = model.pools,
             .relaxComputationFloat32toFloat16 = false};
 }
 
 V1_3::Model convertToV1_3(const V1_1::Model& model) {
-    return {.operands = convertToV1_3(model.operands),
-            .operations = convertToV1_3(model.operations),
-            .inputIndexes = model.inputIndexes,
-            .outputIndexes = model.outputIndexes,
+    return {.main = {.operands = convertToV1_3(model.operands),
+                     .operations = convertToV1_3(model.operations),
+                     .inputIndexes = model.inputIndexes,
+                     .outputIndexes = model.outputIndexes},
             .operandValues = model.operandValues,
             .pools = model.pools,
             .relaxComputationFloat32toFloat16 = model.relaxComputationFloat32toFloat16};
 }
 
 V1_3::Model convertToV1_3(const V1_2::Model& model) {
-    return {.operands = convertToV1_3(model.operands),
-            .operations = convertToV1_3(model.operations),
-            .inputIndexes = model.inputIndexes,
-            .outputIndexes = model.outputIndexes,
+    return {.main = {.operands = convertToV1_3(model.operands),
+                     .operations = convertToV1_3(model.operations),
+                     .inputIndexes = model.inputIndexes,
+                     .outputIndexes = model.outputIndexes},
             .operandValues = model.operandValues,
             .pools = model.pools,
             .relaxComputationFloat32toFloat16 = model.relaxComputationFloat32toFloat16,
-            .extensionNameToPrefix = convertToV1_3(model.extensionNameToPrefix)};
+            .extensionNameToPrefix = model.extensionNameToPrefix};
 }
 
 V1_3::Model convertToV1_3(const V1_3::Model& model) {
     return model;
+}
+
+bool compliantWithV1_0(const V1_0::Request& request) {
+    return true;
+}
+
+bool compliantWithV1_0(const V1_3::Request& request) {
+    return std::all_of(request.pools.begin(), request.pools.end(), [](const auto& pool) {
+        return pool.getDiscriminator() == V1_3::Request::MemoryPool::hidl_discriminator::hidlMemory;
+    });
+}
+
+static hidl_memory convertToV1_0(const V1_3::Request::MemoryPool& pool) {
+    switch (pool.getDiscriminator()) {
+        case V1_3::Request::MemoryPool::hidl_discriminator::hidlMemory:
+            return pool.hidlMemory();
+        case V1_3::Request::MemoryPool::hidl_discriminator::token:
+            return hidl_memory{};
+    }
+}
+
+static V1_3::Request::MemoryPool convertToV1_3(const hidl_memory& pool) {
+    V1_3::Request::MemoryPool ret;
+    ret.hidlMemory(pool);
+    return ret;
+}
+
+V1_0::Request convertToV1_0(const V1_0::Request& request) {
+    return request;
+}
+
+V1_0::Request convertToV1_0(const V1_3::Request& request) {
+    if (!compliantWithV1_0(request)) {
+        LOG(ERROR) << "Upcasting non-compliant request " << SHOW_IF_DEBUG(toString(request))
+                   << " from V1_3::Request to V1_0::Request";
+    }
+    hidl_vec<hidl_memory> pools(request.pools.size());
+    std::transform(request.pools.begin(), request.pools.end(), pools.begin(),
+                   [](const auto& pool) { return convertToV1_0(pool); });
+    return {.inputs = request.inputs, .outputs = request.outputs, .pools = std::move(pools)};
+}
+
+V1_3::Request convertToV1_3(const V1_0::Request& request) {
+    hidl_vec<V1_3::Request::MemoryPool> pools(request.pools.size());
+    std::transform(request.pools.begin(), request.pools.end(), pools.begin(),
+                   [](const auto& pool) { return convertToV1_3(pool); });
+    return {.inputs = request.inputs, .outputs = request.outputs, .pools = std::move(pools)};
+}
+
+V1_3::Request convertToV1_3(const V1_3::Request& request) {
+    return request;
 }
 
 #ifdef NN_DEBUGGABLE
