@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.3.1)
 project(nn-framework)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexceptions -fno-short-enums  -fPIC")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Ofast -lstdc++ -Wl,--no-undefined")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -lstdc++ -Wl,--no-undefined")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__ANDROID_API__=29")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__LE_NN__")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNAMESPACE_FOR_HASH_FUNCTIONS=farmhash")
