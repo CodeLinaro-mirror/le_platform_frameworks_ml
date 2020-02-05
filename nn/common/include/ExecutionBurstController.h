@@ -51,7 +51,8 @@ constexpr const size_t kExecutionBurstChannelLength = 1024;
  *     request.
  * @return Serialized FMQ request data.
  */
-std::vector<hal::FmqRequestDatum> serialize(const hal::Request& request, hal::MeasureTiming measure,
+std::vector<hal::FmqRequestDatum> serialize(const hal::V1_0::Request& request,
+                                            hal::MeasureTiming measure,
                                             const std::vector<int32_t>& slots);
 
 /**
@@ -63,8 +64,8 @@ std::vector<hal::FmqRequestDatum> serialize(const hal::Request& request, hal::Me
  * @param data Serialized FMQ result data.
  * @return Result object if successfully deserialized, std::nullopt otherwise.
  */
-std::optional<std::tuple<hal::ErrorStatus, std::vector<hal::OutputShape>, hal::Timing>> deserialize(
-        const std::vector<hal::FmqResultDatum>& data);
+std::optional<std::tuple<hal::V1_0::ErrorStatus, std::vector<hal::OutputShape>, hal::Timing>>
+deserialize(const std::vector<hal::FmqResultDatum>& data);
 
 /**
  * ResultChannelReceiver is responsible for waiting on the channel until the
@@ -107,7 +108,7 @@ class ResultChannelReceiver {
      * @return Result object if successfully received, std::nullopt if error or
      *     if the receiver object was invalidated.
      */
-    std::optional<std::tuple<hal::ErrorStatus, std::vector<hal::OutputShape>, hal::Timing>>
+    std::optional<std::tuple<hal::V1_0::ErrorStatus, std::vector<hal::OutputShape>, hal::Timing>>
     getBlocking();
 
     /**
@@ -160,7 +161,7 @@ class RequestChannelSender {
      *     the request.
      * @return 'true' on successful send, 'false' otherwise.
      */
-    bool send(const hal::Request& request, hal::MeasureTiming measure,
+    bool send(const hal::V1_0::Request& request, hal::MeasureTiming measure,
               const std::vector<int32_t>& slots);
 
     /**
@@ -298,7 +299,7 @@ class ExecutionBurstController {
      *       different path (e.g., IPreparedModel::executeSynchronously)
      */
     std::tuple<int, std::vector<hal::OutputShape>, hal::Timing, bool> compute(
-            const hal::Request& request, hal::MeasureTiming measure,
+            const hal::V1_0::Request& request, hal::MeasureTiming measure,
             const std::vector<intptr_t>& memoryIds);
 
     /**

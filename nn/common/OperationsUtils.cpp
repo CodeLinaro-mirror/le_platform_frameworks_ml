@@ -133,33 +133,6 @@ bool SetShape(const Shape& in, Shape* out) {
     return true;
 }
 
-bool combineDimensions(const std::vector<uint32_t>& lhs, const std::vector<uint32_t>& rhs,
-                       std::vector<uint32_t>* combined) {
-    if (rhs.empty()) {
-        *combined = lhs;
-        return true;
-    }
-    if (lhs.empty()) {
-        *combined = rhs;
-        return true;
-    }
-    NN_RET_CHECK_EQ(lhs.size(), rhs.size()) << "incompatible ranks";
-    combined->resize(lhs.size());
-    for (uint32_t i = 0; i < lhs.size(); i++) {
-        if (lhs[i] == 0) {
-            (*combined)[i] = rhs[i];
-            continue;
-        }
-        if (rhs[i] == 0) {
-            (*combined)[i] = lhs[i];
-            continue;
-        }
-        NN_RET_CHECK_EQ(lhs[i], rhs[i]) << "incompatible dimension: " << i;
-        (*combined)[i] = lhs[i];
-    }
-    return true;
-}
-
 uint32_t getNumberOfElements(const Shape& shape) {
     uint32_t count = 1;
     for (size_t i = 0; i < shape.dimensions.size(); i++) {
@@ -211,6 +184,20 @@ bool QuantizeMultiplier(double double_multiplier, int32_t* quantized_multiplier,
         ++*shift;
     }
     NN_RET_CHECK_LE(q_fixed, std::numeric_limits<int32_t>::max());
+    // A shift amount smaller than -31 would cause all bits to be shifted out
+    // and thus all results would be zero. We implement that instead with
+    // q_fixed==0, so as to avoid hitting issues with right-shift
+    // operations with shift amounts greater than 31. Note that this happens
+    // roughly when abs(double_multiplier) < 2^-31 and the present handling means
+    // that we're effectively flushing tiny double_multiplier's to zero.
+    // We could conceivably handle values in the range (roughly) [32, 63]
+    // as 'denormals' i.e. (shift==0, q_fixed < 2^30). In that point of view
+    // the present handling is just doing 'flush denormals to zero'. We could
+    // reconsider and actually generate nonzero denormals if a need arises.
+    if (*shift < -31) {
+        *shift = 0;
+        q_fixed = 0;
+    }
     *quantized_multiplier = static_cast<int32_t>(q_fixed);
     return true;
 }

@@ -36,8 +36,10 @@ namespace android {
 namespace nn {
 
 // Forward declaration
-class MetaModel;
+class Device;
 class ExecutionBurstController;
+class MetaModel;
+class VersionedIPreparedModel;
 struct ModelArgumentInfo;
 
 // A unified interface for actual driver prepared model as well as the CPU.
@@ -48,12 +50,15 @@ class PreparedModel {
     PreparedModel() = default;
     virtual ~PreparedModel() = default;
 
+    virtual const Device* getDevice() const = 0;
+    virtual std::shared_ptr<VersionedIPreparedModel> getInterface() const = 0;
+
     // Perform computation with given input/output argument info and memory pools.
     virtual std::tuple<int, std::vector<hal::OutputShape>, hal::Timing> execute(
             const std::vector<ModelArgumentInfo>& inputs,
             const std::vector<ModelArgumentInfo>& outputs, const MemoryTracker& memories,
             const std::shared_ptr<ExecutionBurstController>& burstController,
-            hal::MeasureTiming measure) const = 0;
+            hal::MeasureTiming measure, const hal::OptionalTimePoint& deadline) const = 0;
 
     virtual std::shared_ptr<ExecutionBurstController> configureExecutionBurst(
             bool preferPowerOverLatency) const = 0;
@@ -81,11 +86,19 @@ class Device {
     virtual hal::PerformanceInfo getRelaxedFloat32toFloat16PerformanceScalar() const = 0;
     virtual hal::PerformanceInfo getRelaxedFloat32toFloat16PerformanceTensor() const = 0;
     virtual bool isCachingSupported() const = 0;
+    virtual std::pair<bool, bool> supportsDeadlines() const = 0;
+    virtual int wait() const = 0;
 
     virtual std::pair<int, std::shared_ptr<PreparedModel>> prepareModel(
             const hal::ModelFactory& makeModel, hal::ExecutionPreference preference,
+            hal::Priority priority, const hal::OptionalTimePoint& deadline,
             const std::string& cacheDir,
             const std::optional<hal::CacheToken>& maybeToken) const = 0;
+
+    // The caller is responsible for making sure the MemoryDescriptor only contains PreparedModels
+    // from the same Device.
+    virtual std::pair<int, std::unique_ptr<Memory>> allocate(
+            const MemoryDescriptor& desc) const = 0;
 };
 
 // Manages the NN HAL devices.  Only one instance of this class will exist.

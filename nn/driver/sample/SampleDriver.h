@@ -17,6 +17,8 @@
 #ifndef ANDROID_FRAMEWORKS_ML_NN_DRIVER_SAMPLE_SAMPLE_DRIVER_H
 #define ANDROID_FRAMEWORKS_ML_NN_DRIVER_SAMPLE_SAMPLE_DRIVER_H
 
+#include <hwbinder/IPCThreadState.h>
+
 #include <string>
 #include <vector>
 
@@ -42,7 +44,6 @@ class SampleDriver : public hal::IDevice {
         : mName(name), mOperationResolver(operationResolver) {
         android::nn::initVLogMask();
     }
-    ~SampleDriver() override {}
     hal::Return<void> getCapabilities(getCapabilities_cb cb) override;
     hal::Return<void> getCapabilities_1_1(getCapabilities_1_1_cb cb) override;
     hal::Return<void> getCapabilities_1_2(getCapabilities_1_2_cb cb) override;
@@ -56,31 +57,39 @@ class SampleDriver : public hal::IDevice {
     hal::Return<void> getSupportedOperations_1_2(const hal::V1_2::Model& model,
                                                  getSupportedOperations_1_2_cb cb) override;
     hal::Return<void> getNumberOfCacheFilesNeeded(getNumberOfCacheFilesNeeded_cb cb) override;
-    hal::Return<hal::ErrorStatus> prepareModel(
+    hal::Return<void> supportsDeadlines(supportsDeadlines_cb cb) override;
+    hal::Return<hal::V1_0::ErrorStatus> prepareModel(
             const hal::V1_0::Model& model,
             const sp<hal::V1_0::IPreparedModelCallback>& callback) override;
-    hal::Return<hal::ErrorStatus> prepareModel_1_1(
+    hal::Return<hal::V1_0::ErrorStatus> prepareModel_1_1(
             const hal::V1_1::Model& model, hal::ExecutionPreference preference,
             const sp<hal::V1_0::IPreparedModelCallback>& callback) override;
-    hal::Return<hal::ErrorStatus> prepareModel_1_2(
+    hal::Return<hal::V1_0::ErrorStatus> prepareModel_1_2(
             const hal::V1_2::Model& model, hal::ExecutionPreference preference,
             const hal::hidl_vec<hal::hidl_handle>& modelCache,
             const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token,
             const sp<hal::V1_2::IPreparedModelCallback>& callback) override;
-    hal::Return<hal::ErrorStatus> prepareModel_1_3(
+    hal::Return<hal::V1_3::ErrorStatus> prepareModel_1_3(
             const hal::V1_3::Model& model, hal::ExecutionPreference preference,
+            hal::Priority priority, const hal::OptionalTimePoint& deadline,
             const hal::hidl_vec<hal::hidl_handle>& modelCache,
             const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token,
             const sp<hal::V1_3::IPreparedModelCallback>& callback) override;
-    hal::Return<hal::ErrorStatus> prepareModelFromCache(
+    hal::Return<hal::V1_0::ErrorStatus> prepareModelFromCache(
             const hal::hidl_vec<hal::hidl_handle>& modelCache,
             const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token,
             const sp<hal::V1_2::IPreparedModelCallback>& callback) override;
-    hal::Return<hal::ErrorStatus> prepareModelFromCache_1_3(
+    hal::Return<hal::V1_3::ErrorStatus> prepareModelFromCache_1_3(
+            hal::Priority priority, const hal::OptionalTimePoint& deadline,
             const hal::hidl_vec<hal::hidl_handle>& modelCache,
             const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token,
             const sp<hal::V1_3::IPreparedModelCallback>& callback) override;
     hal::Return<hal::DeviceStatus> getStatus() override;
+    hal::Return<void> allocate(const hal::V1_3::BufferDesc& desc,
+                               const hal::hidl_vec<sp<hal::V1_3::IPreparedModel>>& preparedModels,
+                               const hal::hidl_vec<hal::V1_3::BufferRole>& inputRoles,
+                               const hal::hidl_vec<hal::V1_3::BufferRole>& outputRoles,
+                               allocate_cb cb) override;
 
     // Starts and runs the driver service.  Typically called from main().
     // This will return only once the service shuts down.
@@ -96,23 +105,32 @@ class SampleDriver : public hal::IDevice {
 class SamplePreparedModel : public hal::IPreparedModel {
    public:
     SamplePreparedModel(const hal::Model& model, const SampleDriver* driver,
-                        hal::ExecutionPreference preference)
-        : mModel(model), mDriver(driver), kPreference(preference) {}
-    ~SamplePreparedModel() override {}
+                        hal::ExecutionPreference preference, uid_t userId, hal::Priority priority)
+        : mModel(model),
+          mDriver(driver),
+          kPreference(preference),
+          kUserId(userId),
+          kPriority(priority) {
+        (void)kUserId;
+        (void)kPriority;
+    }
     bool initialize();
-    hal::Return<hal::ErrorStatus> execute(
-            const hal::Request& request,
+    hal::Return<hal::V1_0::ErrorStatus> execute(
+            const hal::V1_0::Request& request,
             const sp<hal::V1_0::IExecutionCallback>& callback) override;
-    hal::Return<hal::ErrorStatus> execute_1_2(
-            const hal::Request& request, hal::MeasureTiming measure,
+    hal::Return<hal::V1_0::ErrorStatus> execute_1_2(
+            const hal::V1_0::Request& request, hal::MeasureTiming measure,
             const sp<hal::V1_2::IExecutionCallback>& callback) override;
-    hal::Return<hal::ErrorStatus> execute_1_3(
-            const hal::Request& request, hal::MeasureTiming measure,
-            const sp<hal::V1_2::IExecutionCallback>& callback) override;
-    hal::Return<void> executeSynchronously(const hal::Request& request, hal::MeasureTiming measure,
+    hal::Return<hal::V1_3::ErrorStatus> execute_1_3(
+            const hal::V1_3::Request& request, hal::MeasureTiming measure,
+            const hal::OptionalTimePoint& deadline,
+            const sp<hal::V1_3::IExecutionCallback>& callback) override;
+    hal::Return<void> executeSynchronously(const hal::V1_0::Request& request,
+                                           hal::MeasureTiming measure,
                                            executeSynchronously_cb cb) override;
-    hal::Return<void> executeSynchronously_1_3(const hal::Request& request,
+    hal::Return<void> executeSynchronously_1_3(const hal::V1_3::Request& request,
                                                hal::MeasureTiming measure,
+                                               const hal::OptionalTimePoint& deadline,
                                                executeSynchronously_1_3_cb cb) override;
     hal::Return<void> configureExecutionBurst(
             const sp<hal::V1_2::IBurstCallback>& callback,
@@ -125,6 +143,8 @@ class SamplePreparedModel : public hal::IPreparedModel {
     const SampleDriver* mDriver;
     std::vector<RunTimePoolInfo> mPoolInfos;
     const hal::ExecutionPreference kPreference;
+    const uid_t kUserId;
+    const hal::Priority kPriority;
 };
 
 }  // namespace sample_driver

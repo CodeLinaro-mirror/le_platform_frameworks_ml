@@ -30,6 +30,7 @@
 #include <android/hardware/neuralnetworks/1.2/IPreparedModelCallback.h>
 #include <android/hardware/neuralnetworks/1.2/types.h>
 #include <android/hardware/neuralnetworks/1.3/IDevice.h>
+#include <android/hardware/neuralnetworks/1.3/IExecutionCallback.h>
 #include <android/hardware/neuralnetworks/1.3/IPreparedModel.h>
 #include <android/hardware/neuralnetworks/1.3/IPreparedModelCallback.h>
 #include <android/hardware/neuralnetworks/1.3/types.h>
@@ -60,11 +61,8 @@ namespace V1_3 = hardware::neuralnetworks::V1_3;
 
 using V1_0::DataLocation;
 using V1_0::DeviceStatus;
-using V1_0::ErrorStatus;
 using V1_0::FusedActivationFunc;
-using V1_0::OperandLifeTime;
 using V1_0::PerformanceInfo;
-using V1_0::Request;
 using V1_0::RequestArgument;
 using V1_1::ExecutionPreference;
 using V1_2::Constant;
@@ -74,26 +72,39 @@ using V1_2::FmqRequestDatum;
 using V1_2::FmqResultDatum;
 using V1_2::IBurstCallback;
 using V1_2::IBurstContext;
-using V1_2::IExecutionCallback;
 using V1_2::MeasureTiming;
-using V1_2::OperationTypeRange;
 using V1_2::OutputShape;
 using V1_2::SymmPerChannelQuantParams;
 using V1_2::Timing;
+using V1_3::BufferDesc;
+using V1_3::BufferRole;
 using V1_3::Capabilities;
+using V1_3::ErrorStatus;
+using V1_3::IBuffer;
 using V1_3::IDevice;
+using V1_3::IExecutionCallback;
 using V1_3::IPreparedModel;
 using V1_3::IPreparedModelCallback;
 using V1_3::Model;
 using V1_3::Operand;
+using V1_3::OperandLifeTime;
 using V1_3::OperandType;
 using V1_3::OperandTypeRange;
 using V1_3::Operation;
 using V1_3::OperationType;
+using V1_3::OperationTypeRange;
+using V1_3::OptionalTimePoint;
+using V1_3::Priority;
+using V1_3::Request;
+using V1_3::Subgraph;
+using ExtensionNameAndPrefix = V1_2::Model::ExtensionNameAndPrefix;
+using ExtensionTypeEncoding = V1_2::Model::ExtensionTypeEncoding;
 
 using CacheToken =
         hardware::hidl_array<uint8_t, static_cast<uint32_t>(Constant::BYTE_SIZE_OF_CACHE_TOKEN)>;
 using ModelFactory = std::function<Model()>;
+
+inline constexpr Priority kDefaultPriority = Priority::MEDIUM;
 
 }  // namespace android::nn::hal
 

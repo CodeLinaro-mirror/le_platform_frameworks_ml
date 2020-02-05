@@ -74,11 +74,17 @@ enum class TestOperandType {
 
 enum class TestOperandLifeTime {
     TEMPORARY_VARIABLE = 0,
-    MODEL_INPUT = 1,
-    MODEL_OUTPUT = 2,
+    SUBGRAPH_INPUT = 1,
+    SUBGRAPH_OUTPUT = 2,
     CONSTANT_COPY = 3,
     CONSTANT_REFERENCE = 4,
     NO_VALUE = 5,
+    // DEPRECATED. Use SUBGRAPH_INPUT.
+    // This value is used in pre-1.3 VTS tests.
+    MODEL_INPUT = SUBGRAPH_INPUT,
+    // DEPRECATED. Use SUBGRAPH_OUTPUT.
+    // This value is used in pre-1.3 VTS tests.
+    MODEL_OUTPUT = SUBGRAPH_OUTPUT,
 };
 
 enum class TestOperationType {
@@ -177,6 +183,7 @@ enum class TestOperationType {
     UNIDIRECTIONAL_SEQUENCE_LSTM = 92,
     UNIDIRECTIONAL_SEQUENCE_RNN = 93,
     RESIZE_NEAREST_NEIGHBOR = 94,
+    QUANTIZED_LSTM = 95,
 };
 
 enum class TestHalVersion { UNKNOWN, V1_0, V1_1, V1_2, V1_3 };
@@ -257,11 +264,11 @@ struct TestOperand {
     TestOperandLifeTime lifetime;
     TestSymmPerChannelQuantParams channelQuant;
 
-    // For MODEL_OUTPUT only. Set to true to skip the accuracy check on this operand.
+    // For SUBGRAPH_OUTPUT only. Set to true to skip the accuracy check on this operand.
     bool isIgnored = false;
 
-    // For CONSTANT_COPY/REFERENCE and MODEL_INPUT, this is the data set in model and request.
-    // For MODEL_OUTPUT, this is the expected results.
+    // For CONSTANT_COPY/REFERENCE and SUBGRAPH_INPUT, this is the data set in model and request.
+    // For SUBGRAPH_OUTPUT, this is the expected results.
     // For TEMPORARY_VARIABLE and NO_VALUE, this is nullptr.
     TestBuffer data;
 };
@@ -302,10 +309,40 @@ struct TestModel {
         return newTestModel;
     }
 
-    bool hasQuant8AsymmOperands() const {
-        for (const TestOperand& operand : operands) {
-            if (operand.type == test_helper::TestOperandType::TENSOR_QUANT8_ASYMM) {
-                return true;
+    bool hasQuant8CoupledOperands() const {
+        for (const TestOperation& operation : operations) {
+            /*
+             *  There are several ops that are exceptions to the general quant8
+             *  types coupling:
+             *  HASHTABLE_LOOKUP -- due to legacy reasons uses
+             *    TENSOR_QUANT8_ASYMM tensor as if it was TENSOR_BOOL. It
+             *    doesn't make sense to have coupling in this case.
+             *  LSH_PROJECTION -- hashes an input tensor treating it as raw
+             *    bytes. We can't expect same results for coupled inputs.
+             *  PAD_V2 -- pad_value is set using int32 scalar, so coupling
+             *    produces a wrong result.
+             *  CAST -- converts tensors without taking into account input's
+             *    scale and zero point. Coupled models shouldn't produce same
+             *    results.
+             *  QUANTIZED_16BIT_LSTM -- the op is made for a specific use case,
+             *    supporting signed quantization is not worth the compications.
+             */
+            if (operation.type == TestOperationType::HASHTABLE_LOOKUP ||
+                operation.type == TestOperationType::LSH_PROJECTION ||
+                operation.type == TestOperationType::PAD_V2 ||
+                operation.type == TestOperationType::CAST ||
+                operation.type == TestOperationType::QUANTIZED_16BIT_LSTM) {
+                continue;
+            }
+            for (const auto operandIndex : operation.inputs) {
+                if (operands[operandIndex].type == TestOperandType::TENSOR_QUANT8_ASYMM) {
+                    return true;
+                }
+            }
+            for (const auto operandIndex : operation.outputs) {
+                if (operands[operandIndex].type == TestOperandType::TENSOR_QUANT8_ASYMM) {
+                    return true;
+                }
             }
         }
         return false;

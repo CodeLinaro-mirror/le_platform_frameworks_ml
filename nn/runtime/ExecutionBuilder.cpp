@@ -19,11 +19,13 @@
 #include "ExecutionBuilder.h"
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -138,13 +140,17 @@ int ExecutionBuilder::setInputFromMemory(uint32_t index, const ANeuralNetworksOp
                             "ANeuralNetworksExecution_setInputFromMemory", false)) {
         return ANEURALNETWORKS_BAD_DATA;
     }
-    // Both offset & length must be zero for Non-BLOB format AHardwareBuffer.
-    if (memory->getHidlMemory().name() == "hardware_buffer" && (offset != 0 || length != 0)) {
-        LOG(ERROR) << "ANeuralNetworksExecution_setInputFromMemory has non-zero offset and length"
-                   << " for Non-BLOB format AHardwareBuffer.";
+    if (!memory->getValidator().validate(mCompilation, IOType::INPUT, index, type, offset,
+                                         length)) {
         return ANEURALNETWORKS_BAD_DATA;
-    } else if (!memory->validateSize(offset, length)) {
-        return ANEURALNETWORKS_BAD_DATA;
+    }
+    // For some types of memory, e.g. MemoryAshmem allocated from ANNMemory_createFromDesc, we
+    // allow the client to specify offset == 0 && length == 0 indicating that the entire memory
+    // region is used. We update the length here because the drivers are still expecting a real
+    // length. For other memories that do not allow this semantic, it is checked in
+    // MemoryValidatorBase::validate before reaching here.
+    if (memory->getHidlMemory().valid() && offset == 0 && length == 0) {
+        length = memory->getHidlMemory().size();
     }
     // TODO validate the rest
     uint32_t poolIndex = mMemories.add(memory);
@@ -195,13 +201,17 @@ int ExecutionBuilder::setOutputFromMemory(uint32_t index, const ANeuralNetworksO
                             "ANeuralNetworksExecution_setOutputFromMemory", true)) {
         return ANEURALNETWORKS_BAD_DATA;
     }
-    // Both offset & length must be zero for Non-BLOB format AHardwareBuffer.
-    if (memory->getHidlMemory().name() == "hardware_buffer" && (offset != 0 || length != 0)) {
-        LOG(ERROR) << "ANeuralNetworksExecution_setOutputFromMemory has non-zero offset and length"
-                   << " for Non-BLOB format AHardwareBuffer.";
+    if (!memory->getValidator().validate(mCompilation, IOType::OUTPUT, index, type, offset,
+                                         length)) {
         return ANEURALNETWORKS_BAD_DATA;
-    } else if (!memory->validateSize(offset, length)) {
-        return ANEURALNETWORKS_BAD_DATA;
+    }
+    // For some types of memory, e.g. MemoryAshmem allocated from ANNMemory_createFromDesc, we
+    // allow the client to specify offset == 0 && length == 0 indicating that the entire memory
+    // region is used. We update the length here because the drivers are still expecting a real
+    // length. For other memories that do not allow this semantic, it is checked in
+    // MemoryValidatorBase::validate before reaching here.
+    if (memory->getHidlMemory().valid() && offset == 0 && length == 0) {
+        length = memory->getHidlMemory().size();
     }
     // TODO validate the rest
     uint32_t poolIndex = mMemories.add(memory);
@@ -256,6 +266,32 @@ int ExecutionBuilder::getDuration(int32_t durationCode, uint64_t* duration) cons
 
     VLOG(EXECUTION) << "getDuration(" << durationCode << "): " << *duration;
     return ANEURALNETWORKS_NO_ERROR;
+}
+
+int ExecutionBuilder::setTimeoutDuration(uint64_t duration) {
+    if (!mCompilation->mExplicitDeviceList || (mCompilation->mDevices.size() != 1)) {
+        LOG(ERROR) << "ANeuralNetworksExecution_setTimeout called on an ANeuralNetworksExecution "
+                      "created from an ANeuralNetworksCompilation that was not created by "
+                      "ANeuralNetworksCompilation_createForDevices with numDevices = 1";
+        return ANEURALNETWORKS_BAD_DATA;
+    }
+    const auto& device = mCompilation->mDevices.front();
+    const bool supportsExecutionDeadline = device->supportsDeadlines().second;
+    if (!supportsExecutionDeadline) {
+        LOG(ERROR) << "ANeuralNetworksExecution_setTimeout called on device that does not support "
+                      "execution timeouts.";
+        return ANEURALNETWORKS_BAD_DATA;
+    }
+    if (mStarted) {
+        LOG(ERROR) << "ANeuralNetworksExecution_setTimeout called after the execution has started.";
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    mTimeoutDuration = duration;
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
+std::optional<uint64_t> ExecutionBuilder::getTimeoutDuration() const {
+    return mTimeoutDuration;
 }
 
 int ExecutionBuilder::getOutputOperandDimensions(uint32_t index, uint32_t* dimensions) {
@@ -489,6 +525,11 @@ int ExecutionBuilder::compute(sp<ExecutionCallback>* synchronizationCallback,
         if (p.state == ModelArgumentInfo::UNSPECIFIED) {
             LOG(ERROR) << "ANeuralNetworksExecution_" << name() << " not all inputs specified";
             return ANEURALNETWORKS_BAD_DATA;
+        } else if (p.state == ModelArgumentInfo::MEMORY) {
+            const Memory* memory = mMemories[p.locationAndLength.poolIndex];
+            if (!memory->getValidator().validateInputDimensions(p.dimensions)) {
+                return ANEURALNETWORKS_OP_FAILED;
+            }
         }
     }
     for (auto& p : mOutputs) {
@@ -585,13 +626,29 @@ bool ExecutionBuilder::updateOutputShapes(const std::vector<OutputShape>& output
     return true;
 }
 
-ErrorStatus ExecutionBuilder::finish(ErrorStatus, const std::vector<OutputShape>& outputShapes) {
+bool ExecutionBuilder::updateMemories() {
+    for (const auto& output : mOutputs) {
+        if (output.state != ModelArgumentInfo::MEMORY) continue;
+        const Memory* memory = mMemories[output.locationAndLength.poolIndex];
+        NN_RET_CHECK(memory->getValidator().updateMetadata({.dimensions = output.dimensions}));
+    }
+    return true;
+}
+
+ErrorStatus ExecutionBuilder::finish(ErrorStatus status,
+                                     const std::vector<OutputShape>& outputShapes) {
     CHECK(!mFinished) << "ExecutionBuilder::finish is called twice";
     mFinished = true;
-    if (!updateOutputShapes(outputShapes)) {
-        return ErrorStatus::GENERAL_FAILURE;
+    if (!updateOutputShapes(outputShapes) || !updateMemories()) {
+        status = ErrorStatus::GENERAL_FAILURE;
     }
-    return ErrorStatus::NONE;
+    bool success = status == ErrorStatus::NONE;
+    for (const auto& output : mOutputs) {
+        if (output.state != ModelArgumentInfo::MEMORY) continue;
+        const Memory* memory = mMemories[output.locationAndLength.poolIndex];
+        memory->getValidator().setInitialized(success);
+    }
+    return status;
 }
 
 bool StepExecutor::updateOutputShapes(const std::vector<OutputShape>& from,
@@ -600,7 +657,7 @@ bool StepExecutor::updateOutputShapes(const std::vector<OutputShape>& from,
         return true;
     }
     if (mExecutionStep != nullptr) {
-        const auto& indexMapping = mExecutionStep->getOutputIndexSubModelToFromModel();
+        const auto& indexMapping = mExecutionStep->getOutputIndexStepModelToMainModel();
         NN_RET_CHECK_LE(indexMapping.size(), from.size());
         for (uint32_t i = 0, e = indexMapping.size(); i < e; i++) {
             uint32_t toIndex = indexMapping[i];
@@ -710,8 +767,12 @@ std::tuple<int, std::vector<OutputShape>, Timing> StepExecutor::compute(
     }
 
     const MeasureTiming measure = measureTiming(mExecutionBuilder);
-    const auto [n, outputShapes, timing] =
-            mPreparedModel->execute(mInputs, mOutputs, mMemories, burstController, measure);
+    const auto [timePointN, deadline] = makeTimePoint(mExecutionBuilder->getTimeoutDuration());
+    if (timePointN != ANEURALNETWORKS_NO_ERROR) {
+        return {timePointN, {}, kNoTiming};
+    }
+    const auto [n, outputShapes, timing] = mPreparedModel->execute(
+            mInputs, mOutputs, mMemories, burstController, measure, deadline);
     mExecutionBuilder->reportTiming(timing);
 
     return {n, std::move(outputShapes), timing};
@@ -724,11 +785,14 @@ std::tuple<int, std::vector<OutputShape>, Timing> StepExecutor::computeOnCpuFall
     mDevice = DeviceManager::getCpuDevice();
     mPreparedModel = nullptr;
     const ModelFactory makeModel = [this] { return mModel->makeHidlModel(); };
-    // TODO: Propagate user preference to this point instead of using default value of
-    // ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER.
+    // TODO: Propagate user preference and compilation priority to this point instead of using
+    // default values of ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER and
+    // ANEURALNETWORKS_PRIORITY_MEDIUM
     const ExecutionPreference preference =
             static_cast<ExecutionPreference>(ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER);
-    const auto [n, preparedModel] = mDevice->prepareModel(makeModel, preference, {}, {});
+    const Priority priority = convertToHalPriority(ANEURALNETWORKS_PRIORITY_DEFAULT);
+    const auto [n, preparedModel] =
+            mDevice->prepareModel(makeModel, preference, priority, {}, {}, {});
     mPreparedModel = preparedModel;
     if (n != ANEURALNETWORKS_NO_ERROR) {
         return {n, {}, kNoTiming};

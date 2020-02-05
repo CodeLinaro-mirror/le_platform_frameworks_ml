@@ -17,11 +17,14 @@
 #ifndef ANDROID_FRAMEWORKS_ML_NN_RUNTIME_COMPILATION_BUILDER_H
 #define ANDROID_FRAMEWORKS_ML_NN_RUNTIME_COMPILATION_BUILDER_H
 
+#include <chrono>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
 #include "ExecutionPlan.h"
 #include "NeuralNetworks.h"
-
-#include <memory>
-#include <vector>
 
 namespace android {
 namespace nn {
@@ -48,11 +51,20 @@ class CompilationBuilder {
 
     int setCaching(const std::string& cacheDir, const uint8_t* token);
 
+    int setPriority(int32_t priority);
+
+    int setTimeoutDuration(uint64_t duration);
+
     int finish();
 
     int createExecution(ExecutionBuilder** execution);
 
     int createBurst(BurstBuilder** burst);
+
+    const ModelBuilder* getModel() const { return mModel; }
+
+    int forEachStepRoleOfInput(uint32_t index, const StepRoleCallback& callback) const;
+    int forEachStepRoleOfOutput(uint32_t index, const StepRoleCallback& callback) const;
 
     const ExecutionPlan& forTest_getExecutionPlan() const { return mPlan; }
 
@@ -86,6 +98,12 @@ class CompilationBuilder {
     std::string mCacheDir;
     uint8_t mToken[ANEURALNETWORKS_BYTE_SIZE_OF_CACHE_TOKEN];
     bool mIsCacheInfoProvided = false;
+
+    // Compilation priority information.
+    int32_t mPriority = ANEURALNETWORKS_PRIORITY_DEFAULT;
+
+    // Amount of time to complete or abort the execution.
+    std::optional<uint64_t> mTimeoutDuration;
 };
 
 }  // namespace nn

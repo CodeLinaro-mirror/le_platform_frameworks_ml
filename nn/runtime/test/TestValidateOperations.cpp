@@ -666,6 +666,10 @@ TEST(OperationValidationTest, MUL_quant8_signed) {
     simpleMathOpTest(ANEURALNETWORKS_MUL, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED);
 }
 
+TEST(OperationValidationTest, MUL_int32) {
+    simpleMathOpTest(ANEURALNETWORKS_MUL, ANEURALNETWORKS_TENSOR_INT32);
+}
+
 TEST(OperationValidationTest, SUB_float16) {
     simpleMathOpTest(ANEURALNETWORKS_SUB, ANEURALNETWORKS_TENSOR_FLOAT16);
 }
@@ -682,12 +686,20 @@ TEST(OperationValidationTest, SUB_quant8_signed) {
     simpleMathOpTest(ANEURALNETWORKS_SUB, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED);
 }
 
+TEST(OperationValidationTest, SUB_int32) {
+    simpleMathOpTest(ANEURALNETWORKS_SUB, ANEURALNETWORKS_TENSOR_INT32);
+}
+
 TEST(OperationValidationTest, DIV_float16) {
     simpleMathOpTest(ANEURALNETWORKS_DIV, ANEURALNETWORKS_TENSOR_FLOAT16);
 }
 
 TEST(OperationValidationTest, DIV_float32) {
     simpleMathOpTest(ANEURALNETWORKS_DIV, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
+TEST(OperationValidationTest, DIV_int32) {
+    simpleMathOpTest(ANEURALNETWORKS_DIV, ANEURALNETWORKS_TENSOR_INT32);
 }
 
 TEST(OperationValidationTest, MUL_quant8_bad_output_scale) {
@@ -777,6 +789,10 @@ TEST(OperationValidationTest, ABS_float32) {
     activationOpTest(ANEURALNETWORKS_ABS, ANEURALNETWORKS_TENSOR_FLOAT32);
 }
 
+TEST(OperationValidationTest, ABS_int32) {
+    activationOpTest(ANEURALNETWORKS_ABS, ANEURALNETWORKS_TENSOR_INT32);
+}
+
 TEST(OperationValidationTest, EXP_float16) {
     activationOpTest(ANEURALNETWORKS_EXP, ANEURALNETWORKS_TENSOR_FLOAT16);
 }
@@ -853,6 +869,10 @@ TEST(OperationValidationTest, TANH_quant8) {
     activationOpTest(ANEURALNETWORKS_TANH, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
 }
 
+TEST(OperationValidationTest, TANH_quant8_signed) {
+    activationOpTest(ANEURALNETWORKS_TANH, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED);
+}
+
 TEST(OperationValidationTest, RELU_float16) {
     activationOpTest(ANEURALNETWORKS_RELU, ANEURALNETWORKS_TENSOR_FLOAT16);
 }
@@ -877,14 +897,6 @@ TEST(OperationValidationTest, RELU6_float32) {
     activationOpTest(ANEURALNETWORKS_RELU, ANEURALNETWORKS_TENSOR_FLOAT32);
 }
 
-TEST(OperationValidationTest, LOGISTIC_float16) {
-    activationOpTest(ANEURALNETWORKS_LOGISTIC, ANEURALNETWORKS_TENSOR_FLOAT16);
-}
-
-TEST(OperationValidationTest, LOGISTIC_float32) {
-    activationOpTest(ANEURALNETWORKS_LOGISTIC, ANEURALNETWORKS_TENSOR_FLOAT32);
-}
-
 TEST(OperationValidationTest, RELU_quant8) {
     activationOpTest(ANEURALNETWORKS_RELU, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
 }
@@ -897,8 +909,32 @@ TEST(OperationValidationTest, RELU6_quant8) {
     activationOpTest(ANEURALNETWORKS_RELU, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
 }
 
+TEST(OperationValidationTest, RELU_quant8_signed) {
+    activationOpTest(ANEURALNETWORKS_RELU, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED);
+}
+
+TEST(OperationValidationTest, RELU1_quant8_signed) {
+    activationOpTest(ANEURALNETWORKS_RELU, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED);
+}
+
+TEST(OperationValidationTest, RELU6_quant8_signed) {
+    activationOpTest(ANEURALNETWORKS_RELU, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED);
+}
+
+TEST(OperationValidationTest, LOGISTIC_float16) {
+    activationOpTest(ANEURALNETWORKS_LOGISTIC, ANEURALNETWORKS_TENSOR_FLOAT16);
+}
+
+TEST(OperationValidationTest, LOGISTIC_float32) {
+    activationOpTest(ANEURALNETWORKS_LOGISTIC, ANEURALNETWORKS_TENSOR_FLOAT32);
+}
+
 TEST(OperationValidationTest, LOGISTIC_quant8) {
     activationOpTest(ANEURALNETWORKS_LOGISTIC, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM);
+}
+
+TEST(OperationValidationTest, LOGISTIC_quant8_signed) {
+    activationOpTest(ANEURALNETWORKS_LOGISTIC, ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED);
 }
 
 void reshapeOpTest(int32_t inputOperandCode) {
@@ -2514,6 +2550,11 @@ TEST(OperationValidationTest, HEATMAP_MAX_KEYPOINT_quant) {
                              ANEURALNETWORKS_TENSOR_QUANT16_ASYMM);
 }
 
+TEST(OperationValidationTest, HEATMAP_MAX_KEYPOINT_quant_signed) {
+    heatmapMaxKeypointOpTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED,
+                             ANEURALNETWORKS_TENSOR_QUANT16_ASYMM);
+}
+
 void instanceNormalizationOpTest(int32_t inputOperandType) {
     SCOPED_TRACE(inputOperandType);
     uint32_t inputDims[4] = {4, 4, 4, 4};
@@ -3518,6 +3559,126 @@ TEST(OperationValidationTest, RESIZE_NEAREST_NEIGHBOR_quant8) {
 TEST(OperationValidationTest, RESIZE_NEAREST_NEIGHBOR_quant8_signed) {
     resizeNearestNeighborTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED, ANEURALNETWORKS_INT32);
     resizeNearestNeighborTest(ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED, ANEURALNETWORKS_FLOAT32);
+}
+
+TEST(OperationValidationTest, QUANTIZED_LSTM) {
+    uint32_t oneDimensional[1] = {5};
+    uint32_t twoDimensional[2] = {5, 5};
+
+    ANeuralNetworksOperandType quant8AsymSignedTensor2D = {
+            .type = ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED,
+            .dimensionCount = 2,
+            .dimensions = twoDimensional,
+            .scale = 0.0078125,
+            .zeroPoint = 0,
+    };
+    ANeuralNetworksOperandType quant8SymTensor2D = {
+            .type = ANEURALNETWORKS_TENSOR_QUANT8_SYMM,
+            .dimensionCount = 2,
+            .dimensions = twoDimensional,
+            .scale = 0.0078125,
+            .zeroPoint = 0,
+    };
+    ANeuralNetworksOperandType quant16SymTensor1D = {
+            .type = ANEURALNETWORKS_TENSOR_QUANT16_SYMM,
+            .dimensionCount = 1,
+            .dimensions = oneDimensional,
+            .scale = 1.0,
+            .zeroPoint = 0,
+    };
+    ANeuralNetworksOperandType quant16SymTensor2D = {
+            .type = ANEURALNETWORKS_TENSOR_QUANT16_SYMM,
+            .dimensionCount = 2,
+            .dimensions = twoDimensional,
+            .scale = 1.0,
+            .zeroPoint = 0,
+    };
+    ANeuralNetworksOperandType int32Tensor1D = {
+            .type = ANEURALNETWORKS_TENSOR_INT32,
+            .dimensionCount = 1,
+            .dimensions = oneDimensional,
+            .scale = 4.65661e-08,
+            .zeroPoint = 0,
+    };
+    ANeuralNetworksOperandType int32Scalar = {
+            .type = ANEURALNETWORKS_INT32,
+    };
+    ANeuralNetworksOperandType float32Scalar = {
+            .type = ANEURALNETWORKS_FLOAT32,
+    };
+
+    ANeuralNetworksOperandType input = quant8AsymSignedTensor2D;
+    ANeuralNetworksOperandType input_to_input_weights = quant8SymTensor2D;
+    ANeuralNetworksOperandType input_to_forget_weights = quant8SymTensor2D;
+    ANeuralNetworksOperandType input_to_cell_weights = quant8SymTensor2D;
+    ANeuralNetworksOperandType input_to_output_weights = quant8SymTensor2D;
+    ANeuralNetworksOperandType recurrent_to_input_weights = quant8SymTensor2D;
+    ANeuralNetworksOperandType recurrent_to_forget_weights = quant8SymTensor2D;
+    ANeuralNetworksOperandType recurrent_to_cell_weights = quant8SymTensor2D;
+    ANeuralNetworksOperandType recurrent_to_output_weights = quant8SymTensor2D;
+    ANeuralNetworksOperandType cell_to_input_weights = quant16SymTensor2D;
+    ANeuralNetworksOperandType cell_to_forget_weights = quant16SymTensor2D;
+    ANeuralNetworksOperandType cell_to_output_weights = quant16SymTensor2D;
+    ANeuralNetworksOperandType input_gate_bias = int32Tensor1D;
+    ANeuralNetworksOperandType forget_gate_bias = int32Tensor1D;
+    ANeuralNetworksOperandType cell_gate_bias = int32Tensor1D;
+    ANeuralNetworksOperandType output_gate_bias = int32Tensor1D;
+    ANeuralNetworksOperandType projection_weights = quant8SymTensor2D;
+    ANeuralNetworksOperandType projection_bias = int32Tensor1D;
+    ANeuralNetworksOperandType output_state_in = quant8AsymSignedTensor2D;
+    ANeuralNetworksOperandType cell_state_in = quant16SymTensor2D;
+    ANeuralNetworksOperandType input_layer_norm_weights = quant16SymTensor1D;
+    ANeuralNetworksOperandType forget_layer_norm_weights = quant16SymTensor1D;
+    ANeuralNetworksOperandType cell_layer_norm_weights = quant16SymTensor1D;
+    ANeuralNetworksOperandType output_layer_norm_weights = quant16SymTensor1D;
+    ANeuralNetworksOperandType cell_clip = float32Scalar;
+    ANeuralNetworksOperandType projection_clip = float32Scalar;
+    ANeuralNetworksOperandType input_intermediate_scale = float32Scalar;
+    ANeuralNetworksOperandType forget_intermediate_scale = float32Scalar;
+    ANeuralNetworksOperandType cell_intermediate_scale = float32Scalar;
+    ANeuralNetworksOperandType output_intermediate_scale = float32Scalar;
+    ANeuralNetworksOperandType hidden_state_zero_point = int32Scalar;
+    ANeuralNetworksOperandType hidden_state_scale = float32Scalar;
+
+    ANeuralNetworksOperandType output_state_out = quant8AsymSignedTensor2D;
+    ANeuralNetworksOperandType cell_state_out = quant16SymTensor2D;
+    ANeuralNetworksOperandType output = quant8AsymSignedTensor2D;
+
+    OperationTestBase test(ANEURALNETWORKS_QUANTIZED_LSTM,
+                           {input,
+                            input_to_input_weights,
+                            input_to_forget_weights,
+                            input_to_cell_weights,
+                            input_to_output_weights,
+                            recurrent_to_input_weights,
+                            recurrent_to_forget_weights,
+                            recurrent_to_cell_weights,
+                            recurrent_to_output_weights,
+                            cell_to_input_weights,
+                            cell_to_forget_weights,
+                            cell_to_output_weights,
+                            input_gate_bias,
+                            forget_gate_bias,
+                            cell_gate_bias,
+                            output_gate_bias,
+                            projection_weights,
+                            projection_bias,
+                            output_state_in,
+                            cell_state_in,
+                            input_layer_norm_weights,
+                            forget_layer_norm_weights,
+                            cell_layer_norm_weights,
+                            output_layer_norm_weights,
+                            cell_clip,
+                            projection_clip,
+                            input_intermediate_scale,
+                            forget_intermediate_scale,
+                            cell_intermediate_scale,
+                            output_intermediate_scale,
+                            hidden_state_zero_point,
+                            hidden_state_scale},
+                           {output_state_out, cell_state_out, output});
+    test.testOpsValidations();
 }
 
 }  // end namespace
