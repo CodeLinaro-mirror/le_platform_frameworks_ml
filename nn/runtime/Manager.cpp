@@ -480,9 +480,7 @@ DeviceManager::DeviceManager() {
 }
 
 DeviceManager::~DeviceManager() {
-    for (auto &device : mDevices) {
-        device = nullptr;
-    }
+    mDevices.clear();
     for (auto handle : mLibHandles) {
         try {
             if (nullptr != handle) {
@@ -492,6 +490,7 @@ DeviceManager::~DeviceManager() {
             LOG(ERROR) << e.what();
         }
     }
+    mLibHandles.clear();
 }
 
 }  // namespace nn
