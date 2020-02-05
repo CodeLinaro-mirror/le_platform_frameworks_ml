@@ -31,6 +31,7 @@
 #include <android/hardware/neuralnetworks/1.2/types.h>
 #include <android/hardware/neuralnetworks/1.3/IDevice.h>
 #include <android/hardware/neuralnetworks/1.3/IExecutionCallback.h>
+#include <android/hardware/neuralnetworks/1.3/IFencedExecutionCallback.h>
 #include <android/hardware/neuralnetworks/1.3/IPreparedModel.h>
 #include <android/hardware/neuralnetworks/1.3/IPreparedModelCallback.h>
 #include <android/hardware/neuralnetworks/1.3/types.h>
@@ -83,6 +84,7 @@ using V1_3::ErrorStatus;
 using V1_3::IBuffer;
 using V1_3::IDevice;
 using V1_3::IExecutionCallback;
+using V1_3::IFencedExecutionCallback;
 using V1_3::IPreparedModel;
 using V1_3::IPreparedModelCallback;
 using V1_3::Model;
@@ -93,6 +95,7 @@ using V1_3::OperandTypeRange;
 using V1_3::Operation;
 using V1_3::OperationType;
 using V1_3::OperationTypeRange;
+using V1_3::OptionalTimeoutDuration;
 using V1_3::OptionalTimePoint;
 using V1_3::Priority;
 using V1_3::Request;
