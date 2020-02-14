@@ -382,7 +382,7 @@ class VersionedIDevice {
      *       execution. If the buffer was unable to be allocated due to an error, the token must be
      *       0.
      */
-    std::tuple<hal::ErrorStatus, sp<hal::IBuffer>, int32_t> allocate(
+    std::tuple<hal::ErrorStatus, sp<hal::IBuffer>, uint32_t> allocate(
             const hal::BufferDesc& desc,
             const std::vector<std::shared_ptr<VersionedIPreparedModel>>& preparedModels,
             const hal::hidl_vec<hal::BufferRole>& inputRoles,
@@ -411,8 +411,8 @@ class VersionedIDevice {
             const hal::OptionalTimePoint& deadline, const std::string& cacheDir,
             const std::optional<hal::CacheToken>& maybeToken) const;
     std::pair<int, std::shared_ptr<VersionedIPreparedModel>> prepareModelFromCacheInternal(
-            hal::Priority priority, const hal::OptionalTimePoint& deadline,
-            const std::string& cacheDir, const hal::CacheToken& token) const;
+            const hal::OptionalTimePoint& deadline, const std::string& cacheDir,
+            const hal::CacheToken& token) const;
 
     /**
      * This is a utility class for VersionedIDevice that encapsulates a

@@ -37,6 +37,7 @@ namespace test_wrapper {
 
 using wrapper::Event;
 using wrapper::ExecutePreference;
+using wrapper::ExecutePriority;
 using wrapper::ExtensionModel;
 using wrapper::ExtensionOperandParams;
 using wrapper::ExtensionOperandType;
@@ -159,6 +160,13 @@ class Model {
         return index;
     }
 
+    uint32_t addModelOperand(const Model* value) {
+        OperandType operandType(Type::MODEL, {});
+        uint32_t operand = addOperand(&operandType);
+        setOperandValueFromModel(operand, value);
+        return operand;
+    }
+
     void setOperandValue(uint32_t index, const void* buffer, size_t length) {
         if (ANeuralNetworksModel_setOperandValue(mModel, index, buffer, length) !=
             ANEURALNETWORKS_NO_ERROR) {
@@ -176,6 +184,13 @@ class Model {
                                    size_t length) {
         if (ANeuralNetworksModel_setOperandValueFromMemory(mModel, index, memory->get(), offset,
                                                            length) != ANEURALNETWORKS_NO_ERROR) {
+            mValid = false;
+        }
+    }
+
+    void setOperandValueFromModel(uint32_t index, const Model* value) {
+        if (ANeuralNetworksModel_setOperandValueFromModel(mModel, index, value->mModel) !=
+            ANEURALNETWORKS_NO_ERROR) {
             mValid = false;
         }
     }
@@ -252,6 +267,11 @@ class Compilation {
     Result setPreference(ExecutePreference preference) {
         return static_cast<Result>(ANeuralNetworksCompilation_setPreference(
                 mCompilation, static_cast<int32_t>(preference)));
+    }
+
+    Result setPriority(ExecutePriority priority) {
+        return static_cast<Result>(ANeuralNetworksCompilation_setPriority(
+                mCompilation, static_cast<int32_t>(priority)));
     }
 
     Result setCaching(const std::string& cacheDir, const std::vector<uint8_t>& token) {

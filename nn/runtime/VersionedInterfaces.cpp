@@ -1396,8 +1396,7 @@ std::pair<int, std::shared_ptr<VersionedIPreparedModel>> VersionedIDevice::prepa
 }
 
 std::pair<int, std::shared_ptr<VersionedIPreparedModel>>
-VersionedIDevice::prepareModelFromCacheInternal(Priority priority,
-                                                const OptionalTimePoint& deadline,
+VersionedIDevice::prepareModelFromCacheInternal(const OptionalTimePoint& deadline,
                                                 const std::string& cacheDir,
                                                 const CacheToken& token) const {
     // Note that some work within VersionedIDevice will be subtracted from the IPC layer
@@ -1418,10 +1417,10 @@ VersionedIDevice::prepareModelFromCacheInternal(Priority priority,
         const sp<PreparedModelCallback> callback = new PreparedModelCallback();
         const Return<ErrorStatus> ret = recoverable<ErrorStatus, V1_3::IDevice>(
                 __FUNCTION__,
-                [priority, &deadline, &modelCache, &dataCache, &token,
+                [&deadline, &modelCache, &dataCache, &token,
                  &callback](const sp<V1_3::IDevice>& device) {
-                    return device->prepareModelFromCache_1_3(priority, deadline, modelCache,
-                                                             dataCache, token, callback);
+                    return device->prepareModelFromCache_1_3(deadline, modelCache, dataCache, token,
+                                                             callback);
                 },
                 callback);
         if (ret.isDeadObject()) {
@@ -1483,7 +1482,7 @@ std::pair<int, std::shared_ptr<VersionedIPreparedModel>> VersionedIDevice::prepa
     // Attempt to compile from cache if token is present.
     if (maybeToken.has_value()) {
         const auto [n, preparedModel] =
-                prepareModelFromCacheInternal(priority, deadline, cacheDir, *maybeToken);
+                prepareModelFromCacheInternal(deadline, cacheDir, *maybeToken);
         if (n == ANEURALNETWORKS_NO_ERROR) {
             return {n, preparedModel};
         }
@@ -1550,11 +1549,11 @@ const std::string& VersionedIDevice::getName() const {
     return kServiceName;
 }
 
-std::tuple<ErrorStatus, sp<IBuffer>, int32_t> VersionedIDevice::allocate(
+std::tuple<ErrorStatus, sp<IBuffer>, uint32_t> VersionedIDevice::allocate(
         const BufferDesc& desc,
         const std::vector<std::shared_ptr<VersionedIPreparedModel>>& versionedPreparedModels,
         const hidl_vec<BufferRole>& inputRoles, const hidl_vec<BufferRole>& outputRoles) const {
-    const auto kFailure = std::make_tuple<ErrorStatus, sp<IBuffer>, int32_t>(
+    const auto kFailure = std::make_tuple<ErrorStatus, sp<IBuffer>, uint32_t>(
             ErrorStatus::GENERAL_FAILURE, nullptr, 0);
 
     // version 1.3+ HAL
@@ -1567,11 +1566,11 @@ std::tuple<ErrorStatus, sp<IBuffer>, int32_t> VersionedIDevice::allocate(
         std::tuple<ErrorStatus, sp<IBuffer>, int32_t> result;
         const Return<void> ret = recoverable<void, V1_3::IDevice>(
                 __FUNCTION__, [&](const sp<V1_3::IDevice>& device) {
-                    return device->allocate(
-                            desc, preparedModels, inputRoles, outputRoles,
-                            [&result](ErrorStatus error, const sp<IBuffer>& buffer, int32_t token) {
-                                result = {error, buffer, token};
-                            });
+                    return device->allocate(desc, preparedModels, inputRoles, outputRoles,
+                                            [&result](ErrorStatus error, const sp<IBuffer>& buffer,
+                                                      uint32_t token) {
+                                                result = {error, buffer, token};
+                                            });
                 });
         if (!ret.isOk()) {
             LOG(ERROR) << "allocate failure: " << ret.description();
