@@ -129,6 +129,12 @@ class CachingDriver : public sample_driver::SampleDriver {
             cb(V1_0::ErrorStatus::DEVICE_UNAVAILABLE, nullptr);
             return Void();
         }
+        Return<void> executeFenced(const hal::Request&, const hidl_vec<hidl_handle>&, MeasureTiming,
+                                   const OptionalTimePoint&, const OptionalTimeoutDuration&,
+                                   executeFenced_cb cb) {
+            cb(ErrorStatus::DEVICE_UNAVAILABLE, hidl_handle(nullptr), nullptr);
+            return Void();
+        }
     };
 
    public:

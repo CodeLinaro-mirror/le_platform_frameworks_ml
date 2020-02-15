@@ -172,6 +172,35 @@ int ModelBuilder::setOperandValue(uint32_t index, const void* buffer, size_t len
     return ANEURALNETWORKS_NO_ERROR;
 }
 
+int ModelBuilder::setOperandValueFromModel(uint32_t index, const ModelBuilder* value) {
+    VLOG(MODEL) << __func__ << " for operand " << index << " model " << value;
+    if (badState("setOperandValueFromModel")) {
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    if (!value->mCompletedModel) {
+        LOG(ERROR) << "ANeuralNetworksModel_setOperandValueFromModel value model must be finished";
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    if (value->mInvalidModel) {
+        LOG(ERROR) << "ANeuralNetworksModel_setOperandValueFromModel value model is invalid";
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    if (index >= operandCount()) {
+        LOG(ERROR) << "ANeuralNetworksModel_setOperandValueFromModel setting operand " << index
+                   << " of " << operandCount();
+        return ANEURALNETWORKS_BAD_DATA;
+    }
+    Operand& operand = mOperands[index];
+    operand.lifetime = OperandLifeTime::SUBGRAPH;
+    operand.location = {
+            .poolIndex = 0,
+            .offset = static_cast<uint32_t>(mReferencedModels.size()),
+            .length = 0,
+    };
+    mReferencedModels.push_back(value);
+    return ANEURALNETWORKS_NO_ERROR;
+}
+
 int ModelBuilder::setOperandSymmPerChannelQuantParams(
         uint32_t index, const ANeuralNetworksSymmPerChannelQuantParams& channelQuant) {
     if (badState("setOperandSymmPerChannelQuantParams")) {
@@ -339,8 +368,33 @@ int ModelBuilder::addOperation(ANeuralNetworksOperationType type, uint32_t input
             return ANEURALNETWORKS_BAD_DATA;
         }
     }
+
+    auto isValidSubgraphReference = [this](const Operand& modelOperand) -> bool {
+        NN_RET_CHECK(modelOperand.type == OperandType::SUBGRAPH)
+                << "Unexpected operand type: " << toString(modelOperand.type);
+        NN_RET_CHECK_LT(modelOperand.location.offset, referencedModelCount())
+                << "Invalid subgraph model reference";
+        return true;
+    };
+    auto getInputCount = [this](const Operand& modelOperand) {
+        return getReferencedModel(modelOperand)->inputCount();
+    };
+    auto getOutputCount = [this](const Operand& modelOperand) {
+        return getReferencedModel(modelOperand)->outputCount();
+    };
+    auto getInputOperand = [this](const Operand& modelOperand, uint32_t index) {
+        return getReferencedModel(modelOperand)->getInputOperand(index);
+    };
+    auto getOutputOperand = [this](const Operand& modelOperand, uint32_t index) {
+        return getReferencedModel(modelOperand)->getOutputOperand(index);
+    };
     NN_RETURN_IF_ERROR(validateOperation(type, inputCount, inputs, outputCount, outputs, mOperands,
-                                         HalVersion::LATEST));
+                                         HalVersion::LATEST,
+                                         {.isValidSubgraphReference = isValidSubgraphReference,
+                                          .getSubgraphInputCount = getInputCount,
+                                          .getSubgraphOutputCount = getOutputCount,
+                                          .getSubgraphInputOperand = getInputOperand,
+                                          .getSubgraphOutputOperand = getOutputOperand}));
 
     uint32_t operationIndex = operationCount();
     if (operationIndex >= MAX_NUMBER_OF_OPERATIONS) {
