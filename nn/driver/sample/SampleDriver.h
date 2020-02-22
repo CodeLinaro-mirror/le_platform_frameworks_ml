@@ -80,7 +80,7 @@ class SampleDriver : public hal::IDevice {
             const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token,
             const sp<hal::V1_2::IPreparedModelCallback>& callback) override;
     hal::Return<hal::V1_3::ErrorStatus> prepareModelFromCache_1_3(
-            hal::Priority priority, const hal::OptionalTimePoint& deadline,
+            const hal::OptionalTimePoint& deadline,
             const hal::hidl_vec<hal::hidl_handle>& modelCache,
             const hal::hidl_vec<hal::hidl_handle>& dataCache, const hal::CacheToken& token,
             const sp<hal::V1_3::IPreparedModelCallback>& callback) override;
@@ -151,6 +151,24 @@ class SamplePreparedModel : public hal::IPreparedModel {
     const hal::ExecutionPreference kPreference;
     const uid_t kUserId;
     const hal::Priority kPriority;
+};
+
+class SampleFencedExecutionCallback : public hal::IFencedExecutionCallback {
+   public:
+    SampleFencedExecutionCallback(hal::Timing timingSinceLaunch, hal::Timing timingAfterFence,
+                                  hal::ErrorStatus error)
+        : kTimingSinceLaunch(timingSinceLaunch),
+          kTimingAfterFence(timingAfterFence),
+          kErrorStatus(error) {}
+    hal::Return<void> getExecutionInfo(getExecutionInfo_cb callback) override {
+        callback(kErrorStatus, kTimingSinceLaunch, kTimingAfterFence);
+        return hal::Void();
+    }
+
+   private:
+    const hal::Timing kTimingSinceLaunch;
+    const hal::Timing kTimingAfterFence;
+    const hal::ErrorStatus kErrorStatus;
 };
 
 }  // namespace sample_driver

@@ -105,7 +105,7 @@ static std::pair<int, OptionalTimePoint> makeTimePoint(uint64_t duration) {
     const uint64_t nanosecondsAtTimeout = nanosecondsSinceEpoch + duration;
 
     OptionalTimePoint otp;
-    otp.nanoseconds(nanosecondsAtTimeout);
+    otp.nanosecondsSinceEpoch(nanosecondsAtTimeout);
     return {ANEURALNETWORKS_NO_ERROR, otp};
 }
 
@@ -167,7 +167,7 @@ class OperationValidationContext : public IOperationValidationContext {
     uint32_t getNumInputs() const override;
     OperandType getInputType(uint32_t index) const override;
     Shape getInputShape(uint32_t index) const override;
-    const Operand::ExtraParams getInputExtraParams(uint32_t index) const override;
+    const OperandExtraParams getInputExtraParams(uint32_t index) const override;
 
     uint32_t getNumOutputs() const override;
     OperandType getOutputType(uint32_t index) const override;
@@ -222,7 +222,7 @@ Shape OperationValidationContext::getInputShape(uint32_t index) const {
             operand->extraParams};
 }
 
-const Operand::ExtraParams OperationValidationContext::getInputExtraParams(uint32_t index) const {
+const OperandExtraParams OperationValidationContext::getInputExtraParams(uint32_t index) const {
     return getInputOperand(index)->extraParams;
 }
 
@@ -1059,15 +1059,12 @@ int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
         case ANEURALNETWORKS_BIDIRECTIONAL_SEQUENCE_LSTM: {
             std::vector<OperandType> inExpectedTypes;
             auto inputType = operands[inputIndexes[0]].type;
-            std::vector<OperandType> outExpectedTypes{inputType, inputType};
-            std::vector<OperandType> outExpectedTypesMerged{inputType};
             if (inputType != OperandType::TENSOR_FLOAT32 &&
                 inputType != OperandType::TENSOR_FLOAT16) {
                 LOG(ERROR) << "Unsupported input tensor type for operation "
                            << getOperationName(opType);
                 return ANEURALNETWORKS_BAD_DATA;
             }
-            NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, HalVersion::V1_2));
 
             inExpectedTypes = {};
             for (int i = 0; i < 48; ++i) {
@@ -1086,20 +1083,29 @@ int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
                 inExpectedTypes.push_back(inputType);
             }
 
-            if (inputCount != 61 || (outputCount != 1 && outputCount != 2)) {
+            const uint32_t kNumOutputs = 2;
+            const uint32_t kNumOutputsMerged = 1;
+            const uint32_t kNumOutputsWithState = 6;
+            const uint32_t kNumOutputsMergedWithState = 5;
+
+            if (inputCount != 61 ||
+                (outputCount != kNumOutputs && outputCount != kNumOutputsMerged &&
+                 outputCount != kNumOutputsWithState &&
+                 outputCount != kNumOutputsMergedWithState)) {
                 LOG(ERROR) << "Invalid number of input operands (" << inputCount
                            << ", expected 61) or output operands (" << outputCount
-                           << ", expected 1 or 2) for operation " << getOperationName(opType);
+                           << ", expected 1, 2, 5 or 6) for operation " << getOperationName(opType);
                 return ANEURALNETWORKS_BAD_DATA;
             }
+            HalVersion minSupportedHalVersion = HalVersion::V1_2;
+            if (outputCount == kNumOutputsWithState || outputCount == kNumOutputsMergedWithState) {
+                minSupportedHalVersion = HalVersion::V1_3;
+            }
+            NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, minSupportedHalVersion));
+            std::vector<OperandType> outExpectedTypes(outputCount, inputType);
             auto status = validateOperationOperandTypes(operands, inputCount, inputIndexes,
                                                         inExpectedTypes, outputCount, outputIndexes,
                                                         outExpectedTypes);
-            if (status != ANEURALNETWORKS_NO_ERROR) {
-                status = validateOperationOperandTypes(operands, inputCount, inputIndexes,
-                                                       inExpectedTypes, outputCount, outputIndexes,
-                                                       outExpectedTypesMerged);
-            }
             return status;
         }
         case ANEURALNETWORKS_LSTM: {
@@ -2751,26 +2757,6 @@ V1_0::OperandType convertToV1_0(const V1_3::OperandType& operandType) {
     return static_cast<V1_0::OperandType>(operandType);
 }
 
-template <typename InExtraParams, typename OutExtraParams>
-OutExtraParams copyExtraParams(const InExtraParams& extraParams) {
-    OutExtraParams out;
-    switch (extraParams.getDiscriminator()) {
-        case InExtraParams::hidl_discriminator::none: {
-            out.none(extraParams.none());
-        } break;
-        case InExtraParams::hidl_discriminator::channelQuant: {
-            out.channelQuant({
-                    .scales = extraParams.channelQuant().scales,
-                    .channelDim = extraParams.channelQuant().channelDim,
-            });
-        } break;
-        case InExtraParams::hidl_discriminator::extension: {
-            out.extension(extraParams.extension());
-        } break;
-    }
-    return out;
-}
-
 bool compliantWithV1_0(hal::V1_0::OperandLifeTime lifetime) {
     return true;
 }
@@ -2845,8 +2831,7 @@ V1_2::Operand convertToV1_2(const V1_3::Operand& operand) {
             .zeroPoint = operand.zeroPoint,
             .lifetime = static_cast<V1_0::OperandLifeTime>(operand.lifetime),
             .location = operand.location,
-            .extraParams = copyExtraParams<V1_3::Operand::ExtraParams, V1_2::Operand::ExtraParams>(
-                    operand.extraParams)};
+            .extraParams = operand.extraParams};
 }
 
 V1_3::Operand convertToV1_3(const V1_0::Operand& operand) {
@@ -2867,8 +2852,7 @@ V1_3::Operand convertToV1_3(const V1_2::Operand& operand) {
             .zeroPoint = operand.zeroPoint,
             .lifetime = convertToV1_3(operand.lifetime),
             .location = operand.location,
-            .extraParams = copyExtraParams<V1_2::Operand::ExtraParams, V1_3::Operand::ExtraParams>(
-                    operand.extraParams)};
+            .extraParams = operand.extraParams};
 }
 
 V1_3::Operand convertToV1_3(const V1_3::Operand& operand) {
