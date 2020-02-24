@@ -97,7 +97,7 @@ int CompilationBuilder::finish() {
     VLOG(COMPILATION) << "CompilationBuilder::finish with CPU fallback";
     mPlan.reset();
     mPlan.becomeSingleStep(DeviceManager::getCpuDevice(), mModel);
-    return mPlan.finish(mModel, mPreference, mPriority, timeout);
+    return mPlan.finish(mPreference, mPriority, timeout);
 }
 
 int CompilationBuilder::setPreference(int32_t preference) {
@@ -157,14 +157,6 @@ int CompilationBuilder::setTimeoutDuration(uint64_t duration) {
         LOG(ERROR) << "ANeuralNetworksCompilation_setTimeout called on an "
                       "ANeuralNetworksCompilation that was not created by "
                       "ANeuralNetworksCompilation_createForDevices with numDevices = 1";
-        return ANEURALNETWORKS_BAD_DATA;
-    }
-    const auto& device = mDevices.front();
-    const bool supportsCompilationDeadline = device->supportsDeadlines().first;
-    if (!supportsCompilationDeadline) {
-        LOG(ERROR)
-                << "ANeuralNetworksCompilation_setTimeout called on device that does not support "
-                   "compilation timeouts.";
         return ANEURALNETWORKS_BAD_DATA;
     }
     if (duration > 0) {

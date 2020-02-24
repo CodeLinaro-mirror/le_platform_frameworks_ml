@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "CompilationBuilder.h"
+#include "ControlFlow.h"
 #include "CpuExecutor.h"
 #include "ExecutionBurstController.h"
 #include "HalInterfaces.h"
@@ -95,7 +96,12 @@ ExecutionBuilder::ExecutionBuilder(const CompilationBuilder* compilation)
       mPartitioning(compilation->mPartitioning),
       mInputs(mModel->inputCount()),
       mOutputs(mModel->outputCount()) {
-    VLOG(EXECUTION) << "ExecutionBuilder::ExecutionBuilder";
+    VLOG(EXECUTION) << "ExecutionBuilder::ExecutionBuilder with " << mInputs.size()
+                    << " inputs and " << mOutputs.size() << " outputs";
+}
+
+const ModelBuilder* ExecutionBuilder::getSourceModel(uint32_t index) const {
+    return mPlan->getSourceModels().getModel(index);
 }
 
 int ExecutionBuilder::setInput(uint32_t index, const ANeuralNetworksOperandType* type,
@@ -125,7 +131,7 @@ int ExecutionBuilder::setInput(uint32_t index, const ANeuralNetworksOperandType*
 
 int ExecutionBuilder::setInputFromMemory(uint32_t index, const ANeuralNetworksOperandType* type,
                                          const Memory* memory, size_t offset, size_t length) {
-    // Should be similar to StepExecutor::setInputOrOutputFromTemporaryMemory()
+    // Should be similar to StepExecutor::setInputOrOutputFromMemory()
 
     if (mStarted) {
         LOG(ERROR) << "ANeuralNetworksExecution_setInputFromMemory called after the "
@@ -186,7 +192,7 @@ int ExecutionBuilder::setOutput(uint32_t index, const ANeuralNetworksOperandType
 
 int ExecutionBuilder::setOutputFromMemory(uint32_t index, const ANeuralNetworksOperandType* type,
                                           const Memory* memory, size_t offset, size_t length) {
-    // Should be similar to StepExecutor::setInputOrOutputFromTemporaryMemory()
+    // Should be similar to StepExecutor::setInputOrOutputFromMemory()
 
     if (mStarted) {
         LOG(ERROR) << "ANeuralNetworksExecution_setOutputFromMemory called after the "
@@ -314,13 +320,6 @@ int ExecutionBuilder::setTimeoutDuration(uint64_t duration) {
                       "ANeuralNetworksCompilation_createForDevices with numDevices = 1";
         return ANEURALNETWORKS_BAD_DATA;
     }
-    const auto& device = mCompilation->mDevices.front();
-    const bool supportsExecutionDeadline = device->supportsDeadlines().second;
-    if (!supportsExecutionDeadline) {
-        LOG(ERROR) << "ANeuralNetworksExecution_setTimeout called on device that does not support "
-                      "execution timeouts.";
-        return ANEURALNETWORKS_BAD_DATA;
-    }
     if (mStarted) {
         LOG(ERROR) << "ANeuralNetworksExecution_setTimeout called after the execution has started.";
         return ANEURALNETWORKS_BAD_STATE;
@@ -335,6 +334,16 @@ int ExecutionBuilder::setTimeoutDuration(uint64_t duration) {
 
 std::optional<uint64_t> ExecutionBuilder::getTimeoutDuration() const {
     return mTimeoutDuration;
+}
+
+int ExecutionBuilder::setLoopTimeout(uint64_t duration) {
+    if (duration > operation_while::kTimeoutNsMaximum) {
+        LOG(WARNING) << "ANeuralNetworksExecution_setLoopTimeout input exceeds the maximum allowed "
+                     << "duration: " << duration << " > " << operation_while::kTimeoutNsMaximum;
+        duration = operation_while::kTimeoutNsMaximum;
+    }
+    mLoopTimeoutDuration = duration;
+    return ANEURALNETWORKS_NO_ERROR;
 }
 
 int ExecutionBuilder::getOutputOperandDimensions(uint32_t index, uint32_t* dimensions) {
@@ -441,7 +450,7 @@ cpuFallbackPartial(const ExecutionPlan& plan,
 static void asyncStartComputePartitioned(ExecutionBuilder* executionBuilder,
                                          const ExecutionPlan& plan,
                                          std::shared_ptr<ExecutionPlan::Controller> controller,
-                                         bool allowFallback,
+                                         bool allowFallback, const OptionalTimePoint& deadline,
                                          const sp<ExecutionCallback>& executionCallback) {
     CHECK(executionBuilder != nullptr);
     VLOG(EXECUTION) << "ExecutionBuilder::compute (from plan, iteratively)";
@@ -459,7 +468,11 @@ static void asyncStartComputePartitioned(ExecutionBuilder* executionBuilder,
         std::shared_ptr<ExecutionBurstController> burstController;
         int n = plan.next(controller, &executor, &burstController);
         if (n != ANEURALNETWORKS_NO_ERROR) {
-            if (allowFallback) break;
+            // During the interpreted execution of control flow, a loop timeout
+            // might occur in ExecutionPlan::next().
+            bool missedDeadline = n == ANEURALNETWORKS_MISSED_DEADLINE_TRANSIENT ||
+                                  n == ANEURALNETWORKS_MISSED_DEADLINE_PERSISTENT;
+            if (allowFallback && !missedDeadline) break;
             executionCallback->notify(convertResultCodeToErrorStatus(n), {}, kNoTiming);
             return;
         }
@@ -473,7 +486,7 @@ static void asyncStartComputePartitioned(ExecutionBuilder* executionBuilder,
         const bool executorIsCpu = executor->isCpu();
 
         // Attempt to execute a single step of the execution.
-        auto [stepN, stepOutputShapes, stepTiming] = executor->compute(burstController);
+        auto [stepN, stepOutputShapes, stepTiming] = executor->compute(deadline, burstController);
 
         // Update global outputs.
         if (!executor->updateOutputShapes(stepOutputShapes, &outputShapes)) {
@@ -676,14 +689,6 @@ int ExecutionBuilder::computeFenced(const std::vector<int>& waitFor,
                        "ANeuralNetworksCompilation_createForDevices with numDevices = 1";
             return ANEURALNETWORKS_BAD_DATA;
         }
-        const auto& device = mCompilation->mDevices.front();
-        const bool supportsExecutionDeadline = device->supportsDeadlines().second;
-        if (!supportsExecutionDeadline) {
-            LOG(ERROR) << "ANeuralNetworksExecution_startComputeWithDependencies called with "
-                          "non-zero duration on device that does not support "
-                          "execution timeouts.";
-            return ANEURALNETWORKS_BAD_DATA;
-        }
     }
     for (auto& p : mInputs) {
         if (p.state == ModelArgumentInfo::UNSPECIFIED) {
@@ -730,6 +735,9 @@ int ExecutionBuilder::compute(sp<ExecutionCallback>* synchronizationCallback,
         *synchronizationCallback = nullptr;
     }
 
+    const auto [timePointN, deadline] = makeTimePoint(mTimeoutDuration);
+    NN_RETURN_IF_ERROR(timePointN);
+
     // TODO validate that we have full types for all inputs and outputs,
     // that the graph is not cyclic,
 
@@ -774,7 +782,7 @@ int ExecutionBuilder::compute(sp<ExecutionCallback>* synchronizationCallback,
         VLOG(EXECUTION) << "ExecutionBuilder::compute (synchronous API)";
         sp<ExecutionCallback> localSynchronizationCallback = new ExecutionCallback();
         localSynchronizationCallback->setOnFinish(wrappedFinish);
-        asyncStartComputePartitioned(this, *mPlan, controller, allowFallback,
+        asyncStartComputePartitioned(this, *mPlan, controller, allowFallback, deadline,
                                      localSynchronizationCallback);
         localSynchronizationCallback->wait();
         if (mMeasureTiming) {
@@ -795,14 +803,15 @@ int ExecutionBuilder::compute(sp<ExecutionCallback>* synchronizationCallback,
         executionCallback->setOnFinish(wrappedFinish);
         if (DeviceManager::get()->syncExecRuntime()) {
             VLOG(EXECUTION) << "ExecutionBuilder::compute (asynchronous API, non-threaded)";
-            asyncStartComputePartitioned(this, *mPlan, controller, allowFallback,
+            asyncStartComputePartitioned(this, *mPlan, controller, allowFallback, deadline,
                                          executionCallback);
         } else {
             VLOG(EXECUTION) << "ExecutionBuilder::compute (asynchronous API)";
-            std::thread asyncExecution([this, controller, allowFallback, executionCallback] {
-                asyncStartComputePartitioned(this, *mPlan, controller, allowFallback,
-                                             executionCallback);
-            });
+            std::thread asyncExecution(
+                    [this, controller, allowFallback, d = deadline, executionCallback] {
+                        asyncStartComputePartitioned(this, *mPlan, controller, allowFallback, d,
+                                                     executionCallback);
+                    });
             executionCallback->bindThread(std::move(asyncExecution));
         }
         *synchronizationCallback = executionCallback;
@@ -897,14 +906,17 @@ bool StepExecutor::updateOutputShapes(const std::vector<OutputShape>& from,
 
 StepExecutor::StepExecutor(ExecutionBuilder* executionBuilder, const ModelBuilder* model,
                            std::shared_ptr<Device> device,
-                           std::shared_ptr<PreparedModel> preparedModel)
+                           std::shared_ptr<PreparedModel> preparedModel, const ExecutionStep* step)
     : mExecutionBuilder(executionBuilder),
+      mExecutionStep(step),
       mModel(model),
       mDevice(device),
       mPreparedModel(preparedModel),
       mInputs(model->inputCount()),
       mOutputs(model->outputCount()) {
     CHECK(mDevice != nullptr);
+    VLOG(EXECUTION) << "StepExecutor::StepExecutor with " << mInputs.size() << " inputs and "
+                    << mOutputs.size() << " outputs";
 }
 
 void StepExecutor::mapInputsAndOutputsTrivially() {
@@ -918,7 +930,7 @@ void StepExecutor::mapInputOrOutput(const ModelArgumentInfo& builderInputOrOutpu
     *executorInputOrOutput = builderInputOrOutput;
     switch (executorInputOrOutput->state) {
         default:
-            nnAssert(!"unexpected ModelArgumentInfo::state");
+            CHECK(false) << "unexpected ModelArgumentInfo::state";
             break;
         case ModelArgumentInfo::HAS_NO_VALUE:
         case ModelArgumentInfo::POINTER:
@@ -934,9 +946,9 @@ void StepExecutor::mapInputOrOutput(const ModelArgumentInfo& builderInputOrOutpu
     }
 }
 
-int StepExecutor::setInputOrOutputFromTemporaryMemory(const Operand& inputOrOutputOperand,
-                                                      const Memory* memory, uint32_t offset,
-                                                      ModelArgumentInfo* inputOrOutputInfo) {
+int StepExecutor::setInputOrOutputFromMemory(const Operand& inputOrOutputOperand,
+                                             const Memory* memory, uint32_t offset,
+                                             ModelArgumentInfo* inputOrOutputInfo) {
     // Should be similar to
     //     ExecutionBuilder::setInputFromMemory()
     //     ExecutionBuilder::setOutputFromMemory()
@@ -977,7 +989,14 @@ bool StepExecutor::isCpu() const {
     return mDevice == DeviceManager::getCpuDevice();
 }
 
+static OptionalTimeoutDuration makeTimeoutDuration(uint64_t nanoseconds) {
+    OptionalTimeoutDuration otd;
+    otd.nanoseconds(nanoseconds);
+    return otd;
+}
+
 std::tuple<int, std::vector<OutputShape>, Timing> StepExecutor::compute(
+        const OptionalTimePoint& deadline,
         const std::shared_ptr<ExecutionBurstController>& burstController) {
     CHECK(mPreparedModel != nullptr);
 
@@ -987,12 +1006,10 @@ std::tuple<int, std::vector<OutputShape>, Timing> StepExecutor::compute(
     }
 
     const MeasureTiming measure = measureTiming(mExecutionBuilder);
-    const auto [timePointN, deadline] = makeTimePoint(mExecutionBuilder->getTimeoutDuration());
-    if (timePointN != ANEURALNETWORKS_NO_ERROR) {
-        return {timePointN, {}, kNoTiming};
-    }
+    const OptionalTimeoutDuration loopTimeoutDuration =
+            makeTimeoutDuration(mExecutionBuilder->getLoopTimeoutDuration());
     const auto [n, outputShapes, timing] = mPreparedModel->execute(
-            mInputs, mOutputs, mMemories, burstController, measure, deadline);
+            mInputs, mOutputs, mMemories, burstController, measure, deadline, loopTimeoutDuration);
     mExecutionBuilder->reportTiming(timing);
 
     return {n, std::move(outputShapes), timing};
@@ -1012,12 +1029,15 @@ std::tuple<int, int, sp<hal::IFencedExecutionCallback>> StepExecutor::computeFen
     if (timePointN != ANEURALNETWORKS_NO_ERROR) {
         return {timePointN, -1, nullptr};
     }
-    OptionalTimeoutDuration otd;
+    const OptionalTimeoutDuration loopTimeoutDuration =
+            makeTimeoutDuration(mExecutionBuilder->getLoopTimeoutDuration());
+    OptionalTimeoutDuration optionalTimeoutDurationAfterFence;
     if (timeoutDurationAfterFence > 0) {
-        otd.nanoseconds(timeoutDurationAfterFence);
+        optionalTimeoutDurationAfterFence.nanoseconds(timeoutDurationAfterFence);
     }
-    const auto [n, syncFence, computeFencedCallback, timing] = mPreparedModel->executeFenced(
-            mInputs, mOutputs, mMemories, waitFor, measure, deadline, otd);
+    const auto [n, syncFence, computeFencedCallback, timing] =
+            mPreparedModel->executeFenced(mInputs, mOutputs, mMemories, waitFor, measure, deadline,
+                                          loopTimeoutDuration, optionalTimeoutDurationAfterFence);
     if (syncFence < 0 && computeFencedCallback == nullptr) {
         mExecutionBuilder->reportTiming(timing);
     }
@@ -1043,7 +1063,7 @@ std::tuple<int, std::vector<OutputShape>, Timing> StepExecutor::computeOnCpuFall
     if (n != ANEURALNETWORKS_NO_ERROR) {
         return {n, {}, kNoTiming};
     }
-    return compute(/*burstController=*/nullptr);
+    return compute({}, /*burstController=*/nullptr);
 }
 
 }  // namespace nn

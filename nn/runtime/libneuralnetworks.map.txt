@@ -20,14 +20,14 @@
 
 LIBNEURALNETWORKS {
   global:
+    ANeuralNetworks_getDefaultLoopTimeout; # introduced=30
     ANeuralNetworks_getDeviceCount; # introduced=Q
     ANeuralNetworks_getDevice; # introduced=Q
+    ANeuralNetworks_getMaximumLoopTimeout; # introduced=30
     ANeuralNetworksDevice_getName; # introduced=Q
     ANeuralNetworksDevice_getType; # introduced=Q
     ANeuralNetworksDevice_getVersion; # introduced=Q
     ANeuralNetworksDevice_getFeatureLevel; # introduced=Q
-    ANeuralNetworksDevice_supportsCompilationTimeout; # introduced=30
-    ANeuralNetworksDevice_supportsExecutionTimeout; # introduced=30
     ANeuralNetworksDevice_wait; # introduced=30
     ANeuralNetworksMemory_createFromAHardwareBuffer; # introduced=Q
     ANeuralNetworksMemory_createFromDesc; # introduced=30
@@ -77,6 +77,7 @@ LIBNEURALNETWORKS {
     ANeuralNetworksExecution_getOutputOperandDimensions; # introduced=Q
     ANeuralNetworksExecution_getOutputOperandRank; # introduced=Q
     ANeuralNetworksExecution_setTimeout; # introduced=30
+    ANeuralNetworksExecution_setLoopTimeout; # introduced=30
     ANeuralNetworksEvent_createFromSyncFenceFd; # introduced=30
     ANeuralNetworksEvent_getSyncFenceFd; # introduced=30
     ANeuralNetworksEvent_wait;
