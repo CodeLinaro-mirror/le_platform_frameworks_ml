@@ -22,7 +22,7 @@
 #include <hidl/Status.h>
 
 #if defined(__LE_NN__)
-#include "external/android-base/logging.h"
+#include "android-base/logging.h"
 #else
 #include <utils/CallStack.h>
 #endif

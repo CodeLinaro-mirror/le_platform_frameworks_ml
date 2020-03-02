@@ -20,12 +20,7 @@
 #include "TestHarness.h"
 #include "Utils.h"
 
-#if defined(__LE_NN__)
-#include "external/android-base/logging.h"
-#else
 #include <android-base/logging.h>
-#endif
-
 #include <android/hardware/neuralnetworks/1.0/IDevice.h>
 #include <android/hardware/neuralnetworks/1.0/IExecutionCallback.h>
 #include <android/hardware/neuralnetworks/1.0/IPreparedModel.h>

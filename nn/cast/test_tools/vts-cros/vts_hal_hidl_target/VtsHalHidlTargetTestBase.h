@@ -20,13 +20,8 @@
 #include <VtsHalHidlTargetTestEnvBase.h>
 #include <gtest/gtest.h>
 #include <hidl/HidlSupport.h>
-#if defined(__LE_NN__)
-#include "external/android-base/logging.h"
-#include "external/utils/RefBase.h"
-#else
 #include <android-base/logging.h>
 #include <utils/RefBase.h>
-#endif  // defined(__LE_NN__)
 
 #define VTS_HAL_HIDL_GET_STUB "VTS_HAL_HIDL_GET_STUB"
 

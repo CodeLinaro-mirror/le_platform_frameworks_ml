@@ -26,7 +26,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-#include "external/android-base/macros.h"
+#include "android-base/macros.h"
 
 namespace android
 {

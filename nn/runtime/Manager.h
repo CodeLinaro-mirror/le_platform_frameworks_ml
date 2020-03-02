@@ -21,12 +21,7 @@
 #include "Utils.h"
 #include "VersionedInterfaces.h"
 
-#if defined(__LE_NN__)
-#include "external/android-base/macros.h"
-#else
 #include <android-base/macros.h>
-#endif
-
 #include <map>
 #include <unordered_set>
 #include <vector>

@@ -20,12 +20,7 @@
 
 #include "HalInterfaces.h"
 
-#if defined(__LE_NN__)
-#include "external/android-base/logging.h"
-#else
 #include <android-base/logging.h>
-#endif
-
 #include <set>
 #include <iostream>
 #include <sstream>

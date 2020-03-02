@@ -24,11 +24,7 @@
 #include <VtsHalHidlTargetTestBase.h>
 #include <VtsHalHidlTargetTestEnvBase.h>
 
-#if defined(__LE_NN__)
-#include "external/android-base/macros.h"
-#else
 #include <android-base/macros.h>
-#endif
 #include <gtest/gtest.h>
 #include <iostream>
 #include <vector>
@@ -76,8 +72,12 @@ class NeuralnetworksHidlTest : public ::testing::VtsHalHidlTargetTestBase {
 // Tag for the validation tests
 class ValidationTest : public NeuralnetworksHidlTest {
    protected:
+    void validateEverything(const Model& model, const std::vector<Request>& request);
+
+   private:
     void validateModel(const Model& model);
-    void validateRequests(const Model& model, const std::vector<Request>& request);
+    void validateRequests(const sp<IPreparedModel>& preparedModel,
+                          const std::vector<Request>& requests);
 };
 
 // Tag for the generated tests

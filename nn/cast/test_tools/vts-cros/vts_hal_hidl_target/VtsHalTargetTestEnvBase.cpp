@@ -22,8 +22,7 @@
 #include <string>
 #include <dirent.h>
 #include <dlfcn.h>
-
-#include "external/android-base/logging.h"
+#include <android-base/logging.h>
 
 static constexpr const char* kListFlag = "--list_hal_drivers";
 static constexpr const char* kInstanceFlag = "--hal_instance";

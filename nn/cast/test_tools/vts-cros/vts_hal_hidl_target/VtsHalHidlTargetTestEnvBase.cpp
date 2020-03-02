@@ -22,10 +22,7 @@
 #include <string>
 
 #include <hidl-util/FqInstance.h>
-
-#if defined(__LE_NN__)
-#include "external/android-base/logging.h"
-#endif
+#include <android-base/logging.h>
 
 static const std::string kListFlag = "--list_registered_services";
 static const std::string kServiceInstanceFlag = "--hal_service_instance=";

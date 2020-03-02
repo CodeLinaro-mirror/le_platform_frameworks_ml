@@ -6,8 +6,8 @@ set (SOURCE_FILES
 
 add_library(${TARGET_NAME} SHARED ${SOURCE_FILES})
 
-
 target_link_libraries(${TARGET_NAME}
+    platform_includes
     log
     cast_nn_hidl_base
 )

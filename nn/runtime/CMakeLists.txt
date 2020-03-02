@@ -23,12 +23,10 @@ add_library(${TARGET_NAME} SHARED ${SOURCE_FILES})
 
 #Dynamic link to shared libraries
 target_link_libraries(${TARGET_NAME}
+    neuralnetworks_headers
     pthread
     cast_nn_hidl_base
     textclassifier_hash
-)
-
-target_link_libraries(${TARGET_NAME}
     neuralnetworks_common
     dl
 )

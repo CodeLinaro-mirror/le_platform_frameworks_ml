@@ -20,7 +20,7 @@
 #define LOG_TAG "sp"
 
 #if defined(__LE_NN__)
-#include "external/android-base/logging.h"
+#include "android-base/logging.h"
 #else
 #include <log/log.h>
 #endif  // __LE_NN__

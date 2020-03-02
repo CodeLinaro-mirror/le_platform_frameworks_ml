@@ -1,3 +1,10 @@
+set (EXTERNAL_TARGET_NAME external_includes)
+
+add_library(${EXTERNAL_TARGET_NAME} INTERFACE)
+
+target_include_directories(${EXTERNAL_TARGET_NAME}
+    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/external>)
+
 set (TARGET_NAME cast_nn_hidl_base)
 
 set (SOURCE_FILES
@@ -11,7 +18,10 @@ set (SOURCE_FILES
 
 add_library(${TARGET_NAME} SHARED ${SOURCE_FILES})
 
-target_include_directories(${TARGET_NAME} PRIVATE include)
+target_include_directories(${TARGET_NAME}
+  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
+target_link_libraries(${TARGET_NAME} external_includes)
 
 #EXPORT_HEADERS
 install(
