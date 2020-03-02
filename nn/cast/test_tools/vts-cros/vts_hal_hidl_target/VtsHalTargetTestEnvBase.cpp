@@ -88,9 +88,7 @@ void VtsHalTargetTestEnvBase::TearDown() {
   // Call the customized teardown process.
   TestTearDown();
 
-  for (auto &device : devices_) {
-    device = nullptr;
-  }
+  devices_.clear();
   for (auto handle : device_handles_) {
     try {
       if (nullptr != handle) {
@@ -100,6 +98,7 @@ void VtsHalTargetTestEnvBase::TearDown() {
       ALOGE("%s\n", e.what());
     }
   }
+  device_handles_.clear();
 }
 
 void VtsHalTargetTestEnvBase::init(int* argc, char** argv) {
