@@ -201,7 +201,8 @@ VersionedIPreparedModel::~VersionedIPreparedModel() {
 }
 
 std::tuple<int, std::vector<OutputShape>, Timing> VersionedIPreparedModel::executeAsynchronously(
-        const Request& request, MeasureTiming measure, const OptionalTimePoint& deadline) const {
+        const Request& request, MeasureTiming measure, const OptionalTimePoint& deadline,
+        const OptionalTimeoutDuration& loopTimeoutDuration) const {
     const auto failDeadObject = []() -> std::tuple<int, std::vector<OutputShape>, Timing> {
         return {ANEURALNETWORKS_DEAD_OBJECT, {}, kNoTiming};
     };
@@ -220,8 +221,8 @@ std::tuple<int, std::vector<OutputShape>, Timing> VersionedIPreparedModel::execu
 
     // version 1.3+ HAL
     if (mPreparedModelV1_3 != nullptr) {
-        Return<ErrorStatus> ret =
-                mPreparedModelV1_3->execute_1_3(request, measure, deadline, callback);
+        Return<ErrorStatus> ret = mPreparedModelV1_3->execute_1_3(request, measure, deadline,
+                                                                  loopTimeoutDuration, callback);
         if (ret.isDeadObject()) {
             LOG(ERROR) << "execute_1_3 failure: " << ret.description();
             return failDeadObject();
@@ -292,7 +293,8 @@ std::tuple<int, std::vector<OutputShape>, Timing> VersionedIPreparedModel::execu
 }
 
 std::tuple<int, std::vector<OutputShape>, Timing> VersionedIPreparedModel::executeSynchronously(
-        const Request& request, MeasureTiming measure, const OptionalTimePoint& deadline) const {
+        const Request& request, MeasureTiming measure, const OptionalTimePoint& deadline,
+        const OptionalTimeoutDuration& loopTimeoutDuration) const {
     const std::tuple<int, std::vector<OutputShape>, Timing> kDeadObject = {
             ANEURALNETWORKS_DEAD_OBJECT, {}, kNoTiming};
     const auto kFailure = getExecutionResult(ErrorStatus::GENERAL_FAILURE, {}, kNoTiming);
@@ -301,7 +303,7 @@ std::tuple<int, std::vector<OutputShape>, Timing> VersionedIPreparedModel::execu
     if (mPreparedModelV1_3 != nullptr) {
         std::tuple<int, std::vector<OutputShape>, Timing> result;
         Return<void> ret = mPreparedModelV1_3->executeSynchronously_1_3(
-                request, measure, deadline,
+                request, measure, deadline, loopTimeoutDuration,
                 [&result](ErrorStatus error, const hidl_vec<OutputShape>& outputShapes,
                           const Timing& timing) {
                     result = getExecutionResult(error, outputShapes, timing);
@@ -345,19 +347,19 @@ std::tuple<int, std::vector<OutputShape>, Timing> VersionedIPreparedModel::execu
     }
 
     // Fallback to asynchronous execution.
-    return executeAsynchronously(request, measure, deadline);
+    return executeAsynchronously(request, measure, deadline, loopTimeoutDuration);
 }
 
 std::tuple<int, std::vector<OutputShape>, Timing> VersionedIPreparedModel::execute(
         const Request& request, MeasureTiming measure, const OptionalTimePoint& deadline,
-        bool preferSynchronous) const {
+        const OptionalTimeoutDuration& loopTimeoutDuration, bool preferSynchronous) const {
     if (preferSynchronous) {
         VLOG(EXECUTION) << "Before executeSynchronously() " << SHOW_IF_DEBUG(toString(request));
-        return executeSynchronously(request, measure, deadline);
+        return executeSynchronously(request, measure, deadline, loopTimeoutDuration);
     }
 
     VLOG(EXECUTION) << "Before executeAsynchronously() " << SHOW_IF_DEBUG(toString(request));
-    return executeAsynchronously(request, measure, deadline);
+    return executeAsynchronously(request, measure, deadline, loopTimeoutDuration);
 }
 
 // This is the amount of time the ExecutionBurstController should spend polling
@@ -406,6 +408,7 @@ std::tuple<int, hal::hidl_handle, sp<hal::IFencedExecutionCallback>, hal::Timing
 VersionedIPreparedModel::executeFenced(
         const hal::Request& request, const hal::hidl_vec<hal::hidl_handle>& waitFor,
         MeasureTiming measure, const hal::OptionalTimePoint& deadline,
+        const OptionalTimeoutDuration& loopTimeoutDuration,
         const hal::OptionalTimeoutDuration& timeoutDurationAfterFence) {
     // version 1.3+ HAL
     // TODO(miaowang): figure out the right coding style for the sync_fence related API.
@@ -415,7 +418,7 @@ VersionedIPreparedModel::executeFenced(
     if (mPreparedModelV1_3 != nullptr) {
         ErrorStatus errorStatus;
         Return<void> ret = mPreparedModelV1_3->executeFenced(
-                request, waitFor, measure, deadline, timeoutDurationAfterFence,
+                request, waitFor, measure, deadline, loopTimeoutDuration, timeoutDurationAfterFence,
                 [&syncFence, &errorStatus, &dispatchCallback](
                         ErrorStatus error, const hidl_handle& handle,
                         const sp<hal::IFencedExecutionCallback>& callback) {
@@ -458,7 +461,8 @@ VersionedIPreparedModel::executeFenced(
         }
     }
     int errorCode;
-    std::tie(errorCode, std::ignore, timing) = executeSynchronously(request, measure, deadline);
+    std::tie(errorCode, std::ignore, timing) =
+            executeSynchronously(request, measure, deadline, loopTimeoutDuration);
     return std::make_tuple(errorCode, hal::hidl_handle(nullptr), nullptr, timing);
 }
 
@@ -600,34 +604,12 @@ static std::tuple<ErrorStatus, uint32_t, uint32_t> getNumberOfCacheFilesNeededFu
     return {ErrorStatus::NONE, 0, 0};
 }
 
-static std::tuple<ErrorStatus, bool, bool> supportsDeadlinesFunction(V1_3::IDevice* device) {
-    CHECK(device != nullptr);
-    constexpr std::tuple<ErrorStatus, bool, bool> kFailure = {ErrorStatus::GENERAL_FAILURE, false,
-                                                              false};
-    std::tuple<ErrorStatus, bool, bool> result = kFailure;
-    const Return<void> ret =
-            device->supportsDeadlines([&result](bool prepareModelDeadline, bool executionDeadline) {
-                result = {ErrorStatus::NONE, prepareModelDeadline, executionDeadline};
-            });
-    if (!ret.isOk()) {
-        LOG(ERROR) << "supportsDeadlines failure: " << ret.description();
-        return kFailure;
-    }
-    return result;
-}
-
-static std::tuple<ErrorStatus, bool, bool> supportsDeadlinesFunction(V1_0::IDevice* device) {
-    CHECK(device != nullptr);
-    return {ErrorStatus::NONE, /*prepareModelDeadline=*/false, /*executionDeadline=*/false};
-}
-
 struct InitialData {
     hal::Capabilities capabilities;
     hal::hidl_vec<hal::Extension> supportedExtensions;
     int32_t type;
     hal::hidl_string versionString;
     std::pair<uint32_t, uint32_t> numberOfCacheFilesNeeded;
-    std::pair<bool, bool> supportsDeadlines;
 };
 
 template <typename Device>
@@ -682,21 +664,12 @@ static std::optional<InitialData> initializeFunction(Device* device) {
         return std::nullopt;
     }
 
-    const auto [supportsDeadlinesStatus, prepareModelDeadline, executionDeadline] =
-            supportsDeadlinesFunction(device);
-    if (supportsDeadlinesStatus != ErrorStatus::NONE) {
-        LOG(ERROR) << "IDevice::supportsDeadlines returned the error "
-                   << toString(supportsDeadlinesStatus);
-        return std::nullopt;
-    }
-
     return InitialData{
             /*.capabilities=*/std::move(capabilities),
             /*.supportedExtensions=*/std::move(supportedExtensions),
             /*.type=*/type,
             /*.versionString=*/std::move(versionString),
             /*.numberOfCacheFilesNeeded=*/{numModelCacheFiles, numDataCacheFiles},
-            /*.supportsDeadlines=*/{prepareModelDeadline, executionDeadline},
     };
 }
 
@@ -743,26 +716,23 @@ std::shared_ptr<VersionedIDevice> VersionedIDevice::create(std::string serviceNa
         return nullptr;
     }
 
-    auto [capabilities, supportedExtensions, type, versionString, numberOfCacheFilesNeeded,
-          supportsDeadlines] = std::move(*initialData);
+    auto [capabilities, supportedExtensions, type, versionString, numberOfCacheFilesNeeded] =
+            std::move(*initialData);
     return std::make_shared<VersionedIDevice>(
             std::move(capabilities), std::move(supportedExtensions), type, std::move(versionString),
-            numberOfCacheFilesNeeded, supportsDeadlines, std::move(serviceName),
-            std::move(core.value()));
+            numberOfCacheFilesNeeded, std::move(serviceName), std::move(core.value()));
 }
 
 VersionedIDevice::VersionedIDevice(hal::Capabilities capabilities,
                                    std::vector<hal::Extension> supportedExtensions, int32_t type,
                                    std::string versionString,
                                    std::pair<uint32_t, uint32_t> numberOfCacheFilesNeeded,
-                                   std::pair<bool, bool> supportsDeadlines, std::string serviceName,
-                                   Core core)
+                                   std::string serviceName, Core core)
     : kCapabilities(std::move(capabilities)),
       kSupportedExtensions(std::move(supportedExtensions)),
       kType(type),
       kVersionString(std::move(versionString)),
       kNumberOfCacheFilesNeeded(numberOfCacheFilesNeeded),
-      kSupportsDeadlines(supportsDeadlines),
       kServiceName(std::move(serviceName)),
       mCore(std::move(core)) {}
 
@@ -1539,10 +1509,6 @@ const std::string& VersionedIDevice::getVersionString() const {
 
 std::pair<uint32_t, uint32_t> VersionedIDevice::getNumberOfCacheFilesNeeded() const {
     return kNumberOfCacheFilesNeeded;
-}
-
-std::pair<bool, bool> VersionedIDevice::supportsDeadlines() const {
-    return kSupportsDeadlines;
 }
 
 const std::string& VersionedIDevice::getName() const {
