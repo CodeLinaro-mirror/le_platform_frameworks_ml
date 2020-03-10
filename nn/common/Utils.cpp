@@ -93,36 +93,64 @@ void initVLogMask() {
     }
 }
 
-static uint64_t getNanosecondsSinceEpoch(const std::chrono::steady_clock::time_point& time) {
-    const auto timeSinceEpoch = time.time_since_epoch();
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(timeSinceEpoch).count();
+Deadline makeDeadline(uint64_t duration) {
+    const auto maxTime = Deadline::max();
+    const auto currentTime = std::chrono::steady_clock::now();
+
+    // Create Deadline. If there would be an overflow, use the max value.
+    const uint64_t remainingNanoseconds =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(maxTime - currentTime).count();
+    if (duration > remainingNanoseconds) {
+        return maxTime;
+    }
+    return currentTime + std::chrono::nanoseconds{duration};
 }
 
-uint64_t getCurrentNanosecondsSinceEpoch() {
-    return getNanosecondsSinceEpoch(std::chrono::steady_clock::now());
+std::optional<Deadline> makeDeadline(std::optional<uint64_t> duration) {
+    return duration.has_value() ? makeDeadline(*duration) : std::optional<Deadline>{};
 }
 
-static std::pair<int, OptionalTimePoint> makeTimePoint(uint64_t duration) {
-    // Relevant time points.
-    const uint64_t maxNanosecondsSinceEpoch =
-            getNanosecondsSinceEpoch(std::chrono::steady_clock::time_point::max());
-    const uint64_t currentNanosecondsSinceEpoch = getCurrentNanosecondsSinceEpoch();
+static uint64_t getMaxNanosecondsSinceEpoch() {
+    const auto maxTime =
+            std::chrono::time_point<std::chrono::steady_clock, std::chrono::nanoseconds>::max();
+    return maxTime.time_since_epoch().count();
+}
 
-    // Check for overflow.
-    if (duration > maxNanosecondsSinceEpoch - currentNanosecondsSinceEpoch) {
-        LOG(ERROR) << "Launching execution failed due to time point overflow";
-        return {ANEURALNETWORKS_BAD_DATA, {}};
+std::optional<Deadline> makeDeadline(const OptionalTimePoint& timePoint) {
+    using Discriminator = hal::OptionalTimePoint::hidl_discriminator;
+    if (timePoint.getDiscriminator() == Discriminator::none) {
+        return std::nullopt;
+    }
+    const uint64_t nanosecondsSinceEpoch = timePoint.nanosecondsSinceEpoch();
+    const uint64_t maxNanosecondsSinceEpoch = getMaxNanosecondsSinceEpoch();
+
+    // Clamp time point to max.
+    if (nanosecondsSinceEpoch >= maxNanosecondsSinceEpoch) {
+        return Deadline::max();
     }
 
-    // Load and return OptionalTimePoint.
-    OptionalTimePoint otp;
-    otp.nanosecondsSinceEpoch(currentNanosecondsSinceEpoch + duration);
-    return {ANEURALNETWORKS_NO_ERROR, otp};
+    // Return provided time point.
+    return Deadline{std::chrono::nanoseconds{nanosecondsSinceEpoch}};
 }
 
-std::pair<int, OptionalTimePoint> makeTimePoint(std::optional<uint64_t> duration) {
-    const std::pair<int, OptionalTimePoint> empty = {ANEURALNETWORKS_NO_ERROR, {}};
-    return duration.has_value() ? makeTimePoint(*duration) : empty;
+bool hasDeadlinePassed(const std::optional<Deadline>& deadline) {
+    if (!deadline.has_value()) {
+        return false;
+    }
+    return std::chrono::steady_clock::now() >= *deadline;
+}
+
+static OptionalTimePoint makeTimePoint(const Deadline& deadline) {
+    const auto timeSinceEpoch = deadline.time_since_epoch();
+    const uint64_t nanosecondsSinceEpoch =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(timeSinceEpoch).count();
+    OptionalTimePoint ret;
+    ret.nanosecondsSinceEpoch(nanosecondsSinceEpoch);
+    return ret;
+}
+
+OptionalTimePoint makeTimePoint(const std::optional<Deadline>& deadline) {
+    return deadline.has_value() ? makeTimePoint(*deadline) : OptionalTimePoint{};
 }
 
 static bool isExtensionOperandType(int32_t type) {
@@ -660,12 +688,12 @@ static bool validateIfOperation(uint32_t inputCount, const uint32_t* inputs, uin
         NN_RET_CHECK_EQ(inputCount, op::kFirstInput + branchModelInputCount);
         NN_RET_CHECK_EQ(outputCount, branchModelOutputCount);
         for (uint32_t i = 0; i < branchModelInputCount; ++i) {
-            const Operand& innerOperand = helper.getSubgraphInputOperand(branchModelOperand, i);
+            const Operand& innerOperand = *helper.getSubgraphInputOperand(branchModelOperand, i);
             const Operand& outerOperand = operands[inputs[op::kFirstInput + i]];
             NN_RET_CHECK(compatible(innerOperand, outerOperand));
         }
         for (uint32_t i = 0; i < branchModelOutputCount; ++i) {
-            const Operand& innerOperand = helper.getSubgraphOutputOperand(branchModelOperand, i);
+            const Operand& innerOperand = *helper.getSubgraphOutputOperand(branchModelOperand, i);
             const Operand& outerOperand = operands[outputs[i]];
             NN_RET_CHECK(compatible(innerOperand, outerOperand));
         }
@@ -704,12 +732,12 @@ static bool validateWhileOperation(uint32_t inputCount, const uint32_t* inputs,
         NN_RET_CHECK_EQ(inputCount, op::kFirstInput + condModelInputCount);
         NN_RET_CHECK_EQ(condModelOutputCount, 1u);
         for (uint32_t i = 0; i < condModelInputCount; ++i) {
-            const Operand& innerOperand = helper.getSubgraphInputOperand(condModelOperand, i);
+            const Operand& innerOperand = *helper.getSubgraphInputOperand(condModelOperand, i);
             const Operand& outerOperand = operands[inputs[op::kFirstInput + i]];
             NN_RET_CHECK(compatible(innerOperand, outerOperand));
         }
         NN_RET_CHECK(
-                validateConditionOperand(helper.getSubgraphOutputOperand(condModelOperand, 0)));
+                validateConditionOperand(*helper.getSubgraphOutputOperand(condModelOperand, 0)));
         return true;
     };
     auto validateBodyOperand = [&](const Operand& bodyModelOperand) -> bool {
@@ -724,18 +752,18 @@ static bool validateWhileOperation(uint32_t inputCount, const uint32_t* inputs,
         const uint32_t stateOnlyCount = bodyModelOutputCount - inputOutputCount;
         const uint32_t inputOnlyCount = bodyModelInputCount - bodyModelOutputCount;
         for (uint32_t i = 0, n = inputOutputCount + stateOnlyCount + inputOnlyCount; i < n; ++i) {
-            const Operand& innerOperand = helper.getSubgraphInputOperand(bodyModelOperand, i);
+            const Operand& innerOperand = *helper.getSubgraphInputOperand(bodyModelOperand, i);
             const Operand& outerOperand = operands[inputs[op::kFirstInput + i]];
             NN_RET_CHECK(compatible(innerOperand, outerOperand));
         }
         for (uint32_t i = 0; i < inputOutputCount; ++i) {
-            const Operand& innerOperand = helper.getSubgraphOutputOperand(bodyModelOperand, i);
+            const Operand& innerOperand = *helper.getSubgraphOutputOperand(bodyModelOperand, i);
             const Operand& outerOperand = operands[outputs[i]];
             NN_RET_CHECK(compatible(innerOperand, outerOperand));
         }
         for (uint32_t i = 0, n = inputOutputCount + stateOnlyCount; i < n; ++i) {
-            const Operand& inputOperand = helper.getSubgraphInputOperand(bodyModelOperand, i);
-            const Operand& outputOperand = helper.getSubgraphOutputOperand(bodyModelOperand, i);
+            const Operand& inputOperand = *helper.getSubgraphInputOperand(bodyModelOperand, i);
+            const Operand& outputOperand = *helper.getSubgraphOutputOperand(bodyModelOperand, i);
             NN_RET_CHECK(compatible(inputOperand, outputOperand));
         }
         return true;
