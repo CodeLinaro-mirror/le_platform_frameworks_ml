@@ -203,6 +203,11 @@ hal::Request::MemoryPool Memory::getMemoryPool() const {
     return pool;
 }
 
+std::optional<RunTimePoolInfo> Memory::getRunTimePoolInfo() const {
+    // TODO(b/147777318): Cache memory mapping within the memory object.
+    return RunTimePoolInfo::createFromHidlMemory(kHidlMemory);
+}
+
 intptr_t Memory::getKey() const {
     return reinterpret_cast<intptr_t>(this);
 }
@@ -451,6 +456,10 @@ int MemoryBuilder::finish() {
         logMemoryDescriptorToInfo(mDesc, mOperand.value());
     }
     mAllocator = selectDeviceMemoryAllocator(mDesc);
+    mShouldFallback = std::none_of(mRoles.begin(), mRoles.end(), [](const auto& role) {
+        const auto* cb = std::get<const CompilationBuilder*>(role);
+        return cb->createdWithExplicitDeviceList();
+    });
     mFinished = true;
     return ANEURALNETWORKS_NO_ERROR;
 }
@@ -475,13 +484,12 @@ std::pair<int, std::unique_ptr<Memory>> MemoryBuilder::allocate() const {
 
     // Try allocate the memory on device.
     if (mAllocator != nullptr) {
-        std::tie(n, memory) = mAllocator->allocate(mDesc);
+        std::tie(n, memory) = mAllocator->allocate(mDesc, mOperand->type);
     }
 
     // If failed, fallback to ashmem.
-    // TODO(xusongw): Decide on the fallback strategy.
     // TODO(xusongw): Use BLOB mode hardware buffer when possible.
-    if (n != ANEURALNETWORKS_NO_ERROR) {
+    if (n != ANEURALNETWORKS_NO_ERROR && mShouldFallback) {
         VLOG(MEMORY) << "MemoryBuilder::allocate -- fallback to ashmem.";
         std::tie(n, memory) = MemoryAshmem::create(size);
     }

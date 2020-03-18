@@ -32,6 +32,7 @@
 #include <utility>
 #include <vector>
 
+#include "CpuExecutor.h"
 #include "HalInterfaces.h"
 #include "NeuralNetworks.h"
 #include "Utils.h"
@@ -90,8 +91,6 @@ class ObjectTracker {
     // A faster way to see if we already have an object than doing find().
     std::unordered_map<const ObjectType*, uint32_t> mKnown;
 };
-
-enum class IOType { INPUT = 0, OUTPUT = 1 };
 
 using CompilationRole = std::tuple<const CompilationBuilder*, IOType, uint32_t>;
 using StepRoleCallback = std::function<void(const PreparedModel*, IOType, uint32_t)>;
@@ -170,6 +169,7 @@ class Memory {
     const hal::hidl_memory& getHidlMemory() const { return kHidlMemory; }
     const sp<hal::IBuffer>& getIBuffer() const { return kBuffer; }
     virtual uint32_t getSize() const { return getHidlMemory().size(); }
+    virtual std::optional<RunTimePoolInfo> getRunTimePoolInfo() const;
 
     MemoryValidatorBase& getValidator() const {
         CHECK(mValidator != nullptr);
@@ -247,7 +247,14 @@ class MemoryBuilder {
     // Once the descriptor has been finished, we should not allow further modifications.
     bool mFinished = false;
 
+    // The following fields are only valid when finished.
+
+    // The chosen device to allocate the memory. Set to nullptr if there are multiple devices.
     const Device* mAllocator = nullptr;
+
+    // If set to true, allocate() will fallback to Ashmem or AHardwareBuffer if the memory
+    // allocation fails on the chosen device, or if there is no device chosen.
+    bool mShouldFallback = true;
 };
 
 class MemoryAshmem : public Memory {
@@ -265,6 +272,10 @@ class MemoryAshmem : public Memory {
     // valid for the lifetime of the MemoryAshmem object. This call always
     // returns non-null because it was validated during MemoryAshmem::create.
     uint8_t* getPointer() const;
+
+    std::optional<RunTimePoolInfo> getRunTimePoolInfo() const override {
+        return RunTimePoolInfo::createFromExistingBuffer(getPointer(), kHidlMemory.size());
+    }
 
     // prefer using MemoryAshmem::create
     MemoryAshmem(sp<hal::IMemory> mapped, hal::hidl_memory memory);
