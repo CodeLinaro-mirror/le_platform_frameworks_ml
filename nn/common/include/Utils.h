@@ -21,11 +21,7 @@
 #include "NeuralNetworks.h"
 #include "ValidateHal.h"
 
-#ifdef __LE_NN__
-#include "external/android-base/logging.h"
-#else
 #include <android-base/logging.h>
-#endif
 #include <optional>
 #include <set>
 #include <vector>

@@ -22,13 +22,11 @@
 #include "OperationsUtils.h"
 #include "Utils.h"
 
-#if defined(__LE_NN__)
-#include "external/android-base/macros.h"
-#else
+#if !defined(__LE_NN__)
 #include <ui/GraphicBuffer.h>
-#include <android-base/macros.h>
 #endif
 
+#include <android-base/macros.h>
 #include <algorithm>
 #include <optional>
 #include <vector>

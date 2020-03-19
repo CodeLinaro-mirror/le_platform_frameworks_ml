@@ -143,9 +143,9 @@ struct Conv2dParam {
     Type* im2colData = nullptr;                                                 \
     const bool need_im2col = stride_width != 1 || stride_height != 1 ||         \
                              filterWidth != 1 || filterHeight != 1;             \
+    std::unique_ptr<Type[]> im2colGuard;                                        \
     if (need_im2col) {                                                          \
         uint64_t im2colByteSize = sizeof(Type);                                     \
-        std::unique_ptr<Type[]> im2colGuard;                                        \
         for (int i=0; i<4; i++) {                                                   \
             im2colByteSize *= im2colDim.sizes[i];                                   \
         }                                                                           \

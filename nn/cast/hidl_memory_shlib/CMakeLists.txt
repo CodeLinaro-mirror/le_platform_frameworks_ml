@@ -8,9 +8,10 @@ set (SOURCE_FILES
 
 add_library(${HIDL_MEMORY_TARGET_NAME} SHARED ${SOURCE_FILES})
 
-target_include_directories(${HIDL_MEMORY_TARGET_NAME} PRIVATE .)
+target_include_directories(${HIDL_MEMORY_TARGET_NAME} PUBLIC include)
 
 target_link_libraries(${HIDL_MEMORY_TARGET_NAME}
+    platform_includes
     cast_nn_hidl_base
 )
 

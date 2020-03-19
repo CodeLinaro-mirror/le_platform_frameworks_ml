@@ -115,7 +115,9 @@ class IOperationExecutionContext {
 
     template <typename T>
     T getInputValue(uint32_t index) const {
-        return getInputBuffer<T>(index)[0];
+        // Workaround for optimizer issue
+        volatile T value = getInputBuffer<T>(index)[0];
+        return value;
     }
 };
 

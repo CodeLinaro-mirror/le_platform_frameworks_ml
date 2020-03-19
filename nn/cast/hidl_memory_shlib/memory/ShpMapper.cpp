@@ -20,7 +20,7 @@
 #include "ShpMapper.h"
 
 #include "ShpMemory.h"
-#include "external/android-base/logging.h"
+#include "android-base/logging.h"
 
 namespace android {
 namespace hidl {

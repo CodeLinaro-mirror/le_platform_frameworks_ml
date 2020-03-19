@@ -24,13 +24,11 @@
 #include "Tracing.h"
 #include "ValidateHal.h"
 
-#if defined(__LE_NN__)
-#include "external/android-base/logging.h"
-#else
-#include <android-base/logging.h>
+#if !defined(__LE_NN__)
 #include <hidl/LegacySupport.h>
 #endif
 
+#include <android-base/logging.h>
 #include <chrono>
 #include <optional>
 #include <thread>

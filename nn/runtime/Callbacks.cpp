@@ -16,12 +16,7 @@
 
 #include "Callbacks.h"
 
-#if defined(__LE_NN__)
-#include "external/android-base/logging.h"
-#else
 #include <android-base/logging.h>
-#endif
-
 #include <limits>
 
 namespace android::hardware::neuralnetworks::V1_2::implementation {

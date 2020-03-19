@@ -1,0 +1,4 @@
+set (TARGET_NAME test_gnerated_includes)
+add_library(${TARGET_NAME} INTERFACE)
+target_include_directories(${TARGET_NAME}
+    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)

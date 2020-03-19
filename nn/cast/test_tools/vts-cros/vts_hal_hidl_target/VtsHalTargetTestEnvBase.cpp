@@ -22,8 +22,7 @@
 #include <string>
 #include <dirent.h>
 #include <dlfcn.h>
-
-#include "external/android-base/logging.h"
+#include <android-base/logging.h>
 
 static constexpr const char* kListFlag = "--list_hal_drivers";
 static constexpr const char* kInstanceFlag = "--hal_instance";
@@ -89,9 +88,7 @@ void VtsHalTargetTestEnvBase::TearDown() {
   // Call the customized teardown process.
   TestTearDown();
 
-  for (auto &device : devices_) {
-    device = nullptr;
-  }
+  devices_.clear();
   for (auto handle : device_handles_) {
     try {
       if (nullptr != handle) {
@@ -101,6 +98,7 @@ void VtsHalTargetTestEnvBase::TearDown() {
       ALOGE("%s\n", e.what());
     }
   }
+  device_handles_.clear();
 }
 
 void VtsHalTargetTestEnvBase::init(int* argc, char** argv) {

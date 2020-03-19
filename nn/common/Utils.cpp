@@ -23,11 +23,7 @@
 #include "OperationResolver.h"
 #include "ValidateHal.h"
 
-#if defined(__LE_NN__)
-#include "external/android-base/logging.h"
-#else
 #include <android-base/logging.h>
-#endif
 
 #if !defined(__LE_NN__)
 #include <android-base/properties.h>
