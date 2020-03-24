@@ -21,7 +21,10 @@ add_library(${TARGET_NAME} SHARED ${SOURCE_FILES})
 target_include_directories(${TARGET_NAME}
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
-target_link_libraries(${TARGET_NAME} external_includes)
+target_link_libraries(${TARGET_NAME}
+    external_includes
+    log
+)
 
 #EXPORT_HEADERS
 install(

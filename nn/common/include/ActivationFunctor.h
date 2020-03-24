@@ -49,7 +49,7 @@ class ActivationFunctor {
       case kActivationSigmoid:
         return 1.0f / (1.0f + std::exp(-a));
       default:
-        ALOG(ERROR, "NN API",
+        ALOG(LOG_ERROR, "NN API",
              "Invalid enum value for activation function: 0x%0X",
              act_);
         abort();
