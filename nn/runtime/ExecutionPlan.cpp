@@ -41,6 +41,7 @@
 #include "Callbacks.h"
 #include "CompilationBuilder.h"
 #include "ControlFlow.h"
+#include "CpuExecutor.h"
 #include "ExecutionBuilder.h"
 #include "ExecutionBurstController.h"
 #include "GraphDump.h"
@@ -832,29 +833,34 @@ std::shared_ptr<ExecutionPlan::Controller> ExecutionPlan::makeController(
         totalSizeOfTemporaries += size;
         return offset;
     };
+    // This function has two modes of operation:
+    // 1. When lifetime is TEMPORARY_VARIABLE, we allocate memory for
+    //    TEMPORARY_VARIABLE source operands, skip SUBGRAPH_OUTPUT source
+    //    operands, and panic if we see a source operand of another lifetime.
+    // 2. When lifetime is SUBGRAPH_OUTPUT, we allocate memory for
+    //    SUBGRAPH_OUTPUT source operands and panic if we see a source operand
+    //    of another lifetime.
     auto mapTemporary =
             [executionBuilder, addTemporaryOfSize](
                     const SourceOperandIndex& sourceOperandIndex,
                     std::map<SourceOperandIndex, uint32_t>* sourceOperandToOffsetOfTemporary,
                     OperandLifeTime lifetime = OperandLifeTime::TEMPORARY_VARIABLE) {
-#ifdef NN_DEBUGGABLE
                 CHECK(lifetime == OperandLifeTime::TEMPORARY_VARIABLE ||
                       lifetime == OperandLifeTime::SUBGRAPH_OUTPUT);
-                CHECK(sourceOperandToOffsetOfTemporary->find(sourceOperandIndex) ==
-                      sourceOperandToOffsetOfTemporary->end());
-#endif
                 const Operand& sourceOperand =
                         executionBuilder->getSourceOperand(sourceOperandIndex);
-                if (sourceOperand.lifetime != lifetime) {
-                    CHECK(lifetime == OperandLifeTime::TEMPORARY_VARIABLE);
-                    CHECK(sourceOperand.lifetime == OperandLifeTime::SUBGRAPH_OUTPUT);
-                    // This is expected to be handled elsewhere.
+                if (lifetime == OperandLifeTime::TEMPORARY_VARIABLE &&
+                    sourceOperand.lifetime == OperandLifeTime::SUBGRAPH_OUTPUT) {
+                    // See the caller for explanation.
                     return;
                 }
+                CHECK(sourceOperand.lifetime == lifetime);
                 const uint32_t size = TypeManager::get()->getSizeOfData(sourceOperand);
                 CHECK_NE(size, 0u);
                 const uint32_t offset = addTemporaryOfSize(size);
-                sourceOperandToOffsetOfTemporary->emplace(sourceOperandIndex, offset);
+                auto [_, isNew] =
+                        sourceOperandToOffsetOfTemporary->emplace(sourceOperandIndex, offset);
+                CHECK(isNew);
                 VLOG(EXECUTION) << "temp: operand " << toString(sourceOperandIndex)
                                 << " offset = " << offset;
             };
@@ -865,6 +871,17 @@ std::shared_ptr<ExecutionPlan::Controller> ExecutionPlan::makeController(
             // Allocate memory for ExecutionStep temporary outputs that are
             // inputs to other steps, as determined by
             // ExecutionPlan::CompoundBody::findTempsAsStepModelOutputs().
+            //
+            // We don't allocate memory for step model output operands with
+            // source operand lifetime SUBGRAPH_OUTPUT because they will be
+            // - managed by the client (main model outputs),
+            // - assigned a location of another operand (when this step model
+            //   output is a branch model output of an IF; see
+            //   ExecutionPlan::nextCompound(const IfStep*, ...)), or
+            // - allocated by a WHILE (when this step model output
+            //   is a condition or body model output of a WHILE; see the
+            //   step->bodyOutputOperands and step->condOutputOperand handling
+            //   below).
             for (const auto& output : step->getTempsAsStepModelOutputs()) {
                 mapTemporary(SourceOperandIndex(step->getSourceModelIndex(), output.first),
                              &sourceOperandToOffsetOfTemporary);
@@ -877,6 +894,17 @@ std::shared_ptr<ExecutionPlan::Controller> ExecutionPlan::makeController(
             // We don't allocate memory for branch output operands because they
             // use the same location as the corresponding outer output operands,
             // as established in ExecutionPlan::nextCompound(const IfStep*, ...)
+            //
+            // We don't allocate memory for outer output operands with source
+            // operand lifetime SUBGRAPH_OUTPUT because they will be
+            // - managed by the client (main model outputs),
+            // - assigned a location of another operand (when this IF outer
+            //   output is a branch model output of another IF; see
+            //   ExecutionPlan::nextCompound(const IfStep*, ...)), or
+            // - allocated by a WHILE (when this IF outer output
+            //   is a condition or body model output of a WHILE; see the
+            //   step->bodyOutputOperands and step->condOutputOperand handling
+            //   below).
             for (const auto& sourceOperandIndex : step->outerOutputOperands) {
                 mapTemporary(sourceOperandIndex, &sourceOperandToOffsetOfTemporary);
             }
@@ -884,14 +912,14 @@ std::shared_ptr<ExecutionPlan::Controller> ExecutionPlan::makeController(
             // Allocate memory for all temporary outputs of an WhileStep because
             // they are going to be written to by the WHILE loop.
             //
-            // We don't allocate memory for outer output operands with lifetime
-            // SUBGRAPH_OUTPUT because they will be
+            // We don't allocate memory for outer output operands with source
+            // operand lifetime SUBGRAPH_OUTPUT because they will be
             // - managed by the client (main model outputs),
-            // - assigned a location of another operand (when the WHILE
-            //   resides within an IF branch model; see
+            // - assigned a location of another operand (when this WHILE outer
+            //   output is a branch model output of an IF; see
             //   ExecutionPlan::nextCompound(const IfStep*, ...)), or
-            // - allocated by another WHILE (when this WHILE resides
-            //   within a condition or body model of another WHILE; see the
+            // - allocated by another WHILE (when this WHILE outer output
+            //   is a condition or body model output of another WHILE; see the
             //   step->bodyOutputOperands and step->condOutputOperand handling
             //   below).
             for (const auto& sourceOperandIndex : step->outerOutputOperands) {
@@ -954,42 +982,81 @@ int ExecutionPlan::fallback(std::shared_ptr<Controller> controller,
     return next(controller, executor);
 }
 
-static void* getBufferFromModelArgumentInfo(const ModelArgumentInfo& info) {
-    if (info.state == ModelArgumentInfo::POINTER) {
-        return info.buffer;
-    }
-    // TODO: Handle info.state == MEMORY.
-    return nullptr;
+ExecutionPlan::Buffer::Buffer(void* pointer, uint32_t size)
+    : mInfo(RunTimePoolInfo::createFromExistingBuffer(reinterpret_cast<uint8_t*>(pointer), size)),
+      mOffset(0) {}
+
+ExecutionPlan::Buffer::Buffer(RunTimePoolInfo info, uint32_t offset)
+    : mInfo(std::move(info)), mOffset(offset) {}
+
+void* ExecutionPlan::Buffer::getPointer() const {
+    return mInfo.getBuffer() + mOffset;
 }
 
-void* ExecutionPlan::getBuffer(std::shared_ptr<Controller> controller,
-                               SourceOperandIndex operandIndex) const {
+uint32_t ExecutionPlan::Buffer::getSize() const {
+    return mInfo.getSize() - mOffset;
+}
+
+void ExecutionPlan::Buffer::flush() const {
+    mInfo.flush();
+}
+
+std::optional<ExecutionPlan::Buffer> ExecutionPlan::getBufferFromModelArgumentInfo(
+        const ModelArgumentInfo& info, const ExecutionBuilder* executionBuilder) const {
+    switch (info.state) {
+        case ModelArgumentInfo::POINTER: {
+            return Buffer(info.buffer, info.locationAndLength.length);
+        } break;
+        case ModelArgumentInfo::MEMORY: {
+            if (std::optional<RunTimePoolInfo> poolInfo =
+                        executionBuilder->getRunTimePoolInfo(info.locationAndLength.poolIndex)) {
+                return Buffer(*poolInfo, info.locationAndLength.offset);
+            } else {
+                LOG(ERROR) << "Unable to map operand memory pool";
+                return std::nullopt;
+            }
+        } break;
+        case ModelArgumentInfo::HAS_NO_VALUE: {
+            LOG(ERROR) << "Attempting to read an operand that has no value";
+            return std::nullopt;
+        } break;
+        default: {
+            LOG(ERROR) << "Unexpected operand memory state: " << static_cast<int>(info.state);
+            return std::nullopt;
+        } break;
+    }
+}
+
+std::optional<ExecutionPlan::Buffer> ExecutionPlan::getBuffer(
+        std::shared_ptr<Controller> controller, SourceOperandIndex operandIndex) const {
     const auto& sourceOperandToOffsetOfTemporary = controller->mSourceOperandToOffsetOfTemporary;
     const auto& sourceOperandToInputIndex = controller->mSourceOperandToInputIndex;
     const auto& sourceOperandToOutputIndex = controller->mSourceOperandToOutputIndex;
     if (auto it = sourceOperandToOffsetOfTemporary.find(operandIndex);
         it != sourceOperandToOffsetOfTemporary.end()) {
         const uint32_t offset = it->second;
-        uint8_t* memory = controller->mTemporaries->getPointer();
-        return memory + offset;
+        const std::unique_ptr<MemoryAshmem>& memory = controller->mTemporaries;
+        return Buffer(memory->getPointer() + offset, memory->getSize() - offset);
     } else if (auto it = sourceOperandToInputIndex.find(operandIndex);
                it != sourceOperandToInputIndex.end()) {
         const ModelArgumentInfo& info = controller->mExecutionBuilder->getInputInfo(it->second);
-        return getBufferFromModelArgumentInfo(info);
+        return getBufferFromModelArgumentInfo(info, controller->mExecutionBuilder);
     } else if (auto it = sourceOperandToOutputIndex.find(operandIndex);
                it != sourceOperandToOutputIndex.end()) {
         const ModelArgumentInfo& info = controller->mExecutionBuilder->getOutputInfo(it->second);
-        return getBufferFromModelArgumentInfo(info);
+        return getBufferFromModelArgumentInfo(info, controller->mExecutionBuilder);
     }
-    return nullptr;
+    return std::nullopt;
 }
 
 bool ExecutionPlan::readConditionValue(std::shared_ptr<Controller> controller,
                                        SourceOperandIndex operandIndex) const {
-    auto buffer = reinterpret_cast<const uint8_t*>(getBuffer(controller, operandIndex));
-    CHECK(buffer != nullptr) << "Unable to read operand " << toString(operandIndex);
-    bool value = static_cast<bool>(buffer[0]);
-    VLOG(EXECUTION) << "readConditionValue: " << value;
+    std::optional<ExecutionPlan::Buffer> buffer = getBuffer(controller, operandIndex);
+    CHECK(buffer != std::nullopt) << "Unable to read operand " << toString(operandIndex);
+    bool8 value;
+    CHECK_GE(buffer->getSize(), sizeof(value));
+    std::memcpy(&value, buffer->getPointer(), sizeof(value));
+    VLOG(EXECUTION) << "readConditionValue: " << static_cast<int>(value);
     return value;
 }
 
@@ -1269,15 +1336,22 @@ int ExecutionPlan::nextCompound(const WhileStep* step, std::shared_ptr<Controlle
             // WHILE operation input operand otherwise.
             const SourceOperandIndex& innerOperand = step->condInputOperands[i];
             const SourceOperandIndex& outerOperand = step->outerOutputOperands[i];
-            void* outerBuffer = getBuffer(controller, outerOperand);
-            CHECK(outerBuffer != nullptr);
+            std::optional<Buffer> outerBuffer = getBuffer(controller, outerOperand);
+            if (outerBuffer == std::nullopt) {
+                return ANEURALNETWORKS_OP_FAILED;
+            }
             const Operand& sourceOperand =
                     controller->mExecutionBuilder->getSourceOperand(outerOperand);
             const uint32_t size = TypeManager::get()->getSizeOfData(sourceOperand);
             CHECK_NE(size, 0u);
-            const void* innerBuffer = getBuffer(controller, innerOperand);
-            CHECK(innerBuffer != nullptr);
-            memcpy(outerBuffer, innerBuffer, size);
+            std::optional<Buffer> innerBuffer = getBuffer(controller, innerOperand);
+            if (innerBuffer == std::nullopt) {
+                return ANEURALNETWORKS_OP_FAILED;
+            }
+            CHECK_LE(size, innerBuffer->getSize());
+            CHECK_LE(size, outerBuffer->getSize());
+            memcpy(outerBuffer->getPointer(), innerBuffer->getPointer(), size);
+            outerBuffer->flush();
         }
         state.iteration = WhileState::kOutsideLoop;
     }
