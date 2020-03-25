@@ -28,19 +28,16 @@ def MakeBranchModel(operation_name):
   z = Output("z", ValueType)
   return Model().Operation(operation_name, y, [100.0], 0).To(z)
 
-x = Input("x", BoolType)
-y = Input("y", ValueType)
-z = Output("z", ValueType)
-then_model = MakeBranchModel("ADD")
-else_model = MakeBranchModel("SUB")
-model = Model().Operation("IF", x, then_model, else_model, y).To(z)
+def Test(x, y, z, name):
+  x_data, y_data, z_data = x, y, z
+  x = Input("x", BoolType)
+  y = Input("y", ValueType)
+  z = Output("z", ValueType)
+  then_model = MakeBranchModel("ADD")
+  else_model = MakeBranchModel("SUB")
+  model = Model().Operation("IF", x, then_model, else_model, y).To(z)
+  example = Example({x: [x_data], y: y_data, z: z_data}, name=name)
+  example.AddVariations(AllOutputsAsInternalCoverter())
 
-Example({x: [True], y: input_data, z: output_add}, name="true", model=model)
-Example({x: [False], y: input_data, z: output_sub}, name="false", model=model)
-
-# Test with multiple references to the same referenced model.
-model = Model(name="same_branch_model")
-model.Operation("IF", x, then_model, then_model, y).To(z)
-
-Example({x: [True], y: input_data, z: output_add}, name="true", model=model)
-Example({x: [False], y: input_data, z: output_add}, name="false", model=model)
+Test(x=True, y=input_data, z=output_add, name="true")
+Test(x=False, y=input_data, z=output_sub, name="false")
