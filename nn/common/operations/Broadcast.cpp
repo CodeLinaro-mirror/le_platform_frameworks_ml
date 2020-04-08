@@ -466,6 +466,12 @@ bool validate(OperationType opType, const IOperationValidationContext* context) 
     } else {
         NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << getOperationName(opType);
     }
+    const Shape& input1 = context->getInputShape(kInputTensor1);
+    const Shape& input2 = context->getInputShape(kInputTensor2);
+    if (hasKnownRank(input1) && hasKnownRank(input2)) {
+        NN_RET_CHECK_LE(getNumberOfDimensions(input1), 4);
+        NN_RET_CHECK_LE(getNumberOfDimensions(input2), 4);
+    }
     return validateInputTypes(context, {inputType, inputType, OperandType::INT32}) &&
            validateOutputTypes(context, {inputType});
 }
@@ -658,6 +664,8 @@ bool executeDiv(IOperationExecutionContext* context) {
                                 context->getInputValue<int32_t>(kActivationScalar),
                                 context->getOutputBuffer<int32_t>(kOutputTensor),
                                 context->getOutputShape(kOutputTensor), [](int32_t a, int32_t b) {
+                                    // In NNAPI, DIV by zero is undefined, but should not crash.
+                                    if (b == 0) return 0;
                                     int32_t result = a / b;
                                     if (a % b != 0 && ((a < 0) != (b < 0))) {
                                         // Implement "floor division".
