@@ -32,6 +32,9 @@
 #include <utility>
 #include <vector>
 
+#include <errno.h>
+#include <poll.h>
+
 #include "ControlFlow.h"
 #include "NeuralNetworks.h"
 #include "NeuralNetworksOEM.h"
@@ -363,17 +366,40 @@ uint32_t nonExtensionOperandSizeOfData(OperandType type, const std::vector<uint3
                    : sizeOfTensorData(sizeOfElement, dimensions);
 }
 
-uint32_t sizeOfTensorData(uint32_t sizeOfElement, const std::vector<uint32_t>& dimensions) {
+// Returns a pair of {false, size} on success, {true, 0} if size overflows uint32_t.
+static std::pair<bool, uint32_t> sizeOfTensorDataHelper(uint32_t sizeOfElement,
+                                                        const std::vector<uint32_t>& dimensions) {
     if (dimensions.empty()) {
-        return 0;
+        return {false, 0};
     }
     uint64_t size = static_cast<uint64_t>(sizeOfElement);
     constexpr uint64_t kMaxSize = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max());
     for (uint32_t d : dimensions) {
         size *= d;
-        CHECK_LE(size, kMaxSize);
+        if (size > kMaxSize) return {true, 0};
     }
-    return static_cast<uint32_t>(size);
+    return {false, static_cast<uint32_t>(size)};
+}
+
+uint32_t sizeOfTensorData(uint32_t sizeOfElement, const std::vector<uint32_t>& dimensions) {
+    const auto [overflow, size] = sizeOfTensorDataHelper(sizeOfElement, dimensions);
+    CHECK(!overflow);
+    return size;
+}
+
+bool nonExtensionOperandSizeOfDataOverflowsUInt32(hal::OperandType type,
+                                                  const std::vector<uint32_t>& dimensions) {
+    CHECK(!isExtensionOperandType(type)) << "Size of extension operand data is unknown";
+    int n = static_cast<int>(type);
+    uint32_t sizeOfElement = tableLookup(kSizeOfDataType, kSizeOfDataTypeOEM, n);
+    return tableLookup(kScalarDataType, kScalarDataTypeOEM, n)
+                   ? false
+                   : sizeOfTensorDataOverflowsUInt32(sizeOfElement, dimensions);
+}
+
+bool sizeOfTensorDataOverflowsUInt32(uint32_t sizeOfElement,
+                                     const std::vector<uint32_t>& dimensions) {
+    return sizeOfTensorDataHelper(sizeOfElement, dimensions).first;
 }
 
 bool tensorHasUnspecifiedDimensions(int type, const uint32_t* dim, uint32_t dimCount) {
@@ -841,70 +867,6 @@ int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
         case ANEURALNETWORKS_OEM_OPERATION: {
             return ANEURALNETWORKS_NO_ERROR;
         }
-        case ANEURALNETWORKS_FLOOR: {
-            if (inputCount != 1 || outputCount != 1) {
-                logInvalidInOutNumber(1, 1);
-                return ANEURALNETWORKS_BAD_DATA;
-            }
-            auto inputType = operands[inputIndexes[0]].type;
-            std::vector<OperandType> inExpectedTypes;
-            std::vector<OperandType> outExpectedTypes;
-            if (inputType == OperandType::TENSOR_FLOAT32) {
-                NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, HalVersion::V1_0));
-                inExpectedTypes = {OperandType::TENSOR_FLOAT32};
-                outExpectedTypes = {OperandType::TENSOR_FLOAT32};
-            } else if (inputType == OperandType::TENSOR_FLOAT16) {
-                NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, HalVersion::V1_2));
-                inExpectedTypes = {OperandType::TENSOR_FLOAT16};
-                outExpectedTypes = {OperandType::TENSOR_FLOAT16};
-            } else {
-                LOG(ERROR) << "Unsupported input tensor type for operation "
-                           << getOperationName(opType);
-                return ANEURALNETWORKS_BAD_DATA;
-            }
-            return validateOperationOperandTypes(operands, inputCount, inputIndexes,
-                                                 inExpectedTypes, outputCount, outputIndexes,
-                                                 outExpectedTypes);
-        }
-        case ANEURALNETWORKS_LOCAL_RESPONSE_NORMALIZATION: {
-            if ((inputCount != 6 && inputCount != 5) || outputCount != 1) {
-                LOG(ERROR) << "Invalid number of input operands (" << inputCount
-                           << ", expected 6 or 5) or output operands (" << outputCount
-                           << ", expected 1) for operation " << getOperationName(opType);
-                return ANEURALNETWORKS_BAD_DATA;
-            }
-            auto inputType = operands[inputIndexes[0]].type;
-            std::vector<OperandType> inExpectedTypes;
-            std::vector<OperandType> outExpectedTypes;
-            if (inputType == OperandType::TENSOR_FLOAT32) {
-                NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, HalVersion::V1_0));
-                inExpectedTypes = {
-                        OperandType::TENSOR_FLOAT32, OperandType::INT32,   OperandType::FLOAT32,
-                        OperandType::FLOAT32,        OperandType::FLOAT32,
-                };
-                outExpectedTypes = {OperandType::TENSOR_FLOAT32};
-            } else if (inputType == OperandType::TENSOR_FLOAT16) {
-                NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, HalVersion::V1_2));
-                inExpectedTypes = {
-                        OperandType::TENSOR_FLOAT16, OperandType::INT32,   OperandType::FLOAT16,
-                        OperandType::FLOAT16,        OperandType::FLOAT16,
-                };
-                outExpectedTypes = {OperandType::TENSOR_FLOAT16};
-            } else {
-                LOG(ERROR) << "Unsupported input tensor type for operation "
-                           << getOperationName(opType);
-                return ANEURALNETWORKS_BAD_DATA;
-            }
-            if (inputCount == 6) {
-                inExpectedTypes.push_back(OperandType::INT32);
-                NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, HalVersion::V1_2));
-            } else if (operands[inputIndexes[0]].dimensions.size() != 4) {
-                NN_RETURN_IF_ERROR(validateHalVersion(opType, halVersion, HalVersion::V1_2));
-            }
-            return validateOperationOperandTypes(operands, inputCount, inputIndexes,
-                                                 inExpectedTypes, outputCount, outputIndexes,
-                                                 outExpectedTypes);
-        }
         case ANEURALNETWORKS_RESHAPE: {
             if (inputCount != 2 || outputCount != 1) {
                 logInvalidInOutNumber(2, 1);
@@ -932,6 +894,12 @@ int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
                 outExpectedTypes = {OperandType::TENSOR_QUANT8_ASYMM_SIGNED};
             } else {
                 LOG(ERROR) << "Unsupported input tensor type for operation "
+                           << getOperationName(opType);
+                return ANEURALNETWORKS_BAD_DATA;
+            }
+            const auto inputRank = operands[inputIndexes[0]].dimensions.size();
+            if (inputRank > 4) {
+                LOG(ERROR) << "Unsupported input tensor rank for operation "
                            << getOperationName(opType);
                 return ANEURALNETWORKS_BAD_DATA;
             }
@@ -1474,6 +1442,12 @@ int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
                            << getOperationName(opType);
                 return ANEURALNETWORKS_BAD_DATA;
             }
+            const auto inputRank = operands[inputIndexes[0]].dimensions.size();
+            if (inputRank > 4) {
+                LOG(ERROR) << "Unsupported input tensor rank for operation "
+                           << getOperationName(opType);
+                return ANEURALNETWORKS_BAD_DATA;
+            }
             return validateOperationOperandTypes(operands, inputCount, inputIndexes,
                                                  inExpectedTypes, outputCount, outputIndexes,
                                                  outExpectedTypes);
@@ -1520,6 +1494,12 @@ int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
                            << getOperationName(opType);
                 return ANEURALNETWORKS_BAD_DATA;
             }
+            const auto inputRank = operands[inputIndexes[0]].dimensions.size();
+            if (inputRank > 4) {
+                LOG(ERROR) << "Unsupported input tensor rank for operation "
+                           << getOperationName(opType);
+                return ANEURALNETWORKS_BAD_DATA;
+            }
             return validateOperationOperandTypes(operands, inputCount, inputIndexes,
                                                  inExpectedTypes, outputCount, outputIndexes,
                                                  outExpectedTypes);
@@ -1563,6 +1543,12 @@ int validateOperation(ANeuralNetworksOperationType opType, uint32_t inputCount,
         case ANEURALNETWORKS_MEAN: {
             if (inputCount != 3 || outputCount != 1) {
                 logInvalidInOutNumber(3, 1);
+                return ANEURALNETWORKS_BAD_DATA;
+            }
+            const auto inputRank = operands[inputIndexes[0]].dimensions.size();
+            if (inputRank > 4) {
+                LOG(ERROR) << "Unsupported input tensor rank for operation "
+                           << getOperationName(opType);
                 return ANEURALNETWORKS_BAD_DATA;
             }
             auto inputType = operands[inputIndexes[0]].type;
@@ -3157,6 +3143,41 @@ V1_3::Request convertToV1_3(const V1_0::Request& request) {
 
 V1_3::Request convertToV1_3(const V1_3::Request& request) {
     return request;
+}
+
+FenceState syncWait(int fd, int timeout) {
+    // This implementation is directly based on the ::sync_wait() implementation.
+
+    struct pollfd fds;
+    int ret;
+
+    if (fd < 0) {
+        errno = EINVAL;
+        return FenceState::UNKNOWN;
+    }
+
+    fds.fd = fd;
+    fds.events = POLLIN;
+
+    do {
+        ret = poll(&fds, 1, timeout);
+        if (ret > 0) {
+            if (fds.revents & POLLNVAL) {
+                errno = EINVAL;
+                return FenceState::UNKNOWN;
+            }
+            if (fds.revents & POLLERR) {
+                errno = EINVAL;
+                return FenceState::ERROR;
+            }
+            return FenceState::SIGNALED;
+        } else if (ret == 0) {
+            errno = ETIME;
+            return FenceState::ACTIVE;
+        }
+    } while (ret == -1 && (errno == EINTR || errno == EAGAIN));
+
+    return FenceState::UNKNOWN;
 }
 
 #ifdef NN_DEBUGGABLE

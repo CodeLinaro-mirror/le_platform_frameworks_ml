@@ -306,6 +306,7 @@ int ExecutionStep::addOperand(uint32_t sourceOperandIndex, uint32_t* stepOperand
 int ExecutionStep::addOperation(int operationIndex) {
     const Operation& operation = getSourceModel()->getOperation(operationIndex);
     if (mToken.ok()) {
+        mToken.update(&mSourceModelIndex, sizeof(mSourceModelIndex));
         mToken.update(&operationIndex, sizeof(operationIndex));
     }
 
@@ -1223,10 +1224,10 @@ int ExecutionPlan::Controller::waitForLastStepSyncFence() const {
         return ANEURALNETWORKS_NO_ERROR;
     }
     VLOG(EXECUTION) << "wait for mLastStepSyncFd " << mLastStepSyncFd;
-    int r = sync_wait(mLastStepSyncFd, -1);
+    auto r = syncWait(mLastStepSyncFd, -1);
     int n = ANEURALNETWORKS_NO_ERROR;
-    if (r < 0) {
-        LOG(ERROR) << "sync_wait failed, fd: " << mLastStepSyncFd;
+    if (r != FenceState::SIGNALED) {
+        LOG(ERROR) << "syncWait failed, fd: " << mLastStepSyncFd;
         n = ANEURALNETWORKS_OP_FAILED;
     }
     return n;
@@ -1940,7 +1941,7 @@ int ModelBuilder::findBestDeviceForEachOperation(
             }
         }
         if (bestChoice < 0) {
-            LOG(ERROR) << "No driver can do the op";
+            LOG(ERROR) << "No driver can do operation " << toString(operation.type);
             return ANEURALNETWORKS_BAD_DATA;
         } else if (devices[bestChoice] == DeviceManager::getCpuDevice() &&
                    (operation.type == OperationType::IF ||
