@@ -273,6 +273,21 @@ inline uint32_t nonExtensionOperandSizeOfData(const hal::Operand& operand) {
 // See also TypeManager::getSizeOfData(const Operand&).
 uint32_t sizeOfTensorData(uint32_t sizeOfElement, const std::vector<uint32_t>& dimensions);
 
+// Returns true if the amount of space needed to store a value of the specified
+// dimensions and element size overflows the uint32_t type.
+//
+// Aborts if the specified type is an extension type.
+//
+// See also TypeManager::sizeOfDataOverflowsUInt32(OperandType, const std::vector<uint32_t>&).
+bool nonExtensionOperandSizeOfDataOverflowsUInt32(hal::OperandType type,
+                                                  const std::vector<uint32_t>& dimensions);
+
+// Returns true if the amount of space needed to store a value of the specified
+// dimensions and element size overflows the uint32_t type.
+//
+// See also TypeManager::sizeOfDataOverflowsUInt32(OperandType, const std::vector<uint32_t>&).
+bool sizeOfTensorDataOverflowsUInt32(uint32_t elementSize, const std::vector<uint32_t>& dimensions);
+
 // Returns true if a non-extension operand type is a scalar type.
 //
 // Aborts if the specified type is an extension type.
@@ -543,6 +558,17 @@ constexpr hal::Priority convertToHalPriority(int32_t priority) {
     LOG(FATAL) << "unrecognized priority: " << priority;
     return {};
 }
+
+// The function syncWait() has the same semantics as the system function
+// ::sync_wait(), except that the syncWait() return value is semantically
+// richer.  The timeout parameter is in msecs.
+enum class FenceState {
+    ACTIVE,    // fence has not been signaled
+    SIGNALED,  // fence has been signaled
+    ERROR,     // fence has been placed in the error state
+    UNKNOWN,   // either bad argument passed to syncWait(), or internal error
+};
+FenceState syncWait(int fd, int timeout);
 
 #ifdef NN_DEBUGGABLE
 uint32_t getProp(const char* str, uint32_t defaultValue = 0);
