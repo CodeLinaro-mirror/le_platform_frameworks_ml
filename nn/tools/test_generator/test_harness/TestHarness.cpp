@@ -77,11 +77,12 @@ void expectNear(const TestOperand& op, const TestBuffer& result, const AccuracyC
         double actual = static_cast<double>(actualBuffer[i]);
         double expected = static_cast<double>(expectedBuffer[i]);
         double tolerableRange = criterion.atol + criterion.rtol * std::fabs(expected);
+        EXPECT_FALSE(std::isnan(expected));
 
         // Skip invalid floating point values.
-        if (allowInvalid && (std::isnan(expected) || std::isinf(expected) ||
-                             (std::is_same_v<T, float> && std::fabs(expected) > 1e3) ||
-                             (std::is_same_v<T, _Float16> || std::fabs(expected) > 1e2))) {
+        if (allowInvalid &&
+            (std::isinf(expected) || (std::is_same_v<T, float> && std::fabs(expected) > 1e3) ||
+             (std::is_same_v<T, _Float16> || std::fabs(expected) > 1e2))) {
             numSkip++;
             continue;
         }
@@ -292,19 +293,24 @@ void checkResults(const TestModel& model, const std::vector<TestBuffer>& buffers
 }
 
 TestModel convertQuant8AsymmOperandsToSigned(const TestModel& testModel) {
-    CHECK_EQ(testModel.referenced.size(), 0u) << "Subgraphs not supported";
-    TestModel converted(testModel.copy());
-    for (TestOperand& operand : converted.main.operands) {
-        if (operand.type == test_helper::TestOperandType::TENSOR_QUANT8_ASYMM) {
-            operand.type = test_helper::TestOperandType::TENSOR_QUANT8_ASYMM_SIGNED;
-            operand.zeroPoint -= 128;
-            const uint8_t* inputOperandData = operand.data.get<uint8_t>();
-            int8_t* outputOperandData = operand.data.getMutable<int8_t>();
-            for (size_t i = 0; i < operand.data.size(); ++i) {
-                outputOperandData[i] =
-                        static_cast<int8_t>(static_cast<int32_t>(inputOperandData[i]) - 128);
+    auto processSubgraph = [](TestSubgraph* subgraph) {
+        for (TestOperand& operand : subgraph->operands) {
+            if (operand.type == test_helper::TestOperandType::TENSOR_QUANT8_ASYMM) {
+                operand.type = test_helper::TestOperandType::TENSOR_QUANT8_ASYMM_SIGNED;
+                operand.zeroPoint -= 128;
+                const uint8_t* inputOperandData = operand.data.get<uint8_t>();
+                int8_t* outputOperandData = operand.data.getMutable<int8_t>();
+                for (size_t i = 0; i < operand.data.size(); ++i) {
+                    outputOperandData[i] =
+                            static_cast<int8_t>(static_cast<int32_t>(inputOperandData[i]) - 128);
+                }
             }
         }
+    };
+    TestModel converted(testModel.copy());
+    processSubgraph(&converted.main);
+    for (TestSubgraph& subgraph : converted.referenced) {
+        processSubgraph(&subgraph);
     }
     return converted;
 }

@@ -2317,7 +2317,7 @@ const TestModel& get_test_model() {
                         }},
                 .outputIndexes = {217}
             },
-        .minSupportedVersion = TestHalVersion::V1_0,
+        .minSupportedVersion = TestHalVersion::V1_2,
         .referenced = {}
     };
     return model;
