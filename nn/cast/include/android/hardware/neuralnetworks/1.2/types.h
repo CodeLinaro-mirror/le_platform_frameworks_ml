@@ -7562,7 +7562,7 @@ static inline bool operator!=(const ::android::hardware::neuralnetworks::V1_2::E
 namespace android {
 namespace hardware {
 namespace details {
-template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::Constant, 2> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::Constant> = {
+template<> static constexpr std::array<::android::hardware::neuralnetworks::V1_2::Constant, 2> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::Constant> = {
     ::android::hardware::neuralnetworks::V1_2::Constant::BYTE_SIZE_OF_CACHE_TOKEN,
     ::android::hardware::neuralnetworks::V1_2::Constant::MAX_NUMBER_OF_CACHE_FILES,
 };
@@ -7573,7 +7573,7 @@ template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::Const
 namespace android {
 namespace hardware {
 namespace details {
-template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::OperandType, 16> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::OperandType> = {
+template<> constexpr static std::array<::android::hardware::neuralnetworks::V1_2::OperandType, 16> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::OperandType> = {
     ::android::hardware::neuralnetworks::V1_2::OperandType::FLOAT32,
     ::android::hardware::neuralnetworks::V1_2::OperandType::INT32,
     ::android::hardware::neuralnetworks::V1_2::OperandType::UINT32,
@@ -7598,7 +7598,7 @@ template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::Opera
 namespace android {
 namespace hardware {
 namespace details {
-template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::OperandTypeRange, 6> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::OperandTypeRange> = {
+template<> constexpr static std::array<::android::hardware::neuralnetworks::V1_2::OperandTypeRange, 6> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::OperandTypeRange> = {
     ::android::hardware::neuralnetworks::V1_2::OperandTypeRange::BASE_MIN,
     ::android::hardware::neuralnetworks::V1_2::OperandTypeRange::FUNDAMENTAL_MIN,
     ::android::hardware::neuralnetworks::V1_2::OperandTypeRange::FUNDAMENTAL_MAX,
@@ -7613,7 +7613,7 @@ template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::Opera
 namespace android {
 namespace hardware {
 namespace details {
-template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::OperationType, 96> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::OperationType> = {
+template<> constexpr static std::array<::android::hardware::neuralnetworks::V1_2::OperationType, 96> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::OperationType> = {
     ::android::hardware::neuralnetworks::V1_2::OperationType::ADD,
     ::android::hardware::neuralnetworks::V1_2::OperationType::AVERAGE_POOL_2D,
     ::android::hardware::neuralnetworks::V1_2::OperationType::CONCATENATION,
@@ -7718,7 +7718,7 @@ template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::Opera
 namespace android {
 namespace hardware {
 namespace details {
-template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::OperationTypeRange, 6> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::OperationTypeRange> = {
+template<> constexpr static std::array<::android::hardware::neuralnetworks::V1_2::OperationTypeRange, 6> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::OperationTypeRange> = {
     ::android::hardware::neuralnetworks::V1_2::OperationTypeRange::BASE_MIN,
     ::android::hardware::neuralnetworks::V1_2::OperationTypeRange::FUNDAMENTAL_MIN,
     ::android::hardware::neuralnetworks::V1_2::OperationTypeRange::FUNDAMENTAL_MAX,
@@ -7733,7 +7733,7 @@ template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::Opera
 namespace android {
 namespace hardware {
 namespace details {
-template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::DeviceType, 4> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::DeviceType> = {
+template<> constexpr static std::array<::android::hardware::neuralnetworks::V1_2::DeviceType, 4> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::DeviceType> = {
     ::android::hardware::neuralnetworks::V1_2::DeviceType::OTHER,
     ::android::hardware::neuralnetworks::V1_2::DeviceType::CPU,
     ::android::hardware::neuralnetworks::V1_2::DeviceType::GPU,
@@ -7746,7 +7746,7 @@ template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::Devic
 namespace android {
 namespace hardware {
 namespace details {
-template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::Model::ExtensionTypeEncoding, 2> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::Model::ExtensionTypeEncoding> = {
+template<> constexpr static std::array<::android::hardware::neuralnetworks::V1_2::Model::ExtensionTypeEncoding, 2> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::Model::ExtensionTypeEncoding> = {
     ::android::hardware::neuralnetworks::V1_2::Model::ExtensionTypeEncoding::HIGH_BITS_PREFIX,
     ::android::hardware::neuralnetworks::V1_2::Model::ExtensionTypeEncoding::LOW_BITS_TYPE,
 };
@@ -7757,7 +7757,7 @@ template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::Model
 namespace android {
 namespace hardware {
 namespace details {
-template<> constexpr std::array<::android::hardware::neuralnetworks::V1_2::MeasureTiming, 2> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::MeasureTiming> = {
+template<> constexpr static std::array<::android::hardware::neuralnetworks::V1_2::MeasureTiming, 2> hidl_enum_values<::android::hardware::neuralnetworks::V1_2::MeasureTiming> = {
     ::android::hardware::neuralnetworks::V1_2::MeasureTiming::NO,
     ::android::hardware::neuralnetworks::V1_2::MeasureTiming::YES,
 };

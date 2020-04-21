@@ -170,7 +170,7 @@ static inline bool operator!=(const ::android::hidl::base::V1_0::DebugInfo& lhs,
 namespace android {
 namespace hardware {
 namespace details {
-template<> constexpr std::array<::android::hidl::base::V1_0::DebugInfo::Architecture, 3> hidl_enum_values<::android::hidl::base::V1_0::DebugInfo::Architecture> = {
+template<> constexpr static std::array<::android::hidl::base::V1_0::DebugInfo::Architecture, 3> hidl_enum_values<::android::hidl::base::V1_0::DebugInfo::Architecture> = {
     ::android::hidl::base::V1_0::DebugInfo::Architecture::UNKNOWN,
     ::android::hidl::base::V1_0::DebugInfo::Architecture::IS_64BIT,
     ::android::hidl::base::V1_0::DebugInfo::Architecture::IS_32BIT,
