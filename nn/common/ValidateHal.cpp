@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "NeuralNetworks.h"
@@ -223,11 +224,6 @@ static bool validateOperands(const hidl_vec<VersionedOperand>& operands,
                 }
             } break;
         }
-
-        // TODO Validate the numberOfConsumers.
-        // TODO Since we have to validate it, there was no point in including it. For the next
-        // release, consider removing unless we have an additional process in system space
-        // that creates this value. In that case, it would not have to be validated.
 
         // Validate the scale.
         switch (operand.type) {
@@ -483,10 +479,6 @@ static bool validateOperations(const hidl_vec<VersionedOperation>& operations,
         return &subgraph.operands[subgraph.outputIndexes[index]];
     };
     const size_t operandCount = operands.size();
-    // This vector keeps track of whether there's an operation that writes to
-    // each operand. It is used to validate that temporary variables and
-    // model outputs will be written to.
-    std::vector<bool> writtenTo(operandCount, false);
     for (auto& op : operations) {
         // TODO Validate the shapes and any known values. This is currently
         // done in CpuExecutor but should be done here for all drivers.
@@ -504,37 +496,19 @@ static bool validateOperations(const hidl_vec<VersionedOperation>& operations,
             return false;
         }
 
+        // This is redundant because of the checks in validateGraph(),
+        // but it is retained here in order to emit more informative
+        // error messages.
         for (uint32_t i : op.outputs) {
             const Operand& operand = operands[i];
             if (operand.lifetime != OperandLifeTime::TEMPORARY_VARIABLE &&
                 operand.lifetime != OperandLifeTime::SUBGRAPH_OUTPUT) {
-                LOG(ERROR) << "Writing to an operand with incompatible lifetime "
+                LOG(ERROR) << "Writing to operand " << i << " with incompatible lifetime "
                            << toString(operand.lifetime);
                 return false;
             }
-
-            // Check that we only write once to an operand.
-            if (writtenTo[i]) {
-                LOG(ERROR) << "Operand " << i << " written a second time";
-                return false;
-            }
-            writtenTo[i] = true;
         }
     }
-    for (size_t i = 0; i < operandCount; i++) {
-        if (!writtenTo[i]) {
-            const Operand& operand = operands[i];
-            if (operand.lifetime == OperandLifeTime::TEMPORARY_VARIABLE ||
-                operand.lifetime == OperandLifeTime::SUBGRAPH_OUTPUT) {
-                LOG(ERROR) << "Operand " << i << " with lifetime " << toString(operand.lifetime)
-                           << " is not being written to.";
-                return false;
-            }
-        }
-    }
-    // TODO More whole graph verifications are possible, for example that an
-    // operand is not use as input & output for the same op, and more
-    // generally that it is acyclic.
     return true;
 }
 
@@ -580,8 +554,9 @@ static bool validateModelInputOutputs(const hidl_vec<uint32_t> indexes,
         }
         const Operand& operand = operands[i];
         if (operand.lifetime != lifetime) {
-            LOG(ERROR) << "Model input or output has lifetime of " << toString(operand.lifetime)
-                       << " instead of the expected " << toString(lifetime);
+            LOG(ERROR) << "Model input or output operand " << i << " has lifetime of "
+                       << toString(operand.lifetime) << " instead of the expected "
+                       << toString(lifetime);
             return false;
         }
     }
@@ -593,6 +568,96 @@ static bool validateModelInputOutputs(const hidl_vec<uint32_t> indexes,
         LOG(ERROR) << "Model input or output occurs multiple times: " << *adjacentI;
         return false;
     }
+
+    for (size_t i = 0; i < operands.size(); ++i) {
+        if (operands[i].lifetime == lifetime &&
+            !binary_search(sortedIndexes.begin(), sortedIndexes.end(), i)) {
+            LOG(ERROR) << "Operand " << i << " marked as " << toString(lifetime)
+                       << " but is not included in Model input or output indexes";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+template <typename VersionedModelOrSubgraph>
+static bool validateGraph(const VersionedModelOrSubgraph& model) {
+    // set up counts
+    std::vector<uint32_t> operandNumberOfConsumers(model.operands.size(), 0);
+    //     Either the operand has a known value before model execution
+    //     begins, or we've seen a writer for this operand while
+    //     walking operands in execution order.
+    std::vector<bool> operandValueKnown(model.operands.size(), false);
+
+    // mark known operands
+    for (size_t i = 0; i < model.operands.size(); ++i) {
+        const auto& operand = model.operands[i];
+        const OperandLifeTime lifetime = convertToV1_3(operand.lifetime);
+        operandValueKnown[i] = lifetime == OperandLifeTime::SUBGRAPH_INPUT ||
+                               lifetime == OperandLifeTime::CONSTANT_COPY ||
+                               lifetime == OperandLifeTime::CONSTANT_REFERENCE ||
+                               lifetime == OperandLifeTime::NO_VALUE ||
+                               lifetime == OperandLifeTime::SUBGRAPH;
+    }
+
+    // Validate that operations are sorted into execution order.
+    //
+    // If there is a cycle in the graph, the operations will not
+    // appear to be sorted into execution order: Some operation will
+    // have an input for which operandValueKnown[] is false.
+    for (size_t i = 0; i < model.operations.size(); ++i) {
+        const auto& operation = model.operations[i];
+
+        for (size_t j = 0; j < operation.inputs.size(); ++j) {
+            uint32_t k = operation.inputs[j];
+            if (!operandValueKnown[k]) {
+                LOG(ERROR) << "Operation " << i << " input " << j << " (operand " << k
+                           << ") is read before it is written";
+                return false;
+            }
+            operandNumberOfConsumers[k]++;
+        }
+
+        for (size_t j = 0; j < operation.outputs.size(); ++j) {
+            uint32_t k = operation.outputs[j];
+            if (operandValueKnown[k]) {
+                // Assuming validateOperations() has returned true, we
+                // know that this output is TEMPORARY_VARIABLE or
+                // MODEL_OUTPUT, and so the only way
+                // operandValueKnown[k] can be true is if we've
+                // already seen a writer for this operand.
+                LOG(ERROR) << "Operation " << i << " output " << j << " (operand " << k
+                           << ") has already been written";
+                return false;
+            }
+            operandValueKnown[k] = true;
+        }
+    }
+
+    // validate number of consumers
+    //
+    // TODO Because we have to validate it, there was no point in including it
+    // in struct Operand. For the next release, consider removing unless we have
+    // an additional process in system space that creates this value. In that
+    // case, it would not have to be validated.
+    for (size_t i = 0; i < model.operands.size(); ++i) {
+        if (model.operands[i].numberOfConsumers != operandNumberOfConsumers[i]) {
+            LOG(ERROR) << "Operand " << i << " has incorrect number of consumers "
+                       << model.operands[i].numberOfConsumers << ", expected "
+                       << operandNumberOfConsumers[i];
+            return false;
+        }
+    }
+
+    // verify all operands are written
+    for (size_t i = 0; i < model.operands.size(); ++i) {
+        if (!operandValueKnown[i]) {
+            LOG(ERROR) << "Operand " << i << " is never written";
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -639,7 +704,7 @@ bool validateModel(const T_Model& model) {
                                       OperandLifeTime::SUBGRAPH_INPUT) &&
             validateModelInputOutputs(model.outputIndexes, latestVersionOperands,
                                       OperandLifeTime::SUBGRAPH_OUTPUT) &&
-            validatePools(model.pools, version));
+            validatePools(model.pools, version) && validateGraph(model));
 }
 
 template bool validateModel<V1_0::Model>(const V1_0::Model& model);
@@ -660,7 +725,8 @@ bool validateModel(const V1_3::Model& model) {
                 validateModelInputOutputs(subgraph.inputIndexes, subgraph.operands,
                                           OperandLifeTime::SUBGRAPH_INPUT) &&
                 validateModelInputOutputs(subgraph.outputIndexes, subgraph.operands,
-                                          OperandLifeTime::SUBGRAPH_OUTPUT));
+                                          OperandLifeTime::SUBGRAPH_OUTPUT) &&
+                validateGraph(subgraph));
     };
     return (validateSubgraph(model.main) &&
             std::all_of(model.referenced.begin(), model.referenced.end(), validateSubgraph) &&
@@ -779,6 +845,85 @@ bool validateRequest(const V1_3::Request& request, const V1_3::Model& model,
             validateRequestArguments(request.outputs, model.main.outputIndexes, model.main.operands,
                                      request.pools, allowUnspecifiedOutput, "output") &&
             validatePools(request.pools, HalVersion::V1_3));
+}
+
+bool validateMemoryDesc(const V1_3::BufferDesc& desc,
+                        const hidl_vec<sp<V1_3::IPreparedModel>>& preparedModels,
+                        const hidl_vec<V1_3::BufferRole>& inputRoles,
+                        const hidl_vec<V1_3::BufferRole>& outputRoles,
+                        std::function<const V1_3::Model*(const sp<V1_3::IPreparedModel>&)> getModel,
+                        std::set<PreparedModelRole>* preparedModelRoles,
+                        V1_3::Operand* combinedOperand) {
+    NN_RET_CHECK(preparedModels.size() != 0);
+    NN_RET_CHECK(inputRoles.size() != 0 || outputRoles.size() != 0);
+
+    std::set<PreparedModelRole> roles;
+    std::vector<V1_3::Operand> operands;
+    operands.reserve(inputRoles.size() + outputRoles.size());
+    for (const auto& role : inputRoles) {
+        NN_RET_CHECK_LT(role.modelIndex, preparedModels.size());
+        const auto& preparedModel = preparedModels[role.modelIndex];
+        NN_RET_CHECK(preparedModel != nullptr);
+        const auto* model = getModel(preparedModel);
+        NN_RET_CHECK(model != nullptr);
+        const auto& inputIndexes = model->main.inputIndexes;
+        NN_RET_CHECK_LT(role.ioIndex, inputIndexes.size());
+        NN_RET_CHECK_GT(role.frequency, 0.0f);
+        NN_RET_CHECK_LE(role.frequency, 1.0f);
+        const auto [it, success] = roles.emplace(preparedModel.get(), IOType::INPUT, role.ioIndex);
+        NN_RET_CHECK(success);
+        operands.push_back(model->main.operands[inputIndexes[role.ioIndex]]);
+    }
+    for (const auto& role : outputRoles) {
+        NN_RET_CHECK_LT(role.modelIndex, preparedModels.size());
+        const auto& preparedModel = preparedModels[role.modelIndex];
+        NN_RET_CHECK(preparedModel != nullptr);
+        const auto* model = getModel(preparedModel);
+        NN_RET_CHECK(model != nullptr);
+        const auto& outputIndexes = model->main.outputIndexes;
+        NN_RET_CHECK_LT(role.ioIndex, outputIndexes.size());
+        NN_RET_CHECK_GT(role.frequency, 0.0f);
+        NN_RET_CHECK_LE(role.frequency, 1.0f);
+        const auto [it, success] = roles.emplace(preparedModel.get(), IOType::OUTPUT, role.ioIndex);
+        NN_RET_CHECK(success);
+        operands.push_back(model->main.operands[outputIndexes[role.ioIndex]]);
+    }
+
+    CHECK(!operands.empty());
+    const auto opType = operands[0].type;
+    const bool isExtension = isExtensionOperandType(opType);
+
+    std::vector<uint32_t> dimensions = desc.dimensions;
+    for (const auto& operand : operands) {
+        NN_RET_CHECK(operand.type == operands[0].type)
+                << toString(operand.type) << " vs " << toString(operands[0].type);
+        NN_RET_CHECK_EQ(operand.scale, operands[0].scale);
+        NN_RET_CHECK_EQ(operand.zeroPoint, operands[0].zeroPoint);
+        // NOTE: validateMemoryDesc cannot validate extra parameters for extension operand type.
+        if (!isExtension) {
+            NN_RET_CHECK(operand.extraParams == operands[0].extraParams)
+                    << toString(operand.extraParams) << " vs " << toString(operands[0].extraParams);
+        }
+        const auto combined = combineDimensions(dimensions, operand.dimensions);
+        NN_RET_CHECK(combined.has_value());
+        dimensions = combined.value();
+    }
+
+    // NOTE: validateMemoryDesc cannot validate scalar dimensions with extension operand type.
+    if (!isExtension) {
+        NN_RET_CHECK(!nonExtensionOperandTypeIsScalar(static_cast<int>(opType)) ||
+                     dimensions.empty())
+                << "invalid dimensions with scalar operand type.";
+    }
+
+    if (preparedModelRoles != nullptr) {
+        *preparedModelRoles = std::move(roles);
+    }
+    if (combinedOperand != nullptr) {
+        *combinedOperand = operands[0];
+        combinedOperand->dimensions = dimensions;
+    }
+    return true;
 }
 
 bool validateExecutionPreference(ExecutionPreference preference) {

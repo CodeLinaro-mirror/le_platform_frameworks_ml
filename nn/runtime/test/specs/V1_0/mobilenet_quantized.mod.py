@@ -259,3 +259,7 @@ output0 = {i85: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
 
 # Instantiate an example
 Example((input0, output0))
+
+# Disable the V1_0 compliance check because hardware_buffer_blob is not
+# supported below V1_2.
+Example.SetVersion("V1_2", "mobilenet_quantized")

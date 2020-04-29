@@ -39,8 +39,8 @@ namespace nn {
 class Device;
 class ExecutionBurstController;
 class MetaModel;
+class ModelArgumentInfo;
 class VersionedIPreparedModel;
-struct ModelArgumentInfo;
 
 // A unified interface for actual driver prepared model as well as the CPU.
 class PreparedModel {
@@ -56,7 +56,8 @@ class PreparedModel {
     // Perform computation with given input/output argument info and memory pools.
     virtual std::tuple<int, std::vector<hal::OutputShape>, hal::Timing> execute(
             const std::vector<ModelArgumentInfo>& inputs,
-            const std::vector<ModelArgumentInfo>& outputs, const MemoryTracker& memories,
+            const std::vector<ModelArgumentInfo>& outputs,
+            const std::vector<const Memory*>& memories,
             const std::shared_ptr<ExecutionBurstController>& burstController,
             hal::MeasureTiming measure, const std::optional<Deadline>& deadline,
             const hal::OptionalTimeoutDuration& loopTimeoutDuration) const = 0;
@@ -66,9 +67,9 @@ class PreparedModel {
     // Returns error_code, sync_fence, callback and timing.
     virtual std::tuple<int, int, sp<hal::IFencedExecutionCallback>, hal::Timing> executeFenced(
             const std::vector<ModelArgumentInfo>& inputs,
-            const std::vector<ModelArgumentInfo>& outputs, const MemoryTracker& memories,
-            const std::vector<int>& waitFor, hal::MeasureTiming measure,
-            const std::optional<Deadline>& deadline,
+            const std::vector<ModelArgumentInfo>& outputs,
+            const std::vector<const Memory*>& memories, const std::vector<int>& waitFor,
+            hal::MeasureTiming measure, const std::optional<Deadline>& deadline,
             const hal::OptionalTimeoutDuration& loopTimeoutDuration,
             const hal::OptionalTimeoutDuration& timeoutDurationAfterFence) const = 0;
 
@@ -110,8 +111,8 @@ class Device {
 
     // The caller is responsible for making sure the MemoryDescriptor only contains PreparedModels
     // from the same Device.
-    virtual std::pair<int, std::unique_ptr<Memory>> allocate(
-            const MemoryDescriptor& desc) const = 0;
+    virtual std::pair<int, std::unique_ptr<Memory>> allocate(const MemoryDescriptor& desc,
+                                                             hal::OperandType type) const = 0;
 };
 
 // Manages the NN HAL devices.  Only one instance of this class will exist.

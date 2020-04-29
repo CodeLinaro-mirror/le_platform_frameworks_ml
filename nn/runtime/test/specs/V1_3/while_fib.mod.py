@@ -23,9 +23,11 @@
 #                        1 1])
 #     i = i + 1
 
-FibType = ["TENSOR_FLOAT32", "{1, 2}"]
-CounterType = ["TENSOR_INT32", "{1}"]
-BoolType = ["TENSOR_BOOL8", "{1}"]
+FibType = ["TENSOR_FLOAT32", [1, 2]]
+FibTypeQuant8 = ["TENSOR_QUANT8_ASYMM", 1.0, 0]
+FibTypeQuant8Signed = ["TENSOR_QUANT8_ASYMM_SIGNED", 1.0, 0]
+CounterType = ["TENSOR_INT32", [1]]
+BoolType = ["TENSOR_BOOL8", [1]]
 
 def MakeConditionModel():
   fib = Input("fib", FibType)
@@ -36,7 +38,15 @@ def MakeConditionModel():
   model.IdentifyInputs(fib, i, n)
   model.IdentifyOutputs(out)
   model.Operation("LESS", i, n).To(out)
-  return model
+
+  quant8 = DataTypeConverter().Identify({
+      fib: FibTypeQuant8,
+  })
+  quant8_signed = DataTypeConverter().Identify({
+      fib: FibTypeQuant8Signed,
+  })
+
+  return SubgraphReference("cond", model), quant8, quant8_signed
 
 def MakeBodyModel():
   fib = Input("fib", FibType)
@@ -44,26 +54,58 @@ def MakeBodyModel():
   n = Input("n", CounterType)
   fib_out = Output("fib_out", FibType)
   i_out = Output("i_out", CounterType)
-  matrix = Parameter("matrix", ["TENSOR_FLOAT32", "{2, 2}"], [0, 1, 1, 1])
-  zero_bias = Parameter("zero_bias", ["TENSOR_FLOAT32", "{2, 1}"], [0, 0])
+  matrix = Parameter("matrix", ["TENSOR_FLOAT32", [2, 2]], [0, 1, 1, 1])
+  zero_bias = Parameter("zero_bias", ["TENSOR_FLOAT32", [2, 1]], [0, 0])
   model = Model()
   model.IdentifyInputs(fib, i, n)
   model.IdentifyOutputs(fib_out, i_out)
   model.Operation("ADD", i, [1], 0).To(i_out)
   model.Operation("FULLY_CONNECTED", fib, matrix, zero_bias, 0).To(fib_out)
-  return model
 
-n = Input("n", CounterType)
-fib_out = Output("fib_out", FibType)
-cond = MakeConditionModel()
-body = MakeBodyModel()
-fib_init = Parameter("fib_init", FibType, [1, 1])
-i_init = [1]
-model = Model().Operation("WHILE", cond, body, fib_init, i_init, n).To(fib_out)
+  quant8 = DataTypeConverter().Identify({
+      fib: FibTypeQuant8,
+      matrix: FibTypeQuant8,
+      zero_bias: ["TENSOR_INT32", 1.0, 0],
+      fib_out: FibTypeQuant8,
+  })
+  quant8_signed = DataTypeConverter().Identify({
+      fib: FibTypeQuant8Signed,
+      matrix: FibTypeQuant8Signed,
+      zero_bias: ["TENSOR_INT32", 1.0, 0],
+      fib_out: FibTypeQuant8Signed,
+  })
+
+  return SubgraphReference("body", model), quant8, quant8_signed
+
+def Test(n, fib):
+  n_ = Input("n", CounterType)
+  fib_out = Output("fib_out", FibType)
+  cond, cond_quant8, cond_quant8_signed = MakeConditionModel()
+  body, body_quant8, body_quant8_signed = MakeBodyModel()
+  fib_init = Parameter("fib_init", FibType, [1, 1])
+  i_init = [1]
+  model = Model().Operation("WHILE", cond, body, fib_init, i_init, n_).To(fib_out)
+
+  quant8 = DataTypeConverter().Identify({
+      fib_init: FibTypeQuant8,
+      fib_out: FibTypeQuant8,
+      cond: cond_quant8,
+      body: body_quant8,
+  })
+  quant8_signed = DataTypeConverter().Identify({
+      fib_init: FibTypeQuant8Signed,
+      fib_out: FibTypeQuant8Signed,
+      cond: cond_quant8_signed,
+      body: body_quant8_signed,
+  })
+
+  example = Example({n_: [n], fib_out: fib}, name=str(n), model=model)
+  example.AddVariations("relaxed", "float16", quant8, quant8_signed)
+  example.AddVariations(AllOutputsAsInternalCoverter())
 
 # Fibonacci numbers: 1 1 2 3 5 8
-Example({n: [1], fib_out: [1, 1]}, name="1", model=model)
-Example({n: [2], fib_out: [1, 2]}, name="2", model=model)
-Example({n: [3], fib_out: [2, 3]}, name="3", model=model)
-Example({n: [4], fib_out: [3, 5]}, name="4", model=model)
-Example({n: [5], fib_out: [5, 8]}, name="5", model=model)
+Test(n=1, fib=[1, 1])
+Test(n=2, fib=[1, 2])
+Test(n=3, fib=[2, 3])
+Test(n=4, fib=[3, 5])
+Test(n=5, fib=[5, 8])

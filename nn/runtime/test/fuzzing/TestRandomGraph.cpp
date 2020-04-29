@@ -196,10 +196,6 @@ class RandomGraphTest : public ::testing::TestWithParam<uint32_t> {
                 //       [0, 255]. We should investigate on a better buffer value generation
                 //       algorithm that represents the real-world cases.
                 "TestRandomGraph_SingleOperationTest_CONV_2D_V1_2_40",
-                // TODO(xusongw): Remove after b/151325288 is resolved.
-                "TestRandomGraph_RandomGraphTest_LargeGraph_TENSOR_FLOAT32_Rank4_9",
-                // TODO(xusongw): Remove after b/151327288 is resolved.
-                "TestRandomGraph_RandomGraphTest_LargeGraph_TENSOR_FLOAT32_Rank1_4",
         };
         if (kDisabledTests.find(mTestName) != kDisabledTests.end()) return true;
         for (const auto& op : mTestModel.main.operations) {
@@ -209,8 +205,18 @@ class RandomGraphTest : public ::testing::TestWithParam<uint32_t> {
                 featureLevel <= __ANDROID_API_Q__) {
                 return true;
             }
-            // TODO(xusongw): Remove after b/151328024 is resolved.
-            if (op.type == TestOperationType::ROI_ALIGN) {
+            // L2_NORMALIZATION on axis of all zeros is undefined before R.
+            if (op.type == TestOperationType::L2_NORMALIZATION &&
+                featureLevel <= __ANDROID_API_Q__) {
+                return true;
+            }
+            // TODO(xusongw): Remove after b/151328024, b/152446228, b/152445711, and b/152446298
+            //                are resolved.
+            if ((op.type == TestOperationType::ROI_ALIGN || op.type == TestOperationType::ADD ||
+                 op.type == TestOperationType::SUB || op.type == TestOperationType::MAXIMUM ||
+                 op.type == TestOperationType::MINIMUM) &&
+                mTestModel.main.operands[op.inputs[0]].type ==
+                        TestOperandType::TENSOR_QUANT8_ASYMM) {
                 return true;
             }
         }

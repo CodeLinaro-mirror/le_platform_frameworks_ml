@@ -146,6 +146,9 @@ int OperationExecutionContext::getResultCode() const {
 // TODO: Return error code directly once we've fully integrated OperationResolver with all ops.
 // Updates the RunTimeOperandInfo with the newly calculated shape.
 // Allocate the buffer if we need to.
+//
+// TODO(b/153081229): This function currently cannot handle extension operands well. We need to
+//                    propagate the extension type info into this function.
 bool setInfoAndAllocateIfNeeded(RunTimeOperandInfo* info, const Shape& shape, int* result) {
     // For user-provided model output operands, the parameters must match the Shape
     // calculated from the preparation step.
@@ -155,17 +158,15 @@ bool setInfoAndAllocateIfNeeded(RunTimeOperandInfo* info, const Shape& shape, in
             *result = ANEURALNETWORKS_OP_FAILED;
             return false;
         }
-        if (info->type == OperandType::TENSOR_QUANT8_ASYMM) {
-            if (info->scale != shape.scale) {
-                LOG(ERROR) << "Invalid scale for model output";
-                *result = ANEURALNETWORKS_OP_FAILED;
-                return false;
-            }
-            if (info->zeroPoint != shape.offset) {
-                LOG(ERROR) << "Invalid zeroPoint for model output";
-                *result = ANEURALNETWORKS_OP_FAILED;
-                return false;
-            }
+        if (info->scale != shape.scale) {
+            LOG(ERROR) << "Invalid scale for model output";
+            *result = ANEURALNETWORKS_OP_FAILED;
+            return false;
+        }
+        if (info->zeroPoint != shape.offset) {
+            LOG(ERROR) << "Invalid zeroPoint for model output";
+            *result = ANEURALNETWORKS_OP_FAILED;
+            return false;
         }
         if (info->extraParams != shape.extraParams) {
             LOG(ERROR) << "Invalid extraParams for model output";
@@ -185,6 +186,15 @@ bool setInfoAndAllocateIfNeeded(RunTimeOperandInfo* info, const Shape& shape, in
     info->scale = shape.scale;
     info->zeroPoint = shape.offset;
     info->extraParams = shape.extraParams;
+
+    // TODO(b/153081229): We bypass the overflow check on extension operands because we do not know
+    //                    the sizes of extension types.
+    if (!isExtensionOperandType(info->type) &&
+        nonExtensionOperandSizeOfDataOverflowsUInt32(info->type, info->dimensions)) {
+        LOG(ERROR) << "Operand data size overflows uint32_t";
+        *result = ANEURALNETWORKS_OP_FAILED;
+        return false;
+    }
 
     // Allocate the buffer only if the combined dimension is fully specified
     if (info->buffer == nullptr && (info->lifetime == OperandLifeTime::TEMPORARY_VARIABLE ||
@@ -834,63 +844,6 @@ int CpuExecutor::executeOperation(const Operation& operation, RunTimeOperandInfo
         case OperationType::OEM_OPERATION: {
             LOG(ERROR) << "OEM operation not supported for CPU execution";
             success = false;
-        } break;
-        case OperationType::FLOOR: {
-            if (!allParametersPresent(1, 1)) {
-                return ANEURALNETWORKS_BAD_DATA;
-            }
-            const RunTimeOperandInfo& input = operands[ins[0]];
-            RunTimeOperandInfo& output = operands[outs[0]];
-            Shape outShape = output.shape();
-
-            if (!floorPrepare(input.shape(), &outShape) ||
-                !setInfoAndAllocateIfNeeded(&output, outShape, &result)) {
-                break;
-            }
-            if (input.type == OperandType::TENSOR_FLOAT32) {
-                success = floorFloat32(reinterpret_cast<const float*>(input.buffer),
-                                       reinterpret_cast<float*>(output.buffer), outShape);
-            } else if (input.type == OperandType::TENSOR_FLOAT16) {
-                success = floorFloat16(reinterpret_cast<const _Float16*>(input.buffer),
-                                       reinterpret_cast<_Float16*>(output.buffer), outShape);
-            }
-        } break;
-        case OperationType::LOCAL_RESPONSE_NORMALIZATION: {
-            const size_t inCount = ins.size();
-            if ((inCount != 6 && inCount != 5) || !allParametersPresent(inCount, 1)) {
-                return ANEURALNETWORKS_BAD_DATA;
-            }
-            const RunTimeOperandInfo& input = operands[ins[0]];
-            int32_t radius = getScalarData<int32_t>(operands[ins[1]]);
-            float bias = (input.type == OperandType::TENSOR_FLOAT16)
-                                 ? getScalarData<_Float16>(operands[ins[2]])
-                                 : getScalarData<float>(operands[ins[2]]);
-            float alpha = (input.type == OperandType::TENSOR_FLOAT16)
-                                  ? getScalarData<_Float16>(operands[ins[3]])
-                                  : getScalarData<float>(operands[ins[3]]);
-            float beta = (input.type == OperandType::TENSOR_FLOAT16)
-                                 ? getScalarData<_Float16>(operands[ins[4]])
-                                 : getScalarData<float>(operands[ins[4]]);
-            const int32_t axis = inCount == 6 ? getScalarData<int32_t>(operands[ins[5]]) : -1;
-
-            RunTimeOperandInfo& output = operands[outs[0]];
-            Shape outShape = output.shape();
-
-            if (!genericNormalizationPrepare(input.shape(), &outShape) ||
-                !setInfoAndAllocateIfNeeded(&output, outShape, &result)) {
-                success = false;
-                break;
-            }
-            if (input.type == OperandType::TENSOR_FLOAT32) {
-                success = localResponseNormFloat32(
-                        reinterpret_cast<const float*>(input.buffer), input.shape(), radius, bias,
-                        alpha, beta, axis, reinterpret_cast<float*>(output.buffer), outShape);
-            } else if (input.type == OperandType::TENSOR_FLOAT16) {
-                success = localResponseNormFloat16(reinterpret_cast<const _Float16*>(input.buffer),
-                                                   input.shape(), radius, bias, alpha, beta, axis,
-                                                   reinterpret_cast<_Float16*>(output.buffer),
-                                                   outShape);
-            }
         } break;
         case OperationType::RESHAPE: {
             if (!allParametersPresent(2, 1)) {
@@ -1779,6 +1732,10 @@ static void setInfoExceptLifetime(RunTimeOperandInfo* to, const RunTimeOperandIn
 int CpuExecutor::executeIfOperation(const Operation& operation, RunTimeOperandInfo* operands) {
     namespace op = operation_if;
     const RunTimeOperandInfo& condOperand = operands[operation.inputs[op::kCondBoolOperand]];
+    if (condOperand.buffer == nullptr) {
+        LOG(ERROR) << "Cannot read IF condition operand value";
+        return ANEURALNETWORKS_OP_FAILED;
+    }
     const bool condValue = *reinterpret_cast<const bool8*>(condOperand.buffer);
     VLOG(CPUEXE) << "CpuExecutor::executeIfOperation: condition value: " << condValue;
 

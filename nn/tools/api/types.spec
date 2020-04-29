@@ -18,7 +18,7 @@
 %define APILevel29 API level 29
 %define APILevel30 API level 30
 %define BeforeAPILevel29For Before API level 29, for
-%define or_1.2 or {@link ANEURALNETWORKS_%{1}} 
+%define or_1.2 or {@link ANEURALNETWORKS_%{1}}
 %define-lines AVAIL27
      *
      * Available since API level 27.
@@ -97,7 +97,7 @@
 
 %kind hal_1.2 hal_1.3
 %define BeforeAPILevel29For Before HAL version 1.2, for
-%define or_1.2 or {@link OperandType::%{1}} 
+%define or_1.2 or {@link OperandType::%{1}}
 %/kind
 
 %kind hal_1.2
@@ -132,7 +132,7 @@
 %/kind
 
 %kind ndk hal_1.3
-%define AndQuant8Signed 
+%define AndQuant8Signed
 %/kind
 %kind hal_1.0 hal_1.1 hal_1.2
 %define AndQuant8Signed
@@ -522,7 +522,7 @@
 %/kind
      * * 2: A 1-D tensor, of shape [depth_out], specifying the bias. For input
      *      tensor of type {@link %{OperandTypeLinkPfx}TENSOR_FLOAT32}
-     *      %{or_1.2 TENSOR_FLOAT16}the bias must be of the same type.
+     *      %{or_1.2 TENSOR_FLOAT16} the bias must be of the same type.
 %kind ndk hal_1.3+
      *      For filter tensor of {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM}
      *      and {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED},
@@ -582,7 +582,7 @@
 %/kind
      * * 2: A 1-D tensor, of shape [depth_out], specifying the bias. For input
      *      tensor of type {@link %{OperandTypeLinkPfx}TENSOR_FLOAT32}
-     *      %{or_1.2 TENSOR_FLOAT16}the bias must be of the same
+     *      %{or_1.2 TENSOR_FLOAT16} the bias must be of the same
      *      type.
 %kind ndk hal_1.3+
      *      For filter tensor of {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM}
@@ -706,7 +706,7 @@
 %/kind
      * * 2: A 1-D tensor, of shape [depth_out], specifying the bias. For input
      *      tensor of type {@link %{OperandTypeLinkPfx}TENSOR_FLOAT32}
-     *      %{or_1.2 TENSOR_FLOAT16}the bias must be of the same type.
+     *      %{or_1.2 TENSOR_FLOAT16} the bias must be of the same type.
 %kind ndk hal_1.3+
      *      For filter tensor of {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM}
      *      and {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED},
@@ -761,7 +761,7 @@
      *      specifying the filter.
      * * 2: A 1-D tensor, of shape [depth_out], specifying the bias. For input
      *      tensor of type {@link %{OperandTypeLinkPfx}TENSOR_FLOAT32}
-     *      %{or_1.2 TENSOR_FLOAT16}the bias must be of the same type.
+     *      %{or_1.2 TENSOR_FLOAT16} the bias must be of the same type.
 %kind ndk hal_1.3+
      *      For filter tensor of {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM}
      *      and {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED},
@@ -1098,7 +1098,7 @@
     %{DeclareOperation HASHTABLE_LOOKUP 10},
 
     /**
-     * Applies L2 normalization along the depth dimension.
+     * Applies L2 normalization along the axis dimension.
      *
      * The values in the output tensor are computed as:
      *
@@ -1107,8 +1107,7 @@
      *         sqrt(sum_{c} pow(input[batch, row, col, c], 2))
      *
 %kind ndk hal_1.2+
-     * For input tensor with rank less than 4, independently normalizes each
-     * 1-D slice along dimension dim.
+     * By default the axis dimension is the last dimension of the input tensor.
      *
 %/kind
      * Supported tensor {@link %{OperandType}}:
@@ -1154,6 +1153,10 @@
 %kind ndk hal_1.3+
      *      For {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED},
      *      the scale must be 1.f / 128 and the zeroPoint must be 0.
+     *
+     *      NOTE: Before %{APILevel30}, if the elements along an axis are all zeros,
+     *      the result is undefined. Since %{APILevel30}, if the elements along an axis
+     *      are all zeros, the result is logical zero.
 %/kind
 %insert-lines AVAIL27
      */
@@ -4962,7 +4965,8 @@
      * * 1: A scalar {@link %{OperandTypeLinkPfx}INT32}, specifying the number of
      *      independent samples to draw for each row slice.
      * * 2: A 1-D {@link %{OperandTypeLinkPfx}TENSOR_INT32} tensor with shape [2],
-     *      specifying seeds used to initialize the random distribution.
+     *      specifying seeds used to initialize the random distribution. If both
+     *      provided seeds are 0, both will be randomly generated.
      * Outputs:
      * * 0: A 2-D {@link %{OperandTypeLinkPfx}TENSOR_INT32} tensor with shape
      *      [batches, samples], containing the drawn samples.
@@ -6250,6 +6254,8 @@
      * * {@link %{OperandTypeLinkPfx}TENSOR_FLOAT16}
      * * {@link %{OperandTypeLinkPfx}TENSOR_FLOAT32}
      *
+     * Supported tensor rank: from 1.
+     *
      * Inputs:
      * * 0: A tensor, specifying the input. May be zero-sized.
      * * 1: A scalar, specifying the alpha parameter.
@@ -6280,6 +6286,8 @@
      * * {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM}
      * * {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED}
      *
+     * Supported tensor rank: from 1.
+     *
      * Inputs:
      * * 0: A tensor, specifying the input. May be zero-sized.
      *
@@ -6298,6 +6306,8 @@
      * * {@link %{OperandTypeLinkPfx}TENSOR_FLOAT16}
      * * {@link %{OperandTypeLinkPfx}TENSOR_FLOAT32}
      * * {@link %{OperandTypeLinkPfx}TENSOR_INT32}
+     *
+     * Supported tensor rank: from 1.
      *
      * Inputs:
      * * 0: A 1-D tensor, specifying the desired output tensor shape.
@@ -6332,6 +6342,8 @@
      * * {@link %{OperandTypeLinkPfx}TENSOR_QUANT16_ASYMM}
      * * {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_SYMM}
      * * {@link %{OperandTypeLinkPfx}TENSOR_QUANT8_ASYMM_SIGNED}
+     *
+     * Supported tensor rank: from 1.
      *
      * Inputs:
      * * 0: The input tensor.
