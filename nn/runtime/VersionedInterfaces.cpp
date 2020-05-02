@@ -23,6 +23,7 @@
 #include <android-base/scopeguard.h>
 #include <android-base/thread_annotations.h>
 #include <android/sync.h>
+#include <cutils/native_handle.h>
 
 #include <algorithm>
 #include <chrono>
@@ -455,9 +456,9 @@ VersionedIPreparedModel::executeFenced(
             return std::make_tuple(ANEURALNETWORKS_BAD_DATA, hal::hidl_handle(nullptr), nullptr,
                                    timing);
         }
-        int r = sync_wait(syncFd, -1);
-        if (r < 0) {
-            LOG(ERROR) << "sync_wait failed, fd: " << syncFd;
+        auto r = syncWait(syncFd, -1);
+        if (r != FenceState::SIGNALED) {
+            LOG(ERROR) << "syncWait failed, fd: " << syncFd;
             return std::make_tuple(ANEURALNETWORKS_OP_FAILED, hal::hidl_handle(nullptr), nullptr,
                                    timing);
         }
@@ -1465,24 +1466,6 @@ std::pair<int, std::shared_ptr<VersionedIPreparedModel>> VersionedIDevice::prepa
     // prepareModelFromCache could not be used or failed.
     const Model model = makeModel();
     return prepareModelInternal(model, preference, priority, deadline, cacheDir, maybeToken);
-}
-
-DeviceStatus VersionedIDevice::getStatus() const {
-    // version 1.0+ HAL
-    if (getDevice<V1_0::IDevice>() != nullptr) {
-        Return<DeviceStatus> ret = recoverable<DeviceStatus, V1_0::IDevice>(
-                __FUNCTION__, [](const sp<V1_0::IDevice>& device) { return device->getStatus(); });
-
-        if (!ret.isOk()) {
-            LOG(ERROR) << "getStatus failure: " << ret.description();
-            return DeviceStatus::UNKNOWN;
-        }
-        return static_cast<DeviceStatus>(ret);
-    }
-
-    // No device available
-    LOG(ERROR) << "Device not available!";
-    return DeviceStatus::UNKNOWN;
 }
 
 int64_t VersionedIDevice::getFeatureLevel() const {

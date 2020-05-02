@@ -372,7 +372,12 @@ class Parameter(Operand):
         Operand.__init__(self, name, opType, value, backward, skipRenaming=skipRenaming,
                          extraParams=extraParams)
         self.initializer = NamedVariable(str(self) + "_init")
-        self.lifetime = "CONSTANT_REFERENCE" if Configuration.useSHM() else "CONSTANT_COPY"
+        if value is None:
+            self.lifetime = "NO_VALUE"
+        elif Configuration.useSHM():
+            self.lifetime = "CONSTANT_REFERENCE"
+        else:
+            self.lifetime = "CONSTANT_COPY"
 
 # A shortcut for parameters of INT32
 class Int32Scalar(Parameter, ImplicitParameter):
@@ -428,9 +433,11 @@ class Float32Vector(Parameter, ImplicitParameter):
 
 # A shortcut for a SUBGRAPH parameter
 class SubgraphReference(Parameter, ImplicitParameter):
-    def __init__(self, name, value):
-        Parameter.__init__(self, name, ("SUBGRAPH", []), value)
+    def __init__(self, name, model):
+        Parameter.__init__(self, name, ("SUBGRAPH", []), model)
         self.lifetime = "SUBGRAPH"
+        if model.name is None:
+            model.name = name
     @staticmethod
     def IsCompatible(value):
         return type(value) is Model
@@ -738,23 +745,26 @@ class DefaultVariation(ModelVariation):
 
 # Convert operand data type
 class DataTypeConverter(ModelVariation, ImplicitVariation):
+    supportsSubgraphs = True
 
-    def __init__(self, targetType=None, name=None):
+    def __init__(self, targetType=None, name=None, scale=None, zeroPoint=None):
         ModelVariation.__init__(self, name=name)
         if targetType is not None:
             assert DataTypeConverter.IsCompatible(targetType)
         self.targetType = targetType
+        self.scale = scale
+        self.zeroPoint = zeroPoint
 
     @staticmethod
     def IsCompatible(value):
-        return value.lower() in ["float16", "int32"]
+        return value.lower() in ["float16", "int32", "quant8", "quant8_signed"]
 
     def SetToDefaultName(self):
         if self.targetType is not None:
             self.name = self.targetType.lower()
             return self
-        # get all target types
-        targetTypes = list(zip(*self.targetOperands.values()))[0]
+        targetTypes = list(zip(*(arg for arg in self.targetOperands.values()
+                                 if type(arg) is not DataTypeConverter)))[0]
         if "TENSOR_QUANT8_SYMM_PER_CHANNEL" in targetTypes:
             self.name = "channelQuant8"
         elif "TENSOR_QUANT8_ASYMM" in targetTypes:
@@ -771,15 +781,38 @@ class DataTypeConverter(ModelVariation, ImplicitVariation):
 
     def AutoIdentify(self, model):
         if self.targetType is not None:
+            if self.targetType == "quant8" or self.targetType == "quant8_signed":
+                if self.targetType == "quant8":
+                    tensorType = "TENSOR_QUANT8_ASYMM"
+                else:
+                    tensorType = "TENSOR_QUANT8_ASYMM_SIGNED"
+                assert self.scale is not None
+                assert self.zeroPoint is not None
+                tensorType = [tensorType, self.scale, self.zeroPoint]
+                scalarType = None  # Not supported.
+            else:
+                tensorType = ["TENSOR_" + self.targetType.upper()]
+                scalarType = [self.targetType.upper()]
             # By default, select all the float32 tensors/scalars
-            targets = {op: ["TENSOR_" + self.targetType.upper()] \
-                    for op in model.operands if op.type.type == "TENSOR_FLOAT32"}
-            targets.update({op: [self.targetType.upper()] \
-                    for op in model.operands if op.type.type == "FLOAT32"})
+            targets = dict()
+            targets.update({op: DataTypeConverter(self.targetType, self.name,
+                                                  self.scale, self.zeroPoint)
+                            for op in model.operands if op.type.type == "SUBGRAPH"})
+            targets.update({op: tensorType
+                            for op in model.operands if op.type.type == "TENSOR_FLOAT32"})
+            if scalarType is not None:
+                targets.update({op: scalarType
+                                for op in model.operands if op.type.type == "FLOAT32"})
             self.Identify(targets)
         return self
 
     def TransformOperand(self, op, arg=None):
+        if type(arg) is DataTypeConverter:
+            # Handle nested SUBGRAPHs
+            assert len(op.value) == 1
+            assert type(op.value[0]) is Model
+            op.value[0] = arg.ApplyTo(op.value[0])
+            return op
         if len(arg) == 1:
             typeTuple = (arg[0], op.type.dimensions)
         else:

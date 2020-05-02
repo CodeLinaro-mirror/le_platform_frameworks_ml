@@ -20,6 +20,7 @@
 
 #include <android-base/scopeguard.h>
 #include <android/hardware_buffer.h>
+#include <cutils/native_handle.h>
 #include <vndk/hardware_buffer.h>
 
 #include <algorithm>
@@ -133,7 +134,6 @@ class DeviceMemoryValidator : public MemoryValidatorBase {
     }
 
     Metadata getMetadata() const override {
-        CHECK(mInitialized);
         return {.logicalSize = TypeManager::get()->getSizeOfData(kOperand.type, mUpdatedDimensions),
                 .dimensions = mUpdatedDimensions,
                 .operand = kOperand};
@@ -155,6 +155,10 @@ class DeviceMemoryValidator : public MemoryValidatorBase {
                              TypeManager::get()->getSizeOfData(kOperand.type, combined.value()));
         mUpdatedDimensions = std::move(combined.value());
         return true;
+    }
+
+    bool createdWithUnknownShape() const override {
+        return TypeManager::get()->getSizeOfData(kOperand.type, kInitialDimensions) == 0;
     }
 
     void setInitialized(bool initialized) override { mInitialized = initialized; }
@@ -242,7 +246,7 @@ static int copyHidlMemories(const std::optional<RunTimePoolInfo>& src,
     return ANEURALNETWORKS_NO_ERROR;
 }
 
-static int copyIBufferToHidlMemory(const sp<IBuffer>& src, const hidl_memory& dst) {
+int copyIBufferToHidlMemory(const sp<IBuffer>& src, const hidl_memory& dst) {
     const auto ret = src->copyTo(dst);
     if (!ret.isOk()) {
         LOG(ERROR) << "ANeuralNetworksMemory_copy failure: " << ret.description();
@@ -251,8 +255,8 @@ static int copyIBufferToHidlMemory(const sp<IBuffer>& src, const hidl_memory& ds
     return convertErrorStatusToResultCode(static_cast<ErrorStatus>(ret));
 }
 
-static int copyHidlMemoryToIBuffer(const hidl_memory& src, const sp<IBuffer>& dst,
-                                   const std::vector<uint32_t>& dimensions) {
+int copyHidlMemoryToIBuffer(const hidl_memory& src, const sp<IBuffer>& dst,
+                            const std::vector<uint32_t>& dimensions) {
     const auto ret = dst->copyFrom(src, dimensions);
     if (!ret.isOk()) {
         LOG(ERROR) << "ANeuralNetworksMemory_copy failure: " << ret.description();
@@ -422,7 +426,7 @@ static void logMemoryDescriptorToInfo(const MemoryDescriptor& desc, const Operan
     LOG(INFO) << "    Zero point: " << toString(operand.zeroPoint);
     LOG(INFO) << "    Extra params: " << toString(operand.extraParams);
     LOG(INFO) << "    Dimensions: " << toString(desc.dimensions);
-    LOG(INFO) << "    Submodels [" << desc.preparedModels.size() << "]:";
+    LOG(INFO) << "    Prepared models [" << desc.preparedModels.size() << "]:";
     for (const auto* preparedModel : desc.preparedModels) {
         LOG(INFO) << "        service = " << preparedModel->getDevice()->getName();
     }
@@ -457,7 +461,10 @@ int MemoryBuilder::finish() {
         logMemoryDescriptorToInfo(mDesc, mOperand.value());
     }
     std::set<const Device*> devices = getDevices(mDesc);
-    if (devices.size() == 1) {
+    if (devices.empty()) {
+        // This can happen with interpreted control flow.
+        mAllocator = nullptr;
+    } else if (devices.size() == 1) {
         mAllocator = *devices.begin();
         VLOG(MEMORY) << "Using " << mAllocator->getName() << " as allocator.";
     } else {

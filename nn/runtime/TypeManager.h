@@ -17,12 +17,13 @@
 #ifndef ANDROID_FRAMEWORKS_ML_NN_RUNTIME_TYPE_MANAGER_H
 #define ANDROID_FRAMEWORKS_ML_NN_RUNTIME_TYPE_MANAGER_H
 
-#include "HalInterfaces.h"
-#include "Manager.h"
-
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
+
+#include "HalInterfaces.h"
+#include "Manager.h"
 
 namespace android {
 namespace nn {
@@ -65,6 +66,7 @@ class TypeManager {
     // unspecified dimension, returns zero.
     //
     // Aborts if the type is an unknown extension type.
+    // Aborts if the size would overflow the return type.
     uint32_t getSizeOfData(const hal::Operand& operand) const {
         return getSizeOfData(operand.type, operand.dimensions);
     }
@@ -75,6 +77,13 @@ class TypeManager {
     //
     // Aborts if the type is an unknown extension type.
     uint32_t getSizeOfData(hal::OperandType type, const std::vector<uint32_t>& dimensions) const;
+
+    // Returns true if the amount of space needed to store a value of the specified
+    // dimensions and element size overflows the uint32_t type.
+    //
+    // See also TypeManager::sizeOfDataOverflowsUInt32().
+    bool sizeOfDataOverflowsUInt32(hal::OperandType type,
+                                   const std::vector<uint32_t>& dimensions) const;
 
     // Returns true if extensions usage is allowed in current process.
     bool areExtensionsAllowed() const { return mExtensionsAllowed; }
