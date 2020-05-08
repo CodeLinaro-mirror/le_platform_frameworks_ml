@@ -22,23 +22,57 @@
 
 #include <functional>
 #include <iostream>
+#include <sstream>
 #include <memory>
 #include <stdio.h>
 #include <stdarg.h>
+#include <log/log.h>
 
 #include "android-base/macros.h"
-
-namespace android
-{
-namespace base
-{
-
-#define LOG_BUF_SIZE 4096
 
 enum LogSeverity
 {
   VERBOSE, DEBUG, INFO, WARNING, ERROR, FATAL,
 };
+
+class LogStream : public std::stringstream {
+public:
+    LogStream(LogSeverity severity) : severity_(severity) {}
+    ~LogStream() {
+        switch(severity_) {
+            case VERBOSE:
+                ALOGV("%s", this->str().c_str());
+                break;
+            case DEBUG:
+                ALOGD("%s", this->str().c_str());
+                break;
+            case INFO:
+                ALOGI("%s", this->str().c_str());
+                break;
+            case WARNING:
+                ALOGW("%s", this->str().c_str());
+                break;
+            case ERROR:
+            case FATAL:
+                ALOGE("%s", this->str().c_str());
+                break;
+        }
+    }
+private:
+    LogSeverity severity_;
+};
+
+#define LOG(sevirity) LogStream(sevirity) << std::endl                                \
+                                          << "[" __FILE__ << "(" << __LINE__ << "):(" \
+                                          << #sevirity << ")]"
+
+namespace android
+{
+
+namespace base
+{
+
+#define LOG_BUF_SIZE 4096
 
 // This class is used to explicitly ignore values in the conditional
 // logging macros.  This avoids compiler warnings like "value computed
@@ -55,15 +89,6 @@ class LogMessageVoidify
 // This is never instantiated. This is only used with LogMessageVoidify to have
 // the correct type.
 static std::ostream* local_swallow_stream;
-
-// Logs a message to logcat on Android otherwise to stderr. If the severity is
-// FATAL it also causes an abort. For example:
-//
-//     LOG(FATAL) << "We didn't expect to reach here";
-#define LOG(severity)                                   \
-  std::cout << std::endl                                \
-            << "[" __FILE__ << "(" << __LINE__ << "):(" \
-            << ::android::base::severity << ")]"
 
 // TODO(bingxue): Differentiate ABORT_AFTER_LOG_FATAL for clang static analyzer
 // when a LogMessage class is properly implemented.
@@ -199,48 +224,6 @@ inline void nn_print_log(char* buf, int buf_size, const char* fmt, ...)
   va_end(ap);
 }
 
-#define ALOG(severity, fmt, ...)                                           \
-  {                                                                        \
-    char buffer[LOG_BUF_SIZE];                                             \
-    android::base::nn_print_log(buffer, LOG_BUF_SIZE, fmt, ##__VA_ARGS__); \
-    LOG(severity) << buffer;                                               \
-  }
-
-#define ALOGI(...) ALOG(INFO, ##__VA_ARGS__)
-
-#define ALOGW(...) ALOG(WARNING, ##__VA_ARGS__)
-
-#define ALOGE(...) ALOG(ERROR, ##__VA_ARGS__)
-
-#if !DCHECK_IS_ON()
-#define ALOGD(...) ((void)0)
-#else
-#define ALOGD(...) ALOG(DEBUG, __VA_ARGS__)
-#endif // !DCHECK_IS_ON
-// Log a fatal error. If the given condition fails, this stops program execution
-// like a normal assertion but also generates the given message. This is NOT
-// stripped from release builds. Not that the condition test is -inverted- from
-// the normal assert() semantics.
-#ifndef LOG_ALWAYS_FATAL_IF
-#define LOG_ALWAYS_FATAL_IF(condition, fmt, ...)                           \
-  if (UNLIKELY(condition)) {                                             \
-    char buffer[LOG_BUF_SIZE];                                           \
-    android::base::nn_print_log(buffer, LOG_BUF_SIZE, fmt, ##__VA_ARGS__); \
-    ABORT_AFTER_LOG_FATAL LOG(FATAL) << buffer;                          \
-  }
-#endif  // LOG_ALWAYS_FATAL_IF
-#ifndef LOG_FATAL_IF
-#define LOG_FATAL_IF(cond, ...) LOG_ALWAYS_FATAL_IF(cond, __VA_ARGS__)
-#endif  // LOG_FATAL_IF
-#ifndef LOG_ALWAYS_FATAL
-#define LOG_ALWAYS_FATAL(...) LOG_ALWAYS_FATAL_IF(true, __VA_ARGS__)
-#endif  // LOG_ALWAYS_FATAL
-// Assertion that generates a log message when the assertion fails.
-// TODO(bingxue): ALOG_ASSERT should be stripped out of release builds.
-#ifndef ALOG_ASSERT
-#define ALOG_ASSERT(cond, fmt, ...) \
-  LOG_ALWAYS_FATAL_IF(!(cond), fmt, ##__VA_ARGS__)
-#endif
 }  // namespace base
 }  // namespace android
 

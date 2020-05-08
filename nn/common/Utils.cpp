@@ -29,10 +29,13 @@
 #include <android-base/properties.h>
 #include <android-base/strings.h>
 #include <sys/system_properties.h>
+#else
+#include <cutils/properties.h>
 #endif
 #include <algorithm>
 #include <unordered_map>
 #include <float.h>
+#include <regex>
 using ::android::hidl::allocator::V1_0::IAllocator;
 
 namespace android {
@@ -55,7 +58,9 @@ void initVLogMask() {
 #if !defined(__LE_NN__)
     const std::string vLogSetting = android::base::GetProperty(kVLogPropKey, "");
 #else
-    const std::string vLogSetting = "";
+    char propVal[PROPERTY_VALUE_MAX];
+    property_get(kVLogPropKey, propVal, "");
+    const std::string vLogSetting(propVal);
 #endif
     if (vLogSetting.empty()) {
         return;
@@ -71,9 +76,11 @@ void initVLogMask() {
         {"manager", MANAGER},
         {"driver", DRIVER}};
 
-#if !defined(__LE_NN__)
-    std::vector<std::string> elements = android::base::Split(vLogSetting, " ,:");
-    for (const auto& elem : elements) {
+    std::regex split_regex("[^\\s,:]+");
+    auto split_begin = std::sregex_iterator(vLogSetting.begin(), vLogSetting.end(), split_regex);
+    auto split_end = std::sregex_iterator();
+    for (std::sregex_iterator i = split_begin; i != split_end; i++) {
+        std::string elem = (*i).str();
         const auto& flag = vLogFlags.find(elem);
         if (flag == vLogFlags.end()) {
             LOG(ERROR) << "Unknown trace flag: " << elem;
@@ -89,7 +96,6 @@ void initVLogMask() {
             vLogMask |= 1 << flag->second;
         }
     }
-#endif
 }
 
 static bool isExtensionOperandType(int32_t type) {

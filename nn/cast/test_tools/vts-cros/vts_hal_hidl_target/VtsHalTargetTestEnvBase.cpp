@@ -174,7 +174,7 @@ void VtsHalTargetTestEnvBase::FindAvailableDevices() {
   std::string path(kNnhalPath);
   DIR *dir = opendir(path.c_str());
   if (nullptr == dir) {
-    ALOGE("Failed to open nn drivers folder: %s\n", strerror(errno))
+    ALOGE("Failed to open nn drivers folder: %s\n", strerror(errno));
     return;
   }
 

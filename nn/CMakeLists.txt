@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.3.1)
 project(nn-framework)
 
+option(USE_VTS "VTS tests compilation enable" OFF)
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexceptions -fno-short-enums  -fPIC")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -lstdc++ -Wl,--no-undefined")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__ANDROID_API__=29")
@@ -23,7 +25,11 @@ add_subdirectory(cast/hidl_base_shlib)
 add_subdirectory(cast/hidl_memory_shlib)
 add_subdirectory(cast/libtextclassifier)
 add_subdirectory(tools/test_generator)
-add_subdirectory(cast/test_tools/vts-cros)
+
+if (USE_VTS)
+  add_subdirectory(cast/test_tools/vts-cros)
+endif()
+
 add_subdirectory(runtime)
 add_subdirectory(runtime/test/generated)
 add_subdirectory(common)
