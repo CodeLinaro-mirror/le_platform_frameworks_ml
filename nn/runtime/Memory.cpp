@@ -194,7 +194,7 @@ Memory::Memory(sp<hal::IBuffer> buffer, uint32_t token)
     : kBuffer(std::move(buffer)), kToken(token) {}
 
 Memory::~Memory() {
-    for (const auto [ptr, weakBurst] : mUsedBy) {
+    for (const auto& [ptr, weakBurst] : mUsedBy) {
         if (const std::shared_ptr<ExecutionBurstController> burst = weakBurst.lock()) {
             burst->freeMemory(getKey());
         }
@@ -472,12 +472,14 @@ int MemoryBuilder::finish() {
         mAllocator = nullptr;
     }
     mSupportsAhwb = std::all_of(devices.begin(), devices.end(), [](const auto* device) {
-        return device->getFeatureLevel() >= __ANDROID_API_Q__;
+        return device->getFeatureLevel() >= __ANDROID_API_R__;
     });
     mShouldFallback = std::none_of(mRoles.begin(), mRoles.end(), [](const auto& role) {
         const auto* cb = std::get<const CompilationBuilder*>(role);
         return cb->createdWithExplicitDeviceList();
     });
+    const uint32_t size = TypeManager::get()->getSizeOfData(mOperand->type, mDesc.dimensions);
+    mShouldFallback &= (size != 0);
     mFinished = true;
     return ANEURALNETWORKS_NO_ERROR;
 }
@@ -488,17 +490,9 @@ std::pair<int, std::unique_ptr<Memory>> MemoryBuilder::allocate() const {
         return {ANEURALNETWORKS_BAD_STATE, nullptr};
     }
 
-    // TODO(xusongw): Does not support dynamic output shape for now.
-    CHECK(mOperand.has_value());
-    uint32_t size = TypeManager::get()->getSizeOfData(mOperand->type, mDesc.dimensions);
-    if (size == 0) {
-        LOG(ERROR)
-                << "ANeuralNetworksMemory_createFromDesc -- does not support unknown dimensions.";
-        return {ANEURALNETWORKS_OP_FAILED, nullptr};
-    }
-
     int n = ANEURALNETWORKS_OP_FAILED;
     std::unique_ptr<Memory> memory;
+    CHECK(mOperand.has_value());
 
     // Try allocate the memory on device.
     if (mAllocator != nullptr) {
@@ -507,6 +501,7 @@ std::pair<int, std::unique_ptr<Memory>> MemoryBuilder::allocate() const {
 
     // If failed, fallback to ashmem or BLOB mode AHWB.
     if (n != ANEURALNETWORKS_NO_ERROR && mShouldFallback) {
+        const uint32_t size = TypeManager::get()->getSizeOfData(mOperand->type, mDesc.dimensions);
         if (mSupportsAhwb) {
             VLOG(MEMORY) << "MemoryBuilder::allocate -- fallback to BLOB mode AHWB.";
             std::tie(n, memory) = MemoryRuntimeAHWB::create(size);
@@ -661,11 +656,11 @@ std::pair<int, std::unique_ptr<MemoryFromDevice>> MemoryFromDevice::create(sp<ha
                                                                            uint32_t token) {
     if (buffer == nullptr) {
         LOG(ERROR) << "nullptr IBuffer for device memory.";
-        return {ANEURALNETWORKS_BAD_DATA, nullptr};
+        return {ANEURALNETWORKS_OP_FAILED, nullptr};
     }
     if (token <= 0) {
         LOG(ERROR) << "Invalid token for device memory: " << token;
-        return {ANEURALNETWORKS_BAD_DATA, nullptr};
+        return {ANEURALNETWORKS_OP_FAILED, nullptr};
     }
     return {ANEURALNETWORKS_NO_ERROR, std::make_unique<MemoryFromDevice>(std::move(buffer), token)};
 };

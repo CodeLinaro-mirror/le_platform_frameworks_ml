@@ -376,6 +376,20 @@ class RandomPartitioningTest : public ::testing::TestWithParam<unsigned> {
     static const OperationPattern kOperationPatterns[];
 
     // See OperationPattern::mMakeSpecialInput.  This function is used to
+    // manufacture an ELU input operand that doesn't fit the general operand
+    // pattern known to the graph generator infrastructure.
+    int makeEluSpecialInput([[maybe_unused]] unsigned problemSize, TestModel* model,
+                            unsigned inputIndex) {
+        if (inputIndex != 1) {
+            return -1;
+        }
+
+        // input operand 1 is alpha, a scalar
+        const WrapperOperandType alphaType(WrapperType::FLOAT32, {});
+        return int(model->addConstantOperand(&alphaType, 1.0f));
+    }
+
+    // See OperationPattern::mMakeSpecialInput.  This function is used to
     // manufacture an RNN input operand that doesn't fit the general operand
     // pattern known to the graph generator infrastructure.
     int makeRnnSpecialInput(unsigned problemSize, TestModel* model, unsigned inputIndex) {
@@ -462,6 +476,10 @@ const RandomPartitioningTest::OperationPattern RandomPartitioningTest::kOperatio
         {HalVersion::V1_2, ANEURALNETWORKS_MAXIMUM, 2, 1, -1, nullptr},
         {HalVersion::V1_2, ANEURALNETWORKS_NEG, 1, 1, -1, nullptr},
         {HalVersion::V1_2, ANEURALNETWORKS_SIN, 1, 1, -1, nullptr},
+
+        {HalVersion::V1_3, ANEURALNETWORKS_ELU, 2, 1, -1,
+         &RandomPartitioningTest::makeEluSpecialInput},
+        {HalVersion::V1_3, ANEURALNETWORKS_HARD_SWISH, 1, 1, -1, nullptr},
 };
 
 HalVersion RandomPartitioningTest::getMinHalVersion(ANeuralNetworksOperationType type) {
@@ -1168,6 +1186,7 @@ TEST_P(RandomPartitioningTest, Test) {
     {
         std::cout << "signatures = " << signatures.size() << ", devices = " << devices.size()
                   << std::endl;
+        // TODO: When dumping steps, include non-ExecutionSteps.
         const ExecutionPlan& plan = c2->getExecutionPlan();
         switch (plan.forTest_getKind()) {
             case ExecutionPlan::Kind::SIMPLE:
@@ -1177,13 +1196,19 @@ TEST_P(RandomPartitioningTest, Test) {
                 const auto& steps = plan.forTest_compoundGetSteps();
                 std::set<const Device*> devicesInPlan;
                 for (const auto& step : steps) {
-                    devicesInPlan.insert(step->getDevice().get());
+                    if (const auto* executionStep = step->tryExecutionStep()) {
+                        devicesInPlan.insert(executionStep->getDevice().get());
+                    }
                 }
                 std::cout << "plan: compound, " << steps.size() << " steps over "
                           << devicesInPlan.size() << " devices" << std::endl;
                 for (unsigned i = 0; i < steps.size(); i++) {
-                    std::cout << "Step " << i << ": " << ModelStats(steps[i]->getStepModel())
-                              << ", device = " << steps[i]->getDevice()->getName() << std::endl;
+                    if (const auto executionStep = steps[i]->tryExecutionStep()) {
+                        std::cout << "Step " << i << ": "
+                                  << ModelStats(executionStep->getStepModel())
+                                  << ", device = " << executionStep->getDevice()->getName()
+                                  << std::endl;
+                    }
                 }
                 break;
             }
