@@ -507,7 +507,18 @@ int ModelBuilder::finish() {
         return n;
     }
 
+    // We sort the operations so that they will be in the appropriate
+    // order for a single-threaded, op at a time execution.
+    // TODO: we don't need this if we always run the partitioner.
+    if (!sortIntoRunOrder()) {
+        // We expect sortIntoRunOrder() to have logged an appropriate error message.
+        mInvalidModel = true;
+        return ANEURALNETWORKS_BAD_DATA;
+    }
+
     // TODO: Modify validation so that it can be called without creating a HAL Model.
+    // NOTE: Must sortIntoRunOrder() before validation; validator expects operations
+    //       to have been sorted.
     // NOTE: Must copyLargeValuesToSharedMemory() before validation; otherwise,
     //       a CONSTANT_REFERENCE operand will not have correct .poolIndex, and
     //       validation will not work properly.
@@ -521,20 +532,280 @@ int ModelBuilder::finish() {
         graphDump("ModelBuilder::finish", modelForValidation, nullptr);
     }
 
-    // We sort the operations so that they will be in the appropriate
-    // order for a single-threaded, op at a time execution.
-    // TODO: we don't need this if we always run the partitioner.
-    sortIntoRunOrder();
+    removeTrailingArgumentsWithDefaultValues();
+
     mCompletedModel = true;
     return ANEURALNETWORKS_NO_ERROR;
 }
 
-void ModelBuilder::sortIntoRunOrder() {
-    if (!mSortedOperationIndexMap.empty()) {
-        LOG(ERROR) << "Operations already in run order.";
-        return;
+static void logRemoval(const Operation& operation, uint32_t count,
+                       const std::vector<Operand>& operands) {
+    std::ostringstream message;
+    message << "Operation " << toString(operation.type) << " with inputs {";
+    for (uint32_t i = 0; i < operation.inputs.size(); ++i) {
+        if (i != 0) {
+            message << ", ";
+        }
+        message << toString(operands[operation.inputs[i]].type);
     }
+    message << "} has trailing optional inputs set to default values. Removing " << count
+            << " trailing inputs.";
+    VLOG(MODEL) << message.str();
+}
+
+void ModelBuilder::removeTrailingArgumentsWithDefaultValues() {
+    for (Operation& operation : mOperations) {
+        const uint32_t count = getNumTrailingArgumentsToRemove(operation);
+        if (count == 0) {
+            continue;
+        }
+        if (VLOG_IS_ON(MODEL)) {
+            logRemoval(operation, count, mOperands);
+        }
+        const uint32_t inputCount = operation.inputs.size();
+        CHECK_LT(count, inputCount);
+        const uint32_t newInputCount = inputCount - count;
+        for (uint32_t i = newInputCount; i < inputCount; ++i) {
+            --mOperands[operation.inputs[i]].numberOfConsumers;
+        }
+        operation.inputs.resize(newInputCount);
+    }
+}
+
+// See countMatchingTrailingArguments().
+enum class TailSpec {
+    BOOL_FALSE,
+    INT32_ONE,
+    INT32_NEGATIVE_ONE,
+};
+
+// See countMatchingTrailingArguments().
+static bool matchesSpec(TailSpec spec, const Operand& operand,
+                        const std::vector<uint8_t>& mSmallOperandValues) {
+    if (operand.lifetime != OperandLifeTime::CONSTANT_COPY) {
+        // CONSTANT_REFERENCE operands are not supported to avoid mapping memory
+        // during compilation.
+        return false;
+    }
+    auto valuePtr = static_cast<const void*>(&mSmallOperandValues[operand.location.offset]);
+    switch (spec) {
+        case TailSpec::BOOL_FALSE:
+            return operand.type == OperandType::BOOL &&
+                   *static_cast<const bool8*>(valuePtr) == false;
+        case TailSpec::INT32_ONE:
+            return operand.type == OperandType::INT32 &&
+                   *static_cast<const int32_t*>(valuePtr) == 1;
+        case TailSpec::INT32_NEGATIVE_ONE:
+            return operand.type == OperandType::INT32 &&
+                   *static_cast<const int32_t*>(valuePtr) == -1;
+        default:
+            CHECK(false) << "Unhandled TailSpec: " << static_cast<int>(spec);
+    }
+}
+
+// Returns the number of trailing operation inputs that match the specification.
+//
+// Example:
+//     opeation.inputs = {BOOL_TRUE, BOOL_TRUE,  INT32_ONE, INT32_NEGATIVE_ONE}
+//     tail            =            {BOOL_FALSE, INT32_ONE, INT32_NEGATIVE_ONE}
+//     tailStartIndex  = 1    matching elements: ^^^^^^^^^  ^^^^^^^^^^^^^^^^^^
+static uint32_t countMatchingTrailingArguments(uint32_t tailStartIndex,
+                                               const std::vector<TailSpec>& tail,
+                                               const Operation& operation,
+                                               const std::vector<Operand>& operands,
+                                               const std::vector<uint8_t>& smallOperandValues) {
+    const uint32_t inputCount = operation.inputs.size();
+    uint32_t count = 0;
+    for (uint32_t i = inputCount - 1; i >= tailStartIndex; --i) {
+        const Operand& operand = operands[operation.inputs[i]];
+        if (!matchesSpec(tail[i - tailStartIndex], operand, smallOperandValues)) {
+            break;
+        }
+        ++count;
+    }
+    return count;
+}
+
+uint32_t ModelBuilder::getNumTrailingArgumentsToRemove(const Operation& operation) const {
+    const uint32_t inputCount = operation.inputs.size();
+    auto getCount = [this, &operation](uint32_t tailStartIndex, const std::vector<TailSpec>& tail) {
+        return countMatchingTrailingArguments(tailStartIndex, tail, operation, mOperands,
+                                              mSmallOperandValues);
+    };
+    using TS = TailSpec;
+    // Check if the operation has optional arguments that might be set to default
+    // values. Skip the counting if no optional arguments are present.
+    switch (operation.type) {
+        case OperationType::AVERAGE_POOL_2D: {
+            if (inputCount == 11 && mOperands[operation.inputs[7]].type == OperandType::INT32) {
+                // Explicit padding
+                // API level 29: 10 to 11 inputs
+                // API level 27: 10 inputs
+                return getCount(10, {TS::BOOL_FALSE});
+            } else if (inputCount == 8 &&
+                       mOperands[operation.inputs[7]].type == OperandType::BOOL) {
+                // Implicit padding
+                // API level 29: 7 to 8 inputs
+                // API level 27: 7 inputs
+                return getCount(7, {TS::BOOL_FALSE});
+            }
+        } break;
+        case OperationType::CONV_2D: {
+            if (10 < inputCount && inputCount <= 13 &&
+                mOperands[operation.inputs[7]].type == OperandType::INT32) {
+                // Explicit padding
+                // API level 29: 10 to 13 inputs
+                // API level 27: 10 inputs
+                uint32_t count = getCount(10, {TS::BOOL_FALSE, TS::INT32_ONE, TS::INT32_ONE});
+                // Inputs 11 and 12 must come together.
+                return inputCount - count == 12 ? 0 : count;
+            } else if (7 < inputCount && inputCount <= 10 &&
+                       mOperands[operation.inputs[7]].type == OperandType::BOOL) {
+                // Implicit padding
+                // API level 29: 7 to 10 inputs
+                // API level 27: 7 inputs
+                uint32_t count = getCount(7, {TS::BOOL_FALSE, TS::INT32_ONE, TS::INT32_ONE});
+                // Inputs 8 and 9 must come together.
+                return inputCount - count == 9 ? 0 : count;
+            }
+        } break;
+        case OperationType::DEPTHWISE_CONV_2D: {
+            if (11 < inputCount && inputCount <= 14 &&
+                mOperands[operation.inputs[8]].type == OperandType::INT32) {
+                // Explicit padding
+                // API level 29: 11 to 14 inputs
+                // API level 27: 11 inputs
+                uint32_t count = getCount(11, {TS::BOOL_FALSE, TS::INT32_ONE, TS::INT32_ONE});
+                // Inputs 12 and 13 must come together.
+                return inputCount - count == 13 ? 0 : count;
+            } else if (8 < inputCount && inputCount <= 11 &&
+                       mOperands[operation.inputs[8]].type == OperandType::BOOL) {
+                // Implicit padding
+                // API level 29: 8 to 11 inputs
+                // API level 27: 8 inputs
+                uint32_t count = getCount(8, {TS::BOOL_FALSE, TS::INT32_ONE, TS::INT32_ONE});
+                // Inputs 9 and 10 must come together.
+                return inputCount - count == 10 ? 0 : count;
+            }
+        } break;
+        case OperationType::DEPTH_TO_SPACE: {
+            if (inputCount == 3) {
+                // API level 29: 2 to 3 inputs
+                // API level 27: 2 inputs
+                return getCount(2, {TS::BOOL_FALSE});
+            }
+        } break;
+        case OperationType::L2_NORMALIZATION: {
+            if (inputCount == 2) {
+                // API level 29: 1 to 2 inputs
+                // API level 27: 1 inputs
+                return getCount(1, {TS::INT32_NEGATIVE_ONE});
+            }
+        } break;
+        case OperationType::L2_POOL_2D: {
+            if (inputCount == 11 && mOperands[operation.inputs[7]].type == OperandType::INT32) {
+                // Explicit padding
+                // API level 29: 10 to 11 inputs
+                // API level 27: 10 inputs
+                return getCount(10, {TS::BOOL_FALSE});
+            } else if (inputCount == 8 &&
+                       mOperands[operation.inputs[7]].type == OperandType::BOOL) {
+                // Implicit padding
+                // API level 29: 7 to 8 inputs
+                // API level 27: 7 inputs
+                return getCount(7, {TS::BOOL_FALSE});
+            }
+        } break;
+        case OperationType::LOCAL_RESPONSE_NORMALIZATION: {
+            if (inputCount == 6) {
+                // API level 29: 5 to 6 inputs
+                // API level 27: 5 inputs
+                return getCount(5, {TS::INT32_NEGATIVE_ONE});
+            }
+        } break;
+        case OperationType::MAX_POOL_2D: {
+            if (inputCount == 11 && mOperands[operation.inputs[7]].type == OperandType::INT32) {
+                // Explicit padding
+                // API level 29: 10 to 11 inputs
+                // API level 27: 10 inputs
+                return getCount(10, {TS::BOOL_FALSE});
+            } else if (inputCount == 8 &&
+                       mOperands[operation.inputs[7]].type == OperandType::BOOL) {
+                // Implicit padding
+                // API level 29: 7 to 8 inputs
+                // API level 27: 7 inputs
+                return getCount(7, {TS::BOOL_FALSE});
+            }
+        } break;
+        case OperationType::RESIZE_BILINEAR: {
+            if (3 < inputCount && inputCount <= 6) {
+                // By shape:
+                //     API level 30: 3 to 6 inputs
+                //     API level 29: 3 to 4 inputs
+                //     API level 27: 3 inputs
+                // By scale:
+                //     API level 30: 3 to 6 inputs
+                //     API level 29: 3 to 4 inputs
+                return getCount(3, {TS::BOOL_FALSE, TS::BOOL_FALSE, TS::BOOL_FALSE});
+            }
+        } break;
+        case OperationType::SOFTMAX: {
+            if (inputCount == 3) {
+                // API level 29: 2 to 3 inputs
+                // API level 27: 2 inputs
+                return getCount(2, {TS::INT32_NEGATIVE_ONE});
+            }
+        } break;
+        case OperationType::SPACE_TO_DEPTH: {
+            if (inputCount == 3) {
+                // API level 29: 2 to 3 inputs
+                // API level 27: 2 inputs
+                return getCount(2, {TS::BOOL_FALSE});
+            }
+        } break;
+        case OperationType::BATCH_TO_SPACE_ND: {
+            if (inputCount == 3) {
+                // API level 29: 2 to 3 inputs
+                // API level 28: 2 inputs
+                return getCount(2, {TS::BOOL_FALSE});
+            }
+        } break;
+        case OperationType::SPACE_TO_BATCH_ND: {
+            if (inputCount == 4) {
+                // API level 29: 3 to 4 inputs
+                // API level 28: 3 inputs
+                return getCount(3, {TS::BOOL_FALSE});
+            }
+        } break;
+        case OperationType::RESIZE_NEAREST_NEIGHBOR: {
+            if (4 < inputCount && inputCount <= 6) {
+                // By shape or scale
+                // API level 30: 4 to 6 inputs
+                // API level 29: 4 inputs
+                return getCount(4, {TS::BOOL_FALSE, TS::BOOL_FALSE});
+            }
+        } break;
+        default: {
+            // Do nothing.
+        } break;
+    }
+    // No trailing optional arguments to check.
+    return 0;
+}
+
+bool ModelBuilder::sortIntoRunOrder() {
+    // Note that this may be called before the model has been
+    // validated, so we must code defensively.  However, we can assume
+    // an Operation's inputs and outputs have legal indices -- this
+    // should have been checked in addOperation().
+
+    if (!mSortedOperationIndexMap.empty()) {
+        LOG(ERROR) << "Operations were already sorted into run order.";
+        return true;
+    }
+
     // Tracks the operations that can be executed.
+    std::vector<uint32_t> sortedOperationIndexMap;
     std::vector<uint32_t> opsReadyToRun;
     std::vector<Operation> runOrder;
 
@@ -565,7 +836,7 @@ void ModelBuilder::sortIntoRunOrder() {
         const Operation& operation = mOperations[opIndex];
 
         runOrder.push_back(mOperations[opIndex]);
-        mSortedOperationIndexMap.push_back(opIndex);
+        sortedOperationIndexMap.push_back(opIndex);
 
         // Mark all its outputs as known.
         for (uint32_t operandIndex : operation.outputs) {
@@ -578,7 +849,19 @@ void ModelBuilder::sortIntoRunOrder() {
             }
         }
     }
-    mOperations = runOrder;
+
+    if (runOrder.size() != mOperations.size()) {
+        nnAssert(runOrder.size() < mOperations.size());
+        // Graph must contain at least one cycle or one never-written
+        // operand, because there is at least one Operation that never
+        // became ready.
+        LOG(ERROR) << "Graph contains at least one cycle or one never-written operand";
+        return false;
+    }
+
+    mSortedOperationIndexMap = std::move(sortedOperationIndexMap);
+    mOperations = std::move(runOrder);
+    return true;
 }
 
 // A helper class to simplify state management when creating a HIDL model.

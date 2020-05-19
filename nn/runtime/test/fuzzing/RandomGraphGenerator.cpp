@@ -54,11 +54,16 @@ std::vector<uint32_t> RandomOperand::getDimensions() const {
     return result;
 }
 
+static bool areValuePropertiesCompatible(int guaranteed, int required) {
+    return !(~guaranteed & required);
+}
+
 // Check if an edge between [this, other] is valid. If yes, add the edge.
 bool RandomOperand::createEdgeIfValid(const RandomOperand& other) const {
     if (other.type != RandomOperandType::INPUT) return false;
     if (dataType != other.dataType || dimensions.size() != other.dimensions.size() ||
-        scale != other.scale || zeroPoint != other.zeroPoint || doNotConnect || other.doNotConnect)
+        scale != other.scale || zeroPoint != other.zeroPoint || doNotConnect ||
+        other.doNotConnect || !areValuePropertiesCompatible(valueProperties, other.valueProperties))
         return false;
     return RandomVariableNetwork::get()->setEqualIfCompatible(dimensions, other.dimensions);
 }
@@ -189,7 +194,8 @@ bool RandomGraph::generateValue() {
             if (operand->type == RandomOperandType::INPUT) numInputs--;
             operand->type = RandomOperandType::CONST;
         }
-        if (operand->type != RandomOperandType::INTERNAL) {
+        if (operand->type != RandomOperandType::INTERNAL &&
+            operand->type != RandomOperandType::NO_VALUE) {
             if (operand->buffer.empty()) operand->resizeBuffer<uint8_t>(operand->getBufferSize());
             // If operand is set by randomBuffer, copy the frozen values into buffer.
             if (!operand->randomBuffer.empty()) {
@@ -218,6 +224,8 @@ static TestOperandLifeTime convertToTestOperandLifeTime(RandomOperandType type) 
             return TestOperandLifeTime::TEMPORARY_VARIABLE;
         case RandomOperandType::CONST:
             return TestOperandLifeTime::CONSTANT_COPY;
+        case RandomOperandType::NO_VALUE:
+            return TestOperandLifeTime::NO_VALUE;
     }
 }
 
@@ -241,10 +249,20 @@ TestModel RandomGraph::createTestModel() {
         };
 
         // Test buffers.
-        if (testOperand.lifetime == TestOperandLifeTime::SUBGRAPH_OUTPUT) {
-            testOperand.data = TestBuffer(operand->getBufferSize());
-        } else if (testOperand.lifetime != TestOperandLifeTime::TEMPORARY_VARIABLE) {
-            testOperand.data = TestBuffer(operand->getBufferSize(), operand->buffer.data());
+        switch (testOperand.lifetime) {
+            case TestOperandLifeTime::SUBGRAPH_OUTPUT:
+                testOperand.data = TestBuffer(operand->getBufferSize());
+                break;
+            case TestOperandLifeTime::SUBGRAPH_INPUT:
+            case TestOperandLifeTime::CONSTANT_COPY:
+            case TestOperandLifeTime::CONSTANT_REFERENCE:
+                testOperand.data = TestBuffer(operand->getBufferSize(), operand->buffer.data());
+                break;
+            case TestOperandLifeTime::TEMPORARY_VARIABLE:
+            case TestOperandLifeTime::NO_VALUE:
+                break;
+            default:
+                NN_FUZZER_CHECK(false) << "Unknown lifetime";
         }
 
         // Input/Output indexes.

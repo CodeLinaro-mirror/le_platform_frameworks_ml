@@ -79,6 +79,10 @@ bool validateProdSum(const IOperationValidationContext* context) {
     NN_RET_CHECK(
             validateInputTypes(context, {inputType, OperandType::TENSOR_INT32, OperandType::BOOL}));
     NN_RET_CHECK(validateOutputTypes(context, {inputType}));
+    const Shape& input = context->getInputShape(kInputTensor);
+    if (hasKnownRank(input)) {
+        NN_RET_CHECK_LE(getNumberOfDimensions(input), 4);
+    }
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
@@ -98,6 +102,10 @@ bool validateMaxMin(const IOperationValidationContext* context) {
     if (inputType == OperandType::TENSOR_QUANT8_ASYMM_SIGNED) {
         minHalVersion = HalVersion::V1_3;
     }
+    const Shape& input = context->getInputShape(kInputTensor);
+    if (hasKnownRank(input)) {
+        NN_RET_CHECK_LE(getNumberOfDimensions(input), 4);
+    }
     return validateHalVersion(context, minHalVersion);
 }
 
@@ -110,12 +118,17 @@ bool validateLogical(const IOperationValidationContext* context) {
     NN_RET_CHECK(
             validateInputTypes(context, {inputType, OperandType::TENSOR_INT32, OperandType::BOOL}));
     NN_RET_CHECK(validateOutputTypes(context, {inputType}));
+    const Shape& input = context->getInputShape(kInputTensor);
+    if (hasKnownRank(input)) {
+        NN_RET_CHECK_LE(getNumberOfDimensions(input), 4);
+    }
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
 bool prepare(IOperationExecutionContext* context) {
     Shape inputShape = context->getInputShape(kInputTensor);
     const uint32_t inputRank = getNumberOfDimensions(inputShape);
+    NN_RET_CHECK_LE(inputRank, 4);
 
     std::vector<bool> shouldReduce(inputRank);
     const int32_t* axes = context->getInputBuffer<int32_t>(kInputAxes);
@@ -148,9 +161,17 @@ bool prepare(IOperationExecutionContext* context) {
 bool executeProd(IOperationExecutionContext* context) {
     switch (context->getInputType(kInputTensor)) {
         case OperandType::TENSOR_FLOAT16:
-            return compute<_Float16>(context, 1, [](_Float16 a, _Float16 b) { return a * b; });
+            return compute<_Float16>(context, 1, [](_Float16 a, _Float16 b) -> _Float16 {
+                // Handle the zero case because 0 * inf evaluates to nan.
+                if (a == 0 || b == 0) return 0;
+                return a * b;
+            });
         case OperandType::TENSOR_FLOAT32:
-            return compute<float>(context, 1, [](float a, float b) { return a * b; });
+            return compute<float>(context, 1, [](float a, float b) -> float {
+                // Handle the zero case because 0 * inf evaluates to nan.
+                if (a == 0 || b == 0) return 0;
+                return a * b;
+            });
         default:
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation REDUCE_PROD";
     }

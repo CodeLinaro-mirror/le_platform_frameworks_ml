@@ -201,7 +201,7 @@ inline std::string toString<RandomVariableRange>(const RandomVariableRange& rang
 
 template <>
 inline std::string toString<RandomOperandType>(const RandomOperandType& type) {
-    static const std::string typeNames[] = {"Input", "Output", "Internal", "Parameter"};
+    static const std::string typeNames[] = {"Input", "Output", "Internal", "Parameter", "No Value"};
     return typeNames[static_cast<int>(type)];
 }
 
@@ -274,6 +274,15 @@ inline std::enable_if_t<nnIsFloat<T>, T> getUniform(T lower, T upper) {
     float nextLower = std::nextafter(static_cast<float>(lower), std::numeric_limits<float>::max());
     std::uniform_real_distribution<float> dis(nextLower, upper);
     return dis(RandomNumberGenerator::generator);
+}
+template <typename T>
+inline std::enable_if_t<nnIsFloat<T>, T> getUniformNonZero(T lower, T upper, T zeroPoint) {
+    if (upper >= zeroPoint) {
+        upper = std::nextafter(static_cast<float>(upper), std::numeric_limits<float>::min());
+    }
+    std::uniform_real_distribution<float> dis(lower, upper);
+    const float value = dis(RandomNumberGenerator::generator);
+    return value >= zeroPoint ? std::nextafter(value, std::numeric_limits<float>::max()) : value;
 }
 
 // getUniform for integers operates on a closed interval [lower, upper].

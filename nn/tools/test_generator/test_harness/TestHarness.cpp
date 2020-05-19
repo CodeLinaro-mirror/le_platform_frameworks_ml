@@ -65,8 +65,8 @@ uint32_t getNumberOfElements(const TestOperand& op) {
 
 // Check if the actual results meet the accuracy criterion.
 template <typename T>
-void expectNear(const TestOperand& op, const TestBuffer& result,
-                const AccuracyCriterion& criterion) {
+void expectNear(const TestOperand& op, const TestBuffer& result, const AccuracyCriterion& criterion,
+                bool allowInvalid = false) {
     constexpr uint32_t kMinNumberOfElementsToTestBiasMSE = 10;
     const T* actualBuffer = result.get<T>();
     const T* expectedBuffer = op.data.get<T>();
@@ -77,11 +77,12 @@ void expectNear(const TestOperand& op, const TestBuffer& result,
         double actual = static_cast<double>(actualBuffer[i]);
         double expected = static_cast<double>(expectedBuffer[i]);
         double tolerableRange = criterion.atol + criterion.rtol * std::fabs(expected);
+        EXPECT_FALSE(std::isnan(expected));
 
         // Skip invalid floating point values.
-        if (std::isnan(expected) || std::isinf(expected) ||
-            (std::is_same_v<T, float> && std::fabs(expected) > 1e3) ||
-            (std::is_same_v<T, _Float16> || std::fabs(expected) > 1e2)) {
+        if (allowInvalid &&
+            (std::isinf(expected) || (std::is_same_v<T, float> && std::fabs(expected) > 1e3) ||
+             (std::is_same_v<T, _Float16> || std::fabs(expected) > 1e2))) {
             numSkip++;
             continue;
         }
@@ -205,10 +206,11 @@ void checkResults(const TestModel& model, const std::vector<TestBuffer>& buffers
 
         switch (operand.type) {
             case TestOperandType::TENSOR_FLOAT32:
-                expectNear<float>(operand, result, criteria.float32);
+                expectNear<float>(operand, result, criteria.float32, criteria.allowInvalidFpValues);
                 break;
             case TestOperandType::TENSOR_FLOAT16:
-                expectNear<_Float16>(operand, result, criteria.float16);
+                expectNear<_Float16>(operand, result, criteria.float16,
+                                     criteria.allowInvalidFpValues);
                 break;
             case TestOperandType::TENSOR_INT32:
             case TestOperandType::INT32:
@@ -267,6 +269,8 @@ void checkResults(const TestModel& model, const std::vector<TestBuffer>& buffers
             .quant16Asymm = {.atol = 1},
             .quant16Symm = {.atol = 1},
             .bool8AllowedErrorRatio = 0.0f,
+            // Since generated tests are hand-calculated, there should be no invalid FP values.
+            .allowInvalidFpValues = false,
     };
     bool hasFloat16Inputs = false;
     model.forEachSubgraph([&hasFloat16Inputs](const TestSubgraph& subgraph) {
@@ -289,19 +293,24 @@ void checkResults(const TestModel& model, const std::vector<TestBuffer>& buffers
 }
 
 TestModel convertQuant8AsymmOperandsToSigned(const TestModel& testModel) {
-    CHECK_EQ(testModel.referenced.size(), 0u) << "Subgraphs not supported";
-    TestModel converted(testModel.copy());
-    for (TestOperand& operand : converted.main.operands) {
-        if (operand.type == test_helper::TestOperandType::TENSOR_QUANT8_ASYMM) {
-            operand.type = test_helper::TestOperandType::TENSOR_QUANT8_ASYMM_SIGNED;
-            operand.zeroPoint -= 128;
-            const uint8_t* inputOperandData = operand.data.get<uint8_t>();
-            int8_t* outputOperandData = operand.data.getMutable<int8_t>();
-            for (size_t i = 0; i < operand.data.size(); ++i) {
-                outputOperandData[i] =
-                        static_cast<int8_t>(static_cast<int32_t>(inputOperandData[i]) - 128);
+    auto processSubgraph = [](TestSubgraph* subgraph) {
+        for (TestOperand& operand : subgraph->operands) {
+            if (operand.type == test_helper::TestOperandType::TENSOR_QUANT8_ASYMM) {
+                operand.type = test_helper::TestOperandType::TENSOR_QUANT8_ASYMM_SIGNED;
+                operand.zeroPoint -= 128;
+                const uint8_t* inputOperandData = operand.data.get<uint8_t>();
+                int8_t* outputOperandData = operand.data.getMutable<int8_t>();
+                for (size_t i = 0; i < operand.data.size(); ++i) {
+                    outputOperandData[i] =
+                            static_cast<int8_t>(static_cast<int32_t>(inputOperandData[i]) - 128);
+                }
             }
         }
+    };
+    TestModel converted(testModel.copy());
+    processSubgraph(&converted.main);
+    for (TestSubgraph& subgraph : converted.referenced) {
+        processSubgraph(&subgraph);
     }
     return converted;
 }
@@ -451,6 +460,7 @@ std::string getOperandClassInSpecFile(TestOperandLifeTime lifetime) {
             return "Output";
         case TestOperandLifeTime::CONSTANT_COPY:
         case TestOperandLifeTime::CONSTANT_REFERENCE:
+        case TestOperandLifeTime::NO_VALUE:
             return "Parameter";
         case TestOperandLifeTime::TEMPORARY_VARIABLE:
             return "Internal";
@@ -537,16 +547,18 @@ void SpecDumper::dumpTestBuffer(TestOperandType type, const TestBuffer& buffer) 
 
 void SpecDumper::dumpTestOperand(const TestOperand& operand, uint32_t index) {
     mOs << "op" << index << " = " << getOperandClassInSpecFile(operand.lifetime) << "(\"op" << index
-        << "\", \"" << toString(operand.type) << "\", \"{"
-        << join(", ", operand.dimensions, defaultToStringFunc<uint32_t>) << "}";
+        << "\", [\"" << toString(operand.type) << "\", ["
+        << join(", ", operand.dimensions, defaultToStringFunc<uint32_t>) << "]";
     if (operand.scale != 0.0f || operand.zeroPoint != 0) {
-        mOs << ", " << operand.scale << "f, " << operand.zeroPoint;
+        mOs << ", " << operand.scale << ", " << operand.zeroPoint;
     }
-    mOs << "\"";
+    mOs << "]";
     if (operand.lifetime == TestOperandLifeTime::CONSTANT_COPY ||
         operand.lifetime == TestOperandLifeTime::CONSTANT_REFERENCE) {
         mOs << ", ";
         dumpTestBuffer(operand.type, operand.data);
+    } else if (operand.lifetime == TestOperandLifeTime::NO_VALUE) {
+        mOs << ", value=None";
     }
     mOs << ")\n";
 }

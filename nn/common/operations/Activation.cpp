@@ -375,6 +375,10 @@ bool validate(OperationType opType, const IOperationValidationContext* context) 
     } else {
         NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << getOperationName(opType);
     }
+    const Shape& input = context->getInputShape(kInputTensor);
+    if (hasKnownRank(input)) {
+        NN_RET_CHECK_LE(getNumberOfDimensions(input), 4);
+    }
     return validateInputTypes(context, {inputType}) && validateOutputTypes(context, {inputType});
 }
 
@@ -394,7 +398,9 @@ bool validateHardSwish(const IOperationValidationContext* context) {
 
 bool prepare(OperationType opType, IOperationExecutionContext* context) {
     Shape input = context->getInputShape(kInputTensor);
-    NN_RET_CHECK_LE(getNumberOfDimensions(input), 4);
+    if (opType != OperationType::HARD_SWISH) {
+        NN_RET_CHECK_LE(getNumberOfDimensions(input), 4);
+    }
     Shape output = input;
     if (input.type == OperandType::TENSOR_QUANT8_ASYMM ||
         input.type == OperandType::TENSOR_QUANT8_ASYMM_SIGNED) {

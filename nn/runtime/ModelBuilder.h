@@ -21,12 +21,12 @@
 #define ANDROID_FRAMEWORKS_ML_NN_RUNTIME_MODEL_BUILDER_H
 
 #include <memory>
+#include <vector>
+
 #include "HalInterfaces.h"
 #include "Memory.h"
 #include "NeuralNetworks.h"
 #include "Utils.h"
-
-#include <vector>
 
 namespace android {
 namespace nn {
@@ -159,9 +159,17 @@ class ModelBuilder {
     // Return true if either mCompleteModel or mInvalidModel is true.
     bool badState(const char* name);
 
+    // Removes some trailing operation inputs that are set to default values.
+    //
+    // Some drivers reject operations based on the argument count even when the
+    // optional arguments are set to default values. This transformation enables
+    // more drivers to execute the model. See http://b/147105700.
+    void removeTrailingArgumentsWithDefaultValues();
+    uint32_t getNumTrailingArgumentsToRemove(const hal::Operation& operation) const;
+
     // Sorts the operations to be in the correct order for single threaded
     // node-at-a-time execution.
-    void sortIntoRunOrder();
+    bool sortIntoRunOrder();
 
     // Copies the large values to a shared memory, if we have any.
     int copyLargeValuesToSharedMemory();

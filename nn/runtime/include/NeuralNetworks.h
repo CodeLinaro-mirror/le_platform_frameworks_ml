@@ -978,7 +978,7 @@ typedef enum {
     ANEURALNETWORKS_HASHTABLE_LOOKUP = 10,
 
     /**
-     * Applies L2 normalization along the depth dimension.
+     * Applies L2 normalization along the axis dimension.
      *
      * The values in the output tensor are computed as:
      *
@@ -986,8 +986,7 @@ typedef enum {
      *         input[batch, row, col, channel] /
      *         sqrt(sum_{c} pow(input[batch, row, col, c], 2))
      *
-     * For input tensor with rank less than 4, independently normalizes each
-     * 1-D slice along dimension dim.
+     * By default the axis dimension is the last dimension of the input tensor.
      *
      * Supported tensor {@link OperandCode}:
      * * {@link ANEURALNETWORKS_TENSOR_FLOAT16} (since API level 29)
@@ -1012,6 +1011,10 @@ typedef enum {
      *      the scale must be 1.f / 128 and the zeroPoint must be 128.
      *      For {@link ANEURALNETWORKS_TENSOR_QUANT8_ASYMM_SIGNED},
      *      the scale must be 1.f / 128 and the zeroPoint must be 0.
+     *
+     *      NOTE: Before API level 30, if the elements along an axis are all zeros,
+     *      the result is undefined. Since API level 30, if the elements along an axis
+     *      are all zeros, the result is logical zero.
      *
      * Available since API level 27.
      */
@@ -4346,7 +4349,8 @@ typedef enum {
      * * 1: A scalar {@link ANEURALNETWORKS_INT32}, specifying the number of
      *      independent samples to draw for each row slice.
      * * 2: A 1-D {@link ANEURALNETWORKS_TENSOR_INT32} tensor with shape [2],
-     *      specifying seeds used to initialize the random distribution.
+     *      specifying seeds used to initialize the random distribution. If both
+     *      provided seeds are 0, both will be randomly generated.
      * Outputs:
      * * 0: A 2-D {@link ANEURALNETWORKS_TENSOR_INT32} tensor with shape
      *      [batches, samples], containing the drawn samples.
@@ -6797,8 +6801,9 @@ int ANeuralNetworksExecution_compute(ANeuralNetworksExecution* execution) __INTR
  * Get the dimensional information of the specified output operand of the model of the
  * {@link ANeuralNetworksExecution}.
  *
- * On asynchronous execution initiated by {@link ANeuralNetworksExecution_startCompute}
- * or {@link ANeuralNetworksExecution_startComputeWithDependencies},
+ * The execution must have completed.  On asynchronous execution initiated by
+ * {@link ANeuralNetworksExecution_startCompute} or
+ * {@link ANeuralNetworksExecution_startComputeWithDependencies},
  * {@link ANeuralNetworksEvent_wait} must be called prior to this function.
  *
  * @param execution The execution to be queried.
@@ -6822,8 +6827,9 @@ int ANeuralNetworksExecution_getOutputOperandRank(ANeuralNetworksExecution* exec
  * Get the dimensional information of the specified output operand of the model of the
  * {@link ANeuralNetworksExecution}. The target output operand cannot be a scalar.
  *
- * On asynchronous execution initiated by {@link ANeuralNetworksExecution_startCompute}
- * or {@link ANeuralNetworksExecution_startComputeWithDependencies},
+ * The execution must have completed.  On asynchronous execution initiated by
+ * {@link ANeuralNetworksExecution_startCompute} or
+ * {@link ANeuralNetworksExecution_startComputeWithDependencies},
  * {@link ANeuralNetworksEvent_wait} must be called prior to this function.
  *
  * @param execution The execution to be queried.
@@ -6977,9 +6983,11 @@ int ANeuralNetworksExecution_setMeasureTiming(ANeuralNetworksExecution* executio
 
 /**
  * Get the time spent in the specified {@link ANeuralNetworksExecution}, in nanoseconds.
- * The execution must have completed.
  *
- * Available since API level 29.
+ * The execution must have completed.  On asynchronous execution initiated by
+ * {@link ANeuralNetworksExecution_startCompute} or
+ * {@link ANeuralNetworksExecution_startComputeWithDependencies},
+ * {@link ANeuralNetworksEvent_wait} must be called prior to this function.
  *
  * @param execution The execution to be queried.
  * @param durationCode The measurement to be queried, specified by {@link DurationCode}.
@@ -6992,6 +7000,8 @@ int ANeuralNetworksExecution_setMeasureTiming(ANeuralNetworksExecution* executio
  *                 need not support any given measurement.
  *
  * @return ANEURALNETWORKS_NO_ERROR if successful.
+ *
+ * Available since API level 29.
  */
 int ANeuralNetworksExecution_getDuration(const ANeuralNetworksExecution* execution,
                                          int32_t durationCode, uint64_t* duration)
@@ -8062,12 +8072,6 @@ int ANeuralNetworksEvent_getSyncFenceFd(const ANeuralNetworksEvent* event, int* 
  * or {@link ANeuralNetworksEvent_wait} on the event object. If the device has a
  * feature level reported by {@link ANeuralNetworksDevice_getFeatureLevel} that
  * is lower than 30, then the timeout duration hints will be ignored.
- *
- * If this execution contains a {@link ANEURALNETWORKS_WHILE} operation, and
- * the condition model does not output false within the loop timeout duration,
- * then execution will be aborted and {@link ANEURALNETWORKS_MISSED_DEADLINE_*}
- * will be returned through {@link ANeuralNetworksEvent_wait} on the event
- * object.
  *
  * If this execution contains a {@link ANEURALNETWORKS_WHILE} operation, and
  * the condition model does not output false within the loop timeout duration,
