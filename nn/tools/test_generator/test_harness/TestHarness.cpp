@@ -327,6 +327,21 @@ bool isQuantizedType(TestOperandType type) {
     return kQuantizedTypes.count(type) > 0;
 }
 
+bool isFloatType(TestOperandType type) {
+    static const std::set<TestOperandType> kFloatTypes = {
+            TestOperandType::TENSOR_FLOAT32,
+            TestOperandType::TENSOR_FLOAT16,
+            TestOperandType::FLOAT32,
+            TestOperandType::FLOAT16,
+    };
+    return kFloatTypes.count(type) > 0;
+}
+
+bool isConstant(TestOperandLifeTime lifetime) {
+    return lifetime == TestOperandLifeTime::CONSTANT_COPY ||
+           lifetime == TestOperandLifeTime::CONSTANT_REFERENCE;
+}
+
 namespace {
 
 const char* kOperationTypeNames[] = {
@@ -452,6 +467,27 @@ const char* kOperandTypeNames[] = {
         "TENSOR_QUANT8_ASYMM_SIGNED",
 };
 
+bool isScalarType(TestOperandType type) {
+    static const std::vector<bool> kIsScalarOperandType = {
+            true,   // TestOperandType::FLOAT32
+            true,   // TestOperandType::INT32
+            true,   // TestOperandType::UINT32
+            false,  // TestOperandType::TENSOR_FLOAT32
+            false,  // TestOperandType::TENSOR_INT32
+            false,  // TestOperandType::TENSOR_QUANT8_ASYMM
+            true,   // TestOperandType::BOOL
+            false,  // TestOperandType::TENSOR_QUANT16_SYMM
+            false,  // TestOperandType::TENSOR_FLOAT16
+            false,  // TestOperandType::TENSOR_BOOL8
+            true,   // TestOperandType::FLOAT16
+            false,  // TestOperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL
+            false,  // TestOperandType::TENSOR_QUANT16_ASYMM
+            false,  // TestOperandType::TENSOR_QUANT8_SYMM
+            false,  // TestOperandType::TENSOR_QUANT8_ASYMM_SIGNED
+    };
+    return kIsScalarOperandType[static_cast<int>(type)];
+}
+
 std::string getOperandClassInSpecFile(TestOperandLifeTime lifetime) {
     switch (lifetime) {
         case TestOperandLifeTime::SUBGRAPH_INPUT:
@@ -471,11 +507,27 @@ std::string getOperandClassInSpecFile(TestOperandLifeTime lifetime) {
 }
 
 template <typename T>
-const auto defaultToStringFunc = [](const T& value) { return std::to_string(value); };
-
+std::string defaultToStringFunc(const T& value) {
+    return std::to_string(value);
+};
 template <>
-const auto defaultToStringFunc<_Float16> =
-        [](const _Float16& value) { return std::to_string(static_cast<float>(value)); };
+std::string defaultToStringFunc<_Float16>(const _Float16& value) {
+    return defaultToStringFunc(static_cast<float>(value));
+};
+
+// Dump floating point values in hex representation.
+template <typename T>
+std::string toHexFloatString(const T& value);
+template <>
+std::string toHexFloatString<float>(const float& value) {
+    std::stringstream ss;
+    ss << "\"" << std::hexfloat << value << "\"";
+    return ss.str();
+};
+template <>
+std::string toHexFloatString<_Float16>(const _Float16& value) {
+    return toHexFloatString(static_cast<float>(value));
+};
 
 template <typename Iterator, class ToStringFunc>
 std::string join(const std::string& joint, Iterator begin, Iterator end, ToStringFunc func) {
@@ -492,9 +544,15 @@ std::string join(const std::string& joint, const std::vector<T>& range, ToString
 }
 
 template <typename T>
-void dumpTestBufferToSpecFileHelper(const TestBuffer& buffer, std::ostream& os) {
+void dumpTestBufferToSpecFileHelper(const TestBuffer& buffer, bool useHexFloat, std::ostream& os) {
     const T* data = buffer.get<T>();
     const uint32_t length = buffer.size() / sizeof(T);
+    if constexpr (nnIsFloat<T>) {
+        if (useHexFloat) {
+            os << "from_hex([" << join(", ", data, data + length, toHexFloatString<T>) << "])";
+            return;
+        }
+    }
     os << "[" << join(", ", data, data + length, defaultToStringFunc<T>) << "]";
 }
 
@@ -509,36 +567,36 @@ const char* toString(TestOperationType type) {
 }
 
 // Dump a test buffer.
-void SpecDumper::dumpTestBuffer(TestOperandType type, const TestBuffer& buffer) {
+void SpecDumper::dumpTestBuffer(TestOperandType type, const TestBuffer& buffer, bool useHexFloat) {
     switch (type) {
         case TestOperandType::FLOAT32:
         case TestOperandType::TENSOR_FLOAT32:
-            dumpTestBufferToSpecFileHelper<float>(buffer, mOs);
+            dumpTestBufferToSpecFileHelper<float>(buffer, useHexFloat, mOs);
             break;
         case TestOperandType::INT32:
         case TestOperandType::TENSOR_INT32:
-            dumpTestBufferToSpecFileHelper<int32_t>(buffer, mOs);
+            dumpTestBufferToSpecFileHelper<int32_t>(buffer, useHexFloat, mOs);
             break;
         case TestOperandType::TENSOR_QUANT8_ASYMM:
-            dumpTestBufferToSpecFileHelper<uint8_t>(buffer, mOs);
+            dumpTestBufferToSpecFileHelper<uint8_t>(buffer, useHexFloat, mOs);
             break;
         case TestOperandType::TENSOR_QUANT8_SYMM:
         case TestOperandType::TENSOR_QUANT8_ASYMM_SIGNED:
-            dumpTestBufferToSpecFileHelper<int8_t>(buffer, mOs);
+            dumpTestBufferToSpecFileHelper<int8_t>(buffer, useHexFloat, mOs);
             break;
         case TestOperandType::TENSOR_QUANT16_ASYMM:
-            dumpTestBufferToSpecFileHelper<uint16_t>(buffer, mOs);
+            dumpTestBufferToSpecFileHelper<uint16_t>(buffer, useHexFloat, mOs);
             break;
         case TestOperandType::TENSOR_QUANT16_SYMM:
-            dumpTestBufferToSpecFileHelper<int16_t>(buffer, mOs);
+            dumpTestBufferToSpecFileHelper<int16_t>(buffer, useHexFloat, mOs);
             break;
         case TestOperandType::BOOL:
         case TestOperandType::TENSOR_BOOL8:
-            dumpTestBufferToSpecFileHelper<bool8>(buffer, mOs);
+            dumpTestBufferToSpecFileHelper<bool8>(buffer, useHexFloat, mOs);
             break;
         case TestOperandType::FLOAT16:
         case TestOperandType::TENSOR_FLOAT16:
-            dumpTestBufferToSpecFileHelper<_Float16>(buffer, mOs);
+            dumpTestBufferToSpecFileHelper<_Float16>(buffer, useHexFloat, mOs);
             break;
         default:
             CHECK(false) << "Unknown type when dumping the buffer";
@@ -550,17 +608,29 @@ void SpecDumper::dumpTestOperand(const TestOperand& operand, uint32_t index) {
         << "\", [\"" << toString(operand.type) << "\", ["
         << join(", ", operand.dimensions, defaultToStringFunc<uint32_t>) << "]";
     if (operand.scale != 0.0f || operand.zeroPoint != 0) {
-        mOs << ", " << operand.scale << ", " << operand.zeroPoint;
+        mOs << ", float.fromhex(" << toHexFloatString(operand.scale) << "), " << operand.zeroPoint;
     }
     mOs << "]";
     if (operand.lifetime == TestOperandLifeTime::CONSTANT_COPY ||
         operand.lifetime == TestOperandLifeTime::CONSTANT_REFERENCE) {
         mOs << ", ";
-        dumpTestBuffer(operand.type, operand.data);
+        dumpTestBuffer(operand.type, operand.data, /*useHexFloat=*/true);
     } else if (operand.lifetime == TestOperandLifeTime::NO_VALUE) {
         mOs << ", value=None";
     }
-    mOs << ")\n";
+    mOs << ")";
+    // For quantized data types, append a human-readable scale at the end.
+    if (operand.scale != 0.0f) {
+        mOs << "  # scale = " << operand.scale;
+    }
+    // For float buffers, append human-readable values at the end.
+    if (isFloatType(operand.type) &&
+        (operand.lifetime == TestOperandLifeTime::CONSTANT_COPY ||
+         operand.lifetime == TestOperandLifeTime::CONSTANT_REFERENCE)) {
+        mOs << "  # ";
+        dumpTestBuffer(operand.type, operand.data, /*useHexFloat=*/false);
+    }
+    mOs << "\n";
 }
 
 void SpecDumper::dumpTestOperation(const TestOperation& operation) {
@@ -572,6 +642,7 @@ void SpecDumper::dumpTestOperation(const TestOperation& operation) {
 
 void SpecDumper::dumpTestModel() {
     CHECK_EQ(kTestModel.referenced.size(), 0u) << "Subgraphs not supported";
+    mOs << "from_hex = lambda l: [float.fromhex(i) for i in l]\n\n";
 
     // Dump model operands.
     mOs << "# Model operands\n";
@@ -593,8 +664,14 @@ void SpecDumper::dumpTestModel() {
             operand.lifetime != TestOperandLifeTime::SUBGRAPH_OUTPUT) {
             continue;
         }
+        // For float buffers, dump human-readable values as a comment.
+        if (isFloatType(operand.type)) {
+            mOs << "    # op" << i << ": ";
+            dumpTestBuffer(operand.type, operand.data, /*useHexFloat=*/false);
+            mOs << "\n";
+        }
         mOs << "    op" << i << ": ";
-        dumpTestBuffer(operand.type, operand.data);
+        dumpTestBuffer(operand.type, operand.data, /*useHexFloat=*/true);
         mOs << ",\n";
     }
     mOs << "}).DisableLifeTimeVariation()\n";
@@ -606,11 +683,177 @@ void SpecDumper::dumpResults(const std::string& name, const std::vector<TestBuff
     for (uint32_t i = 0; i < results.size(); i++) {
         const uint32_t outputIndex = kTestModel.main.outputIndexes[i];
         const auto& operand = kTestModel.main.operands[outputIndex];
+        // For float buffers, dump human-readable values as a comment.
+        if (isFloatType(operand.type)) {
+            mOs << "    # op" << outputIndex << ": ";
+            dumpTestBuffer(operand.type, results[i], /*useHexFloat=*/false);
+            mOs << "\n";
+        }
         mOs << "    op" << outputIndex << ": ";
-        dumpTestBuffer(operand.type, results[i]);
+        dumpTestBuffer(operand.type, results[i], /*useHexFloat=*/true);
         mOs << ",\n";
     }
     mOs << "}\n";
+}
+
+template <typename T>
+static TestOperand convertOperandToFloat32(const TestOperand& op) {
+    TestOperand converted = op;
+    converted.type =
+            isScalarType(op.type) ? TestOperandType::FLOAT32 : TestOperandType::TENSOR_FLOAT32;
+    converted.scale = 0.0f;
+    converted.zeroPoint = 0;
+
+    const uint32_t numberOfElements = getNumberOfElements(converted);
+    converted.data = TestBuffer(numberOfElements * sizeof(float));
+    const T* data = op.data.get<T>();
+    float* floatData = converted.data.getMutable<float>();
+
+    if (op.scale != 0.0f) {
+        std::transform(data, data + numberOfElements, floatData, [&op](T val) {
+            return (static_cast<float>(val) - op.zeroPoint) * op.scale;
+        });
+    } else {
+        std::transform(data, data + numberOfElements, floatData,
+                       [](T val) { return static_cast<float>(val); });
+    }
+    return converted;
+}
+
+std::optional<TestModel> convertToFloat32Model(const TestModel& testModel) {
+    // Only single-operation graphs are supported.
+    if (testModel.referenced.size() > 0 || testModel.main.operations.size() > 1) {
+        return std::nullopt;
+    }
+
+    // Check for unsupported operations.
+    CHECK(!testModel.main.operations.empty());
+    const auto& operation = testModel.main.operations[0];
+    // Do not convert type-casting operations.
+    if (operation.type == TestOperationType::DEQUANTIZE ||
+        operation.type == TestOperationType::QUANTIZE ||
+        operation.type == TestOperationType::CAST) {
+        return std::nullopt;
+    }
+    // HASHTABLE_LOOKUP has different behavior in float and quant data types: float
+    // HASHTABLE_LOOKUP will output logical zero when there is a key miss, while quant
+    // HASHTABLE_LOOKUP will output byte zero.
+    if (operation.type == TestOperationType::HASHTABLE_LOOKUP) {
+        return std::nullopt;
+    }
+
+    auto convert = [&testModel, &operation](const TestOperand& op, uint32_t index) {
+        switch (op.type) {
+            case TestOperandType::TENSOR_FLOAT32:
+            case TestOperandType::FLOAT32:
+            case TestOperandType::TENSOR_BOOL8:
+            case TestOperandType::BOOL:
+            case TestOperandType::UINT32:
+                return op;
+            case TestOperandType::INT32:
+                // The third input of PAD_V2 uses INT32 to specify the padded value.
+                if (operation.type == TestOperationType::PAD_V2 && index == operation.inputs[2]) {
+                    // The scale and zero point is inherited from the first input.
+                    const uint32_t input0Index = operation.inputs[0];
+                    const auto& input0 = testModel.main.operands[input0Index];
+                    TestOperand scalarWithScaleAndZeroPoint = op;
+                    scalarWithScaleAndZeroPoint.scale = input0.scale;
+                    scalarWithScaleAndZeroPoint.zeroPoint = input0.zeroPoint;
+                    return convertOperandToFloat32<int32_t>(scalarWithScaleAndZeroPoint);
+                }
+                return op;
+            case TestOperandType::TENSOR_INT32:
+                if (op.scale != 0.0f || op.zeroPoint != 0) {
+                    return convertOperandToFloat32<int32_t>(op);
+                }
+                return op;
+            case TestOperandType::TENSOR_FLOAT16:
+            case TestOperandType::FLOAT16:
+                return convertOperandToFloat32<_Float16>(op);
+            case TestOperandType::TENSOR_QUANT8_ASYMM:
+                return convertOperandToFloat32<uint8_t>(op);
+            case TestOperandType::TENSOR_QUANT8_ASYMM_SIGNED:
+                return convertOperandToFloat32<int8_t>(op);
+            case TestOperandType::TENSOR_QUANT16_ASYMM:
+                return convertOperandToFloat32<uint16_t>(op);
+            case TestOperandType::TENSOR_QUANT16_SYMM:
+                return convertOperandToFloat32<int16_t>(op);
+            default:
+                CHECK(false) << "OperandType not supported";
+                return TestOperand{};
+        }
+    };
+
+    TestModel converted = testModel;
+    for (uint32_t i = 0; i < testModel.main.operands.size(); i++) {
+        converted.main.operands[i] = convert(testModel.main.operands[i], i);
+    }
+    return converted;
+}
+
+template <typename T>
+static void setDataFromFloat32Buffer(const TestBuffer& fpBuffer, TestOperand* op) {
+    const uint32_t numberOfElements = getNumberOfElements(*op);
+    const float* floatData = fpBuffer.get<float>();
+    T* data = op->data.getMutable<T>();
+
+    if (op->scale != 0.0f) {
+        std::transform(floatData, floatData + numberOfElements, data, [op](float val) {
+            int32_t unclamped = std::round(val / op->scale) + op->zeroPoint;
+            int32_t clamped = std::clamp<int32_t>(unclamped, std::numeric_limits<T>::min(),
+                                                  std::numeric_limits<T>::max());
+            return static_cast<T>(clamped);
+        });
+    } else {
+        std::transform(floatData, floatData + numberOfElements, data,
+                       [](float val) { return static_cast<T>(val); });
+    }
+}
+
+void setExpectedOutputsFromFloat32Results(const std::vector<TestBuffer>& results,
+                                          TestModel* model) {
+    CHECK_EQ(model->referenced.size(), 0u) << "Subgraphs not supported";
+    CHECK_EQ(model->main.operations.size(), 1u) << "Only single-operation graph is supported";
+
+    for (uint32_t i = 0; i < results.size(); i++) {
+        uint32_t outputIndex = model->main.outputIndexes[i];
+        auto& op = model->main.operands[outputIndex];
+        switch (op.type) {
+            case TestOperandType::TENSOR_FLOAT32:
+            case TestOperandType::FLOAT32:
+            case TestOperandType::TENSOR_BOOL8:
+            case TestOperandType::BOOL:
+            case TestOperandType::INT32:
+            case TestOperandType::UINT32:
+                op.data = results[i];
+                break;
+            case TestOperandType::TENSOR_INT32:
+                if (op.scale != 0.0f) {
+                    setDataFromFloat32Buffer<int32_t>(results[i], &op);
+                } else {
+                    op.data = results[i];
+                }
+                break;
+            case TestOperandType::TENSOR_FLOAT16:
+            case TestOperandType::FLOAT16:
+                setDataFromFloat32Buffer<_Float16>(results[i], &op);
+                break;
+            case TestOperandType::TENSOR_QUANT8_ASYMM:
+                setDataFromFloat32Buffer<uint8_t>(results[i], &op);
+                break;
+            case TestOperandType::TENSOR_QUANT8_ASYMM_SIGNED:
+                setDataFromFloat32Buffer<int8_t>(results[i], &op);
+                break;
+            case TestOperandType::TENSOR_QUANT16_ASYMM:
+                setDataFromFloat32Buffer<uint16_t>(results[i], &op);
+                break;
+            case TestOperandType::TENSOR_QUANT16_SYMM:
+                setDataFromFloat32Buffer<int16_t>(results[i], &op);
+                break;
+            default:
+                CHECK(false) << "OperandType not supported";
+        }
+    }
 }
 
 }  // namespace test_helper
