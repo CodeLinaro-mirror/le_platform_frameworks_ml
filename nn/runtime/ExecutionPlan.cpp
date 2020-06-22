@@ -607,6 +607,7 @@ void LogicalStep::dump() const {
 int ExecutionPlan::CompoundBody::finish(const SourceModels* sourceModels,
                                         int32_t executionPreference, int32_t priority,
                                         const std::optional<Deadline>& deadline) {
+    CHECK(!mSuccessfulFinish);
     CHECK(!deadline.has_value());
     const ModelBuilder* mainModel = sourceModels->getModel(kMainModelInSourceModels);
 
@@ -700,6 +701,7 @@ void ExecutionPlan::CompoundBody::findControlFlowBoundaryConstants(
 
 int ExecutionPlan::SimpleBody::finish(const SourceModels*, int32_t executionPreference,
                                       int32_t priority, const std::optional<Deadline>& deadline) {
+    CHECK(!mSuccessfulFinish);
     CHECK(mDevice != nullptr);
     VLOG(COMPILATION) << "ExecutionPlan::SimpleBody::finish, compilation";
     const int n = compile(*mDevice, *mModel, executionPreference, priority, deadline, *mCacheDir,
@@ -1034,6 +1036,7 @@ std::optional<ExecutionPlan::Buffer> ExecutionPlan::getBuffer(
     const auto& sourceOperandToOffsetOfTemporary = controller->mSourceOperandToOffsetOfTemporary;
     const auto& sourceOperandToInputIndex = controller->mSourceOperandToInputIndex;
     const auto& sourceOperandToOutputIndex = controller->mSourceOperandToOutputIndex;
+    const auto& sourceOperandToConstantReference = controller->mSourceOperandToConstantReference;
     if (auto it = sourceOperandToOffsetOfTemporary.find(operandIndex);
         it != sourceOperandToOffsetOfTemporary.end()) {
         const uint32_t offset = it->second;
@@ -1047,6 +1050,14 @@ std::optional<ExecutionPlan::Buffer> ExecutionPlan::getBuffer(
                it != sourceOperandToOutputIndex.end()) {
         const ModelArgumentInfo& info = controller->mExecutionBuilder->getOutputInfo(it->second);
         return getBufferFromModelArgumentInfo(info, controller->mExecutionBuilder);
+    } else if (auto it = sourceOperandToConstantReference.find(operandIndex);
+               it != sourceOperandToConstantReference.end()) {
+        const ConstantReferenceLocation& location = it->second;
+        const std::optional<RunTimePoolInfo> info = location.memory->getRunTimePoolInfo();
+        if (info == std::nullopt) {
+            return std::nullopt;
+        }
+        return Buffer(info->getBuffer() + location.offset, location.length);
     }
     return std::nullopt;
 }
@@ -1099,6 +1110,7 @@ int ExecutionPlan::next(std::shared_ptr<Controller> controller,
             if (burstController != nullptr && controller->mBurstBuilder != nullptr) {
                 *burstController = controller->mBurstBuilder->getControllerAt(0);
             }
+            controller->mFallbackNextStepIndex = 0;
             controller->mNextStepIndex = 1;
             return ANEURALNETWORKS_NO_ERROR;
         }
@@ -1366,6 +1378,8 @@ int ExecutionPlan::nextCompound(const WhileStep* step, std::shared_ptr<Controlle
             const SourceOperandIndex& outerOperand = step->outerOutputOperands[i];
             std::optional<Buffer> outerBuffer = getBuffer(controller, outerOperand);
             if (outerBuffer == std::nullopt) {
+                // This should never happen.
+                LOG(ERROR) << "Unable to get outerBuffer for operand " << toString(outerOperand);
                 return ANEURALNETWORKS_OP_FAILED;
             }
             const Operand& sourceOperand =
@@ -1374,6 +1388,8 @@ int ExecutionPlan::nextCompound(const WhileStep* step, std::shared_ptr<Controlle
             CHECK_NE(size, 0u);
             std::optional<Buffer> innerBuffer = getBuffer(controller, innerOperand);
             if (innerBuffer == std::nullopt) {
+                // This should never happen.
+                LOG(ERROR) << "Unable to get innerBuffer for operand " << toString(innerOperand);
                 return ANEURALNETWORKS_OP_FAILED;
             }
             CHECK_LE(size, innerBuffer->getSize());
@@ -1624,7 +1640,7 @@ int ModelBuilder::partitionTheWorkInternal(uint32_t sourceModelIndex,
             VLOG(COMPILATION) << "ModelBuilder::partitionTheWork: only one best device: "
                               << bestDeviceIndex << " = " << devices[bestDeviceIndex]->getName();
             plan->becomeSingleStep(devices[bestDeviceIndex], this);
-            return plan->finish(preference, priority, deadline);
+            return ANEURALNETWORKS_NO_ERROR;
         }
     }
 

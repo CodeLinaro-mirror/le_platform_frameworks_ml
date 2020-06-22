@@ -241,17 +241,16 @@ std::tuple<int, std::vector<OutputShape>, Timing> VersionedIPreparedModel::execu
         return getResults(*callback);
     }
 
-    const bool compliant = compliantWithV1_0(request);
-    if (!compliant) {
-        LOG(ERROR) << "Could not handle execute or execute_1_2!";
-        return failWithStatus(ErrorStatus::GENERAL_FAILURE);
-    }
-    const V1_0::Request request10 = convertToV1_0(request);
-
     // version 1.2 HAL
     if (mPreparedModelV1_2 != nullptr) {
+        const bool compliant = compliantWithV1_2(request);
+        if (!compliant) {
+            LOG(ERROR) << "Could not handle execute_1_2!";
+            return failWithStatus(ErrorStatus::GENERAL_FAILURE);
+        }
+        const V1_0::Request request12 = convertToV1_2(request);
         Return<V1_0::ErrorStatus> ret =
-                mPreparedModelV1_2->execute_1_2(request10, measure, callback);
+                mPreparedModelV1_2->execute_1_2(request12, measure, callback);
         if (ret.isDeadObject()) {
             LOG(ERROR) << "execute_1_2 failure: " << ret.description();
             return failDeadObject();
@@ -271,6 +270,12 @@ std::tuple<int, std::vector<OutputShape>, Timing> VersionedIPreparedModel::execu
 
     // version 1.0 HAL
     if (mPreparedModelV1_0 != nullptr) {
+        const bool compliant = compliantWithV1_0(request);
+        if (!compliant) {
+            LOG(ERROR) << "Could not handle execute!";
+            return failWithStatus(ErrorStatus::GENERAL_FAILURE);
+        }
+        const V1_0::Request request10 = convertToV1_0(request);
         Return<V1_0::ErrorStatus> ret = mPreparedModelV1_0->execute(request10, callback);
         if (ret.isDeadObject()) {
             LOG(ERROR) << "execute failure: " << ret.description();
@@ -324,16 +329,16 @@ std::tuple<int, std::vector<OutputShape>, Timing> VersionedIPreparedModel::execu
 
     // version 1.2 HAL
     if (mPreparedModelV1_2 != nullptr) {
-        const bool compliant = compliantWithV1_0(request);
+        const bool compliant = compliantWithV1_2(request);
         if (!compliant) {
             LOG(ERROR) << "Could not handle executeSynchronously!";
             return kFailure;
         }
-        const V1_0::Request request10 = convertToV1_0(request);
+        const V1_0::Request request12 = convertToV1_2(request);
 
         std::tuple<int, std::vector<OutputShape>, Timing> result;
         Return<void> ret = mPreparedModelV1_2->executeSynchronously(
-                request10, measure,
+                request12, measure,
                 [&result](V1_0::ErrorStatus error, const hidl_vec<OutputShape>& outputShapes,
                           const Timing& timing) {
                     result = getExecutionResult(convertToV1_3(error), outputShapes, timing);
@@ -703,8 +708,16 @@ std::optional<InitialData> initialize(const Core& core) {
 }
 
 std::shared_ptr<VersionedIDevice> VersionedIDevice::create(std::string serviceName,
-                                                           sp<V1_0::IDevice> device) {
-    CHECK(device != nullptr) << "VersionedIDevice::create passed invalid device object.";
+                                                           const DeviceFactory& makeDevice) {
+    CHECK(makeDevice != nullptr)
+            << "VersionedIDevice::create passed invalid device factory object.";
+
+    // get handle to IDevice object
+    sp<V1_0::IDevice> device = makeDevice(/*blocking=*/true);
+    if (device == nullptr) {
+        VLOG(DRIVER) << "VersionedIDevice::create got a null IDevice for " << serviceName;
+        return nullptr;
+    }
 
     auto core = Core::create(std::move(device));
     if (!core.has_value()) {
@@ -722,20 +735,22 @@ std::shared_ptr<VersionedIDevice> VersionedIDevice::create(std::string serviceNa
             std::move(*initialData);
     return std::make_shared<VersionedIDevice>(
             std::move(capabilities), std::move(supportedExtensions), type, std::move(versionString),
-            numberOfCacheFilesNeeded, std::move(serviceName), std::move(core.value()));
+            numberOfCacheFilesNeeded, std::move(serviceName), makeDevice, std::move(core.value()));
 }
 
 VersionedIDevice::VersionedIDevice(hal::Capabilities capabilities,
                                    std::vector<hal::Extension> supportedExtensions, int32_t type,
                                    std::string versionString,
                                    std::pair<uint32_t, uint32_t> numberOfCacheFilesNeeded,
-                                   std::string serviceName, Core core)
+                                   std::string serviceName, const DeviceFactory& makeDevice,
+                                   Core core)
     : kCapabilities(std::move(capabilities)),
       kSupportedExtensions(std::move(supportedExtensions)),
       kType(type),
       kVersionString(std::move(versionString)),
       kNumberOfCacheFilesNeeded(numberOfCacheFilesNeeded),
       kServiceName(std::move(serviceName)),
+      kMakeDevice(makeDevice),
       mCore(std::move(core)) {}
 
 std::optional<VersionedIDevice::Core> VersionedIDevice::Core::create(sp<V1_0::IDevice> device) {
@@ -874,7 +889,7 @@ Return<T_Return> VersionedIDevice::recoverable(
             if (pingReturn.isDeadObject()) {
                 VLOG(DRIVER) << "VersionedIDevice::recoverable(" << context << ") -- Recovering "
                              << kServiceName;
-                sp<V1_0::IDevice> recoveredDevice = V1_0::IDevice::tryGetService(kServiceName);
+                sp<V1_0::IDevice> recoveredDevice = kMakeDevice(/*blocking=*/false);
                 if (recoveredDevice == nullptr) {
                     VLOG(DRIVER) << "VersionedIDevice::recoverable got a null IDEVICE for "
                                  << kServiceName;
@@ -911,7 +926,7 @@ int VersionedIDevice::wait() const {
     auto pingReturn = mCore.getDevice<V1_0::IDevice>()->ping();
     if (pingReturn.isDeadObject()) {
         VLOG(DRIVER) << "VersionedIDevice::wait -- Recovering " << kServiceName;
-        sp<V1_0::IDevice> recoveredDevice = V1_0::IDevice::getService(kServiceName);
+        sp<V1_0::IDevice> recoveredDevice = kMakeDevice(/*blocking=*/true);
         if (recoveredDevice == nullptr) {
             LOG(ERROR) << "VersionedIDevice::wait got a null IDevice for " << kServiceName;
             return ANEURALNETWORKS_OP_FAILED;

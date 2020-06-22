@@ -1,59 +1,59 @@
-// Generated from strided_slice_invalid_output_dims.mod.py
+// Generated from strided_slice_b155662254.mod.py
 // DO NOT EDIT
 // clang-format off
 #include "TestHarness.h"
 using namespace test_helper;
 
-namespace generated_tests::strided_slice_invalid_output_dims {
+namespace generated_tests::strided_slice_b155662254 {
 
 const TestModel& get_test_model() {
     static TestModel model = {
-        .expectFailure = true,
+        .expectFailure = false,
         .expectedMultinomialDistributionTolerance = 0,
         .isRelaxed = false,
         .main = {
                 .inputIndexes = {0},
-                .operands = {{ // input
+                .operands = {{ // op1
                             .channelQuant = {},
-                            .data = TestBuffer::createFromVector<float>({1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}),
-                            .dimensions = {2, 3},
+                            .data = TestBuffer::createFromVector<float>({0.0f, 1.0f, 2.0f, 3.0f}),
+                            .dimensions = {4},
                             .isIgnored = false,
                             .lifetime = TestOperandLifeTime::SUBGRAPH_INPUT,
                             .numberOfConsumers = 1,
                             .scale = 0.0f,
                             .type = TestOperandType::TENSOR_FLOAT32,
                             .zeroPoint = 0
-                        }, { // begins
+                        }, { // param
                             .channelQuant = {},
-                            .data = TestBuffer::createFromVector<int32_t>({0, 0}),
-                            .dimensions = {2},
+                            .data = TestBuffer::createFromVector<int32_t>({0}),
+                            .dimensions = {1},
                             .isIgnored = false,
                             .lifetime = TestOperandLifeTime::CONSTANT_COPY,
                             .numberOfConsumers = 1,
                             .scale = 0.0f,
                             .type = TestOperandType::TENSOR_INT32,
                             .zeroPoint = 0
-                        }, { // ends
+                        }, { // param1
                             .channelQuant = {},
-                            .data = TestBuffer::createFromVector<int32_t>({2, 3}),
-                            .dimensions = {2},
+                            .data = TestBuffer::createFromVector<int32_t>({1}),
+                            .dimensions = {1},
                             .isIgnored = false,
                             .lifetime = TestOperandLifeTime::CONSTANT_COPY,
                             .numberOfConsumers = 1,
                             .scale = 0.0f,
                             .type = TestOperandType::TENSOR_INT32,
                             .zeroPoint = 0
-                        }, { // strides
+                        }, { // param2
                             .channelQuant = {},
-                            .data = TestBuffer::createFromVector<int32_t>({1, 1}),
-                            .dimensions = {2},
+                            .data = TestBuffer::createFromVector<int32_t>({1}),
+                            .dimensions = {1},
                             .isIgnored = false,
                             .lifetime = TestOperandLifeTime::CONSTANT_COPY,
                             .numberOfConsumers = 1,
                             .scale = 0.0f,
                             .type = TestOperandType::TENSOR_INT32,
                             .zeroPoint = 0
-                        }, { // beginMask
+                        }, { // param3
                             .channelQuant = {},
                             .data = TestBuffer::createFromVector<int32_t>({0}),
                             .dimensions = {},
@@ -63,7 +63,7 @@ const TestModel& get_test_model() {
                             .scale = 0.0f,
                             .type = TestOperandType::INT32,
                             .zeroPoint = 0
-                        }, { // endMask
+                        }, { // param4
                             .channelQuant = {},
                             .data = TestBuffer::createFromVector<int32_t>({0}),
                             .dimensions = {},
@@ -73,7 +73,7 @@ const TestModel& get_test_model() {
                             .scale = 0.0f,
                             .type = TestOperandType::INT32,
                             .zeroPoint = 0
-                        }, { // shrinkAxisMask
+                        }, { // param5
                             .channelQuant = {},
                             .data = TestBuffer::createFromVector<int32_t>({1}),
                             .dimensions = {},
@@ -83,10 +83,10 @@ const TestModel& get_test_model() {
                             .scale = 0.0f,
                             .type = TestOperandType::INT32,
                             .zeroPoint = 0
-                        }, { // output
+                        }, { // op2
                             .channelQuant = {},
-                            .data = TestBuffer::createFromVector<float>({1.0f, 2.0f, 3.0f}),
-                            .dimensions = {3},
+                            .data = TestBuffer::createFromVector<float>({0.0f}),
+                            .dimensions = {1},
                             .isIgnored = false,
                             .lifetime = TestOperandLifeTime::SUBGRAPH_OUTPUT,
                             .numberOfConsumers = 0,
@@ -101,66 +101,66 @@ const TestModel& get_test_model() {
                         }},
                 .outputIndexes = {7}
             },
-        .minSupportedVersion = TestHalVersion::V1_2,
+        .minSupportedVersion = TestHalVersion::V1_1,
         .referenced = {}
     };
     return model;
 }
 
-const auto dummy_test_model = TestModelManager::get().add("strided_slice_invalid_output_dims", get_test_model());
+const auto dummy_test_model = TestModelManager::get().add("strided_slice_b155662254", get_test_model());
 
-}  // namespace generated_tests::strided_slice_invalid_output_dims
+}  // namespace generated_tests::strided_slice_b155662254
 
-namespace generated_tests::strided_slice_invalid_output_dims {
+namespace generated_tests::strided_slice_b155662254 {
 
 const TestModel& get_test_model_all_inputs_as_internal() {
     static TestModel model = {
-        .expectFailure = true,
+        .expectFailure = false,
         .expectedMultinomialDistributionTolerance = 0,
         .isRelaxed = false,
         .main = {
                 .inputIndexes = {8},
-                .operands = {{ // input
+                .operands = {{ // op1
                             .channelQuant = {},
                             .data = TestBuffer::createFromVector<float>({}),
-                            .dimensions = {2, 3},
+                            .dimensions = {4},
                             .isIgnored = false,
                             .lifetime = TestOperandLifeTime::TEMPORARY_VARIABLE,
                             .numberOfConsumers = 1,
                             .scale = 0.0f,
                             .type = TestOperandType::TENSOR_FLOAT32,
                             .zeroPoint = 0
-                        }, { // begins
+                        }, { // param
                             .channelQuant = {},
-                            .data = TestBuffer::createFromVector<int32_t>({0, 0}),
-                            .dimensions = {2},
+                            .data = TestBuffer::createFromVector<int32_t>({0}),
+                            .dimensions = {1},
                             .isIgnored = false,
                             .lifetime = TestOperandLifeTime::CONSTANT_COPY,
                             .numberOfConsumers = 1,
                             .scale = 0.0f,
                             .type = TestOperandType::TENSOR_INT32,
                             .zeroPoint = 0
-                        }, { // ends
+                        }, { // param1
                             .channelQuant = {},
-                            .data = TestBuffer::createFromVector<int32_t>({2, 3}),
-                            .dimensions = {2},
+                            .data = TestBuffer::createFromVector<int32_t>({1}),
+                            .dimensions = {1},
                             .isIgnored = false,
                             .lifetime = TestOperandLifeTime::CONSTANT_COPY,
                             .numberOfConsumers = 1,
                             .scale = 0.0f,
                             .type = TestOperandType::TENSOR_INT32,
                             .zeroPoint = 0
-                        }, { // strides
+                        }, { // param2
                             .channelQuant = {},
-                            .data = TestBuffer::createFromVector<int32_t>({1, 1}),
-                            .dimensions = {2},
+                            .data = TestBuffer::createFromVector<int32_t>({1}),
+                            .dimensions = {1},
                             .isIgnored = false,
                             .lifetime = TestOperandLifeTime::CONSTANT_COPY,
                             .numberOfConsumers = 1,
                             .scale = 0.0f,
                             .type = TestOperandType::TENSOR_INT32,
                             .zeroPoint = 0
-                        }, { // beginMask
+                        }, { // param3
                             .channelQuant = {},
                             .data = TestBuffer::createFromVector<int32_t>({0}),
                             .dimensions = {},
@@ -170,7 +170,7 @@ const TestModel& get_test_model_all_inputs_as_internal() {
                             .scale = 0.0f,
                             .type = TestOperandType::INT32,
                             .zeroPoint = 0
-                        }, { // endMask
+                        }, { // param4
                             .channelQuant = {},
                             .data = TestBuffer::createFromVector<int32_t>({0}),
                             .dimensions = {},
@@ -180,7 +180,7 @@ const TestModel& get_test_model_all_inputs_as_internal() {
                             .scale = 0.0f,
                             .type = TestOperandType::INT32,
                             .zeroPoint = 0
-                        }, { // shrinkAxisMask
+                        }, { // param5
                             .channelQuant = {},
                             .data = TestBuffer::createFromVector<int32_t>({1}),
                             .dimensions = {},
@@ -190,20 +190,20 @@ const TestModel& get_test_model_all_inputs_as_internal() {
                             .scale = 0.0f,
                             .type = TestOperandType::INT32,
                             .zeroPoint = 0
-                        }, { // output
+                        }, { // op2
                             .channelQuant = {},
-                            .data = TestBuffer::createFromVector<float>({1.0f, 2.0f, 3.0f}),
-                            .dimensions = {3},
+                            .data = TestBuffer::createFromVector<float>({0.0f}),
+                            .dimensions = {1},
                             .isIgnored = false,
                             .lifetime = TestOperandLifeTime::SUBGRAPH_OUTPUT,
                             .numberOfConsumers = 0,
                             .scale = 0.0f,
                             .type = TestOperandType::TENSOR_FLOAT32,
                             .zeroPoint = 0
-                        }, { // input_new
+                        }, { // op1_new
                             .channelQuant = {},
-                            .data = TestBuffer::createFromVector<float>({1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}),
-                            .dimensions = {2, 3},
+                            .data = TestBuffer::createFromVector<float>({0.0f, 1.0f, 2.0f, 3.0f}),
+                            .dimensions = {4},
                             .isIgnored = false,
                             .lifetime = TestOperandLifeTime::SUBGRAPH_INPUT,
                             .numberOfConsumers = 1,
@@ -220,7 +220,7 @@ const TestModel& get_test_model_all_inputs_as_internal() {
                             .scale = 0.0f,
                             .type = TestOperandType::TENSOR_FLOAT32,
                             .zeroPoint = 0
-                        }, { // param
+                        }, { // param6
                             .channelQuant = {},
                             .data = TestBuffer::createFromVector<int32_t>({0}),
                             .dimensions = {},
@@ -242,13 +242,13 @@ const TestModel& get_test_model_all_inputs_as_internal() {
                         }},
                 .outputIndexes = {7}
             },
-        .minSupportedVersion = TestHalVersion::V1_2,
+        .minSupportedVersion = TestHalVersion::V1_1,
         .referenced = {}
     };
     return model;
 }
 
-const auto dummy_test_model_all_inputs_as_internal = TestModelManager::get().add("strided_slice_invalid_output_dims_all_inputs_as_internal", get_test_model_all_inputs_as_internal());
+const auto dummy_test_model_all_inputs_as_internal = TestModelManager::get().add("strided_slice_b155662254_all_inputs_as_internal", get_test_model_all_inputs_as_internal());
 
-}  // namespace generated_tests::strided_slice_invalid_output_dims
+}  // namespace generated_tests::strided_slice_b155662254
 

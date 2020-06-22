@@ -295,6 +295,7 @@ class Operand(NamedVariable):
         self.model_index = None
         self.ins = []
         self.outs = []
+        self.mayBeInternal = True
 
     def SetValue(self, value):
         self.value = value if type(value) is list or type(value) is tuple or value is None \
@@ -330,7 +331,14 @@ class Operand(NamedVariable):
                              extraParams=self.type.extraParams)
         if not issubclass(DerivedClass, Internal):
             newop.SetValue(self.value)
+        if not self.mayBeInternal:
+            assert not issubclass(DerivedClass, Internal)
+            newop.ShouldNeverBeInternal()
         return newop
+
+    def ShouldNeverBeInternal(self):
+        self.mayBeInternal = False
+        return self
 
 # Base class of user-defined input/output operand
 class InOut(Operand):
@@ -695,9 +703,9 @@ class ModelVariation:
         assert not model.dumped
 
         if not self.supportsSubgraphs:
-          containsSubgraphs = any(operand.lifetime == "SUBGRAPH" for operand in model.operands)
-          assert not containsSubgraphs, "Variation {} does not support subgraphs".format(
-              self.__class__.__name__)
+            containsSubgraphs = any(operand.lifetime == "SUBGRAPH" for operand in model.operands)
+            assert not containsSubgraphs, "Variation {} does not support subgraphs".format(
+                self.__class__.__name__)
 
         if not self.targetOperands:
             self.AutoIdentify(model)
@@ -997,13 +1005,11 @@ class AllTensorsAsInputsConverter(ModelVariation):
         if len(model.operations) != 1:
             raise SkipVariation
 
-        # TODO: Re-enable after the corresponding null-deref bugs are addressed.
-        if model.operations[0].optype in [
-                "MEAN", "PAD", "SQUEEZE", "STRIDED_SLICE", "TRANSPOSE", "RESHAPE"]:
-            raise SkipVariation
-
         # Find all constant tensors.
-        tensorParams = [p for p in model.operands if type(p) is Parameter and not p.type.IsScalar()]
+        tensorParams = [
+            p for p in model.operands
+            if type(p) is Parameter and not p.type.IsScalar() and p.value is not None
+        ]
         if not tensorParams:
             raise SkipVariation
 
@@ -1033,7 +1039,7 @@ class AllInputsAsInternalCoverter(ModelVariation):
             raise SkipVariation
 
         # Find all input tensors that can be an output of the ADD operation.
-        modelInputs = [i for i in model.GetInputs() if CompatibleWithADD(i)]
+        modelInputs = [i for i in model.GetInputs() if CompatibleWithADD(i) and i.mayBeInternal]
         if not modelInputs:
             raise SkipVariation
 

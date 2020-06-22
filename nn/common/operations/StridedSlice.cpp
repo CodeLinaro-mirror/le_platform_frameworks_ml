@@ -185,11 +185,15 @@ bool prepare(IOperationExecutionContext* context) {
         if (!(shrinkAxisMask & (1 << idx))) {
             outDims.push_back(outDim);
         } else {
-            if (outDim != 1) {
-                LOG(ERROR) << "Outdim " << idx << " is " << outDim << ", expected 1";
-                NN_RET_CHECK_EQ(outDim, 1);
-            }
+            // Only positive stride is allowed on non-range indexing (i.e. shrinkMask is set).
+            NN_RET_CHECK_GT(stride, 0) << "index = " << idx;
+            NN_RET_CHECK_EQ(outDim, 1) << "index = " << idx;
         }
+    }
+
+    // Handle the case when all dimensions are removed
+    if (outDims.empty()) {
+        outDims.push_back(1);
     }
 
     Shape outputShape = context->getOutputShape(kOutputTensor);

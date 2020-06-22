@@ -382,15 +382,6 @@ int8_t requantize<int8_t>(int8_t value, const Shape& oldShape, const Shape& newS
     return static_cast<int8_t>(std::round(doubleRet));
 }
 
-bool floorPrepare(const Shape& input, Shape* output) {
-    return SetShape(input, output);
-}
-
-bool genericActivationPrepare(const Shape& input, Shape* output) {
-    NN_OPS_CHECK(getNumberOfDimensions(input) <= 4);
-    return SetShape(input, output);
-}
-
 bool reshapePrepare(const Shape& input, const int32_t* targetDims, const int32_t targetDimsSize,
                     Shape* output) {
     // Reshape allows one of the targetDims components to have the
@@ -667,6 +658,10 @@ bool meanPrepare(const Shape& input, const int32_t* axisData, const Shape& axisS
                 outDims[idx - numSkipAxis] = getSizeOfDimension(input, idx);
             }
         }
+        // Handle the case when all dimensions are removed
+        if (outDims.empty()) {
+            outDims.push_back(1);
+        }
         output->dimensions = outDims;
     }
 
@@ -684,11 +679,15 @@ bool argMinMaxPrepare(const Shape& input, int32_t axis, Shape* output) {
 
     // Copy the input dimensions, omitting the axis dimension.
     output->dimensions.clear();
-    output->dimensions.reserve(getNumberOfDimensions(input) - 1);
-    output->dimensions.insert(output->dimensions.end(), input.dimensions.begin(),
-                              input.dimensions.begin() + axis);
-    output->dimensions.insert(output->dimensions.end(), input.dimensions.begin() + axis + 1,
-                              input.dimensions.end());
+    if (getNumberOfDimensions(input) > 1) {
+        output->dimensions.reserve(getNumberOfDimensions(input) - 1);
+        output->dimensions.insert(output->dimensions.end(), input.dimensions.begin(),
+                                  input.dimensions.begin() + axis);
+        output->dimensions.insert(output->dimensions.end(), input.dimensions.begin() + axis + 1,
+                                  input.dimensions.end());
+    } else {
+        output->dimensions.push_back(1);
+    }
 
     return true;
 }
