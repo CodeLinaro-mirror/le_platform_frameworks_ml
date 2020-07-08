@@ -692,12 +692,18 @@ static int validateHalVersion(ANeuralNetworksOperationType opType, HalVersion ha
     return ANEURALNETWORKS_NO_ERROR;
 }
 
-// Checks if two operands have the same types, shapes, and parameters.
-// Omits lifetime, numberOfConsumers, and location.
+// Checks if two operands have the same types, ranks (if specified), dimensions
+// (if specified), scales, zeroPoints, and extraParams.
 static bool compatible(const Operand& a, const Operand& b) {
     NN_RET_CHECK(a.type == b.type) << toString(a.type) << " != " << toString(b.type);
-    NN_RET_CHECK(a.dimensions == b.dimensions)
-            << toString(a.dimensions) << " != " << toString(b.dimensions);
+    if (a.dimensions.size() != 0 && b.dimensions.size() != 0) {
+        NN_RET_CHECK_EQ(a.dimensions.size(), b.dimensions.size()) << "Incompatible dimensions";
+        for (uint32_t i = 0, n = a.dimensions.size(); i < n; ++i) {
+            if (a.dimensions[i] != 0 && b.dimensions[i] != 0) {
+                NN_RET_CHECK_EQ(a.dimensions[i], b.dimensions[i]) << "Incompatible dimensions";
+            }
+        }
+    }
     NN_RET_CHECK_EQ(a.scale, b.scale);
     NN_RET_CHECK_EQ(a.zeroPoint, b.zeroPoint);
     NN_RET_CHECK(a.extraParams == b.extraParams)
@@ -756,6 +762,15 @@ static bool validateIfOperation(uint32_t inputCount, const uint32_t* inputs, uin
     return true;
 }
 
+static bool validateControlFlowOperandUnknownSize(const SubgraphValidationHelper& helper,
+                                                  const Operand& operand) {
+    if (!helper.allowControlFlowOperationWithOperandOfUnknownSize &&
+        !isExtensionOperandType(operand.type)) {
+        NN_RET_CHECK_NE(nonExtensionOperandSizeOfData(operand.type, operand.dimensions), 0u);
+    }
+    return true;
+}
+
 static bool validateWhileOperation(uint32_t inputCount, const uint32_t* inputs,
                                    uint32_t outputCount, const uint32_t* outputs,
                                    const std::vector<Operand>& operands,
@@ -783,6 +798,8 @@ static bool validateWhileOperation(uint32_t inputCount, const uint32_t* inputs,
             const Operand& innerOperand = *helper.getSubgraphInputOperand(condModelOperand, i);
             const Operand& outerOperand = operands[inputs[op::kFirstInput + i]];
             NN_RET_CHECK(compatible(innerOperand, outerOperand));
+            NN_RET_CHECK(validateControlFlowOperandUnknownSize(helper, innerOperand));
+            NN_RET_CHECK(validateControlFlowOperandUnknownSize(helper, outerOperand));
         }
         NN_RET_CHECK(
                 validateConditionOperand(*helper.getSubgraphOutputOperand(condModelOperand, 0)));
@@ -803,16 +820,20 @@ static bool validateWhileOperation(uint32_t inputCount, const uint32_t* inputs,
             const Operand& innerOperand = *helper.getSubgraphInputOperand(bodyModelOperand, i);
             const Operand& outerOperand = operands[inputs[op::kFirstInput + i]];
             NN_RET_CHECK(compatible(innerOperand, outerOperand));
+            NN_RET_CHECK(validateControlFlowOperandUnknownSize(helper, innerOperand));
+            NN_RET_CHECK(validateControlFlowOperandUnknownSize(helper, outerOperand));
         }
         for (uint32_t i = 0; i < inputOutputCount; ++i) {
             const Operand& innerOperand = *helper.getSubgraphOutputOperand(bodyModelOperand, i);
             const Operand& outerOperand = operands[outputs[i]];
             NN_RET_CHECK(compatible(innerOperand, outerOperand));
+            NN_RET_CHECK(validateControlFlowOperandUnknownSize(helper, outerOperand));
         }
         for (uint32_t i = 0, n = inputOutputCount + stateOnlyCount; i < n; ++i) {
             const Operand& inputOperand = *helper.getSubgraphInputOperand(bodyModelOperand, i);
             const Operand& outputOperand = *helper.getSubgraphOutputOperand(bodyModelOperand, i);
             NN_RET_CHECK(compatible(inputOperand, outputOperand));
+            NN_RET_CHECK(validateControlFlowOperandUnknownSize(helper, outputOperand));
         }
         return true;
     };
