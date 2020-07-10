@@ -131,8 +131,10 @@ class ModelBuilder {
                          ExecutionPlan* plan) const;
 
    private:
-    // TODO(b/132322449): move partitionTheWork, partitionTheWorkInternal,
-    // findBestDeviceForEachOperation, sortIntoRunOrder to CompilationBuilder?
+    // TODO(b/132322449): move partitionTheWork, findBestDeviceForEachOperation,
+    // getPerformance, supportedByControlFlowInterpreter,
+    // isControlFlowOperationWithOperandOfUnknownSize, partitionTheWorkInternal,
+    // sortIntoRunOrder to CompilationBuilder?
 
     // Populates bestDeviceForOperation
     //
@@ -149,6 +151,11 @@ class ModelBuilder {
     float getPerformance(uint32_t preference, const std::shared_ptr<Device> device) const;
     float getPerformance(uint32_t preference, const std::shared_ptr<Device> device,
                          uint32_t operationIndex) const;
+    bool supportedByControlFlowInterpreter(uint32_t operationIndex) const;
+
+    // Returns true if the operation is IF or WHILE and has an inner or outer
+    // input or output of unknown size.
+    bool isControlFlowOperationWithOperandOfUnknownSize(uint32_t operationIndex) const;
 
     int partitionTheWorkInternal(uint32_t sourceModelIndex,
                                  const std::vector<std::shared_ptr<Device>>& devices,
@@ -187,10 +194,9 @@ class ModelBuilder {
     std::vector<hal::Operand> mOperands;
     // Is at least one of those operands an OEM operand?
     bool mHasOEMOperand = false;
-    // Specifies where to find the list of indexes identifying
-    // the inputs and outputs of the model.  The offset is into
-    // the mOperandIndexes table.
+    // The indexes of input operands of the model.
     std::vector<uint32_t> mInputIndexes;
+    // The indexes of output operands of the model.
     std::vector<uint32_t> mOutputIndexes;
 
     MemoryTracker mMemories;
