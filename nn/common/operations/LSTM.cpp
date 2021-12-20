@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "LSTM.h"
 
 #include "CpuExecutor.h"
@@ -1032,3 +1033,4 @@ bool LSTMCell::Eval() {
 
 }  // namespace nn
 }  // namespace android
+#endif

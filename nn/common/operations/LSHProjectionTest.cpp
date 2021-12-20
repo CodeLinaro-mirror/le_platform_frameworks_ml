@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "LSHProjection.h"
 
 #include "NeuralNetworksWrapper.h"
@@ -172,3 +173,4 @@ TEST(LSHProjectionOpTest2, SparseWithTwoInputs) {
 }  // namespace wrapper
 }  // namespace nn
 }  // namespace android
+#endif

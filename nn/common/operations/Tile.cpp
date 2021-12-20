@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #define LOG_TAG "Operations"
 
 #include "Tile.h"
@@ -109,3 +110,4 @@ bool eval(const uint8_t* inputData, const Shape& inputShape, const int32_t* mult
 }  // namespace tile
 }  // namespace nn
 }  // namespace android
+#endif

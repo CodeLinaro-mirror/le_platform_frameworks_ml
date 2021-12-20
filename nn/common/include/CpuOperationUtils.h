@@ -23,13 +23,16 @@
 #include <cmath>
 #include <limits>
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/types.h"
+#endif
 
 namespace android {
 namespace nn {
 
 // The implementations in tflite/kernels/internal/ take a Dims<4> object
 // even if the original tensors were not 4D.
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 inline tflite::Dims<4> convertShapeToDims(const Shape& shape) {
     nnAssert(shape.dimensions.size() <= 4);
     tflite::Dims<4> dims;
@@ -57,6 +60,7 @@ inline tflite::RuntimeShape convertShapeToTflshape(const Shape& shape) {
     std::vector<int32_t> tflShapeDim(shape.dimensions.begin(), shape.dimensions.end());
     return tflite::RuntimeShape(tflShapeDim.size(), tflShapeDim.data());
 }
+#endif
 
 inline void convertFloat16ToFloat32(const _Float16* input, std::vector<float>* output) {
     CHECK(input != nullptr);

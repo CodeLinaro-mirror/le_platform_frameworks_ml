@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "Multinomial.h"
 
 #include "CpuExecutor.h"
@@ -141,3 +142,4 @@ void Multinomial::EvalFloat32(const float* inputData) {
 
 }  // namespace nn
 }  // namespace android
+#endif
