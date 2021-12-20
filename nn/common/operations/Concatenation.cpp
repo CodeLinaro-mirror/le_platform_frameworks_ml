@@ -17,8 +17,10 @@
 #include "CpuOperationUtils.h"
 #include "OperationResolver.h"
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
 #include "tensorflow/lite/kernels/internal/reference/legacy_reference_ops.h"
+#endif
 
 #include "Tracing.h"
 
@@ -31,6 +33,7 @@ constexpr char kOperationName[] = "CONCATENATION";
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename T>
@@ -96,6 +99,7 @@ inline bool concatenation(IOperationExecutionContext* context) {
 }
 
 }  // namespace
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     uint32_t inputCount = context->getNumInputs();
@@ -124,6 +128,7 @@ bool validate(const IOperationValidationContext* context) {
            validateOutputTypes(context, {inputType});
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     uint32_t numInputs = context->getNumInputs();
     NN_RET_CHECK_GE(numInputs, 2);
@@ -168,6 +173,7 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
+#endif
 
 }  // namespace concatenation
 

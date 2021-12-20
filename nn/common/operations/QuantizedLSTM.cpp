@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "QuantizedLSTM.h"
 
 #include "CpuExecutor.h"
@@ -423,3 +424,4 @@ bool QuantizedLSTMCell::eval() {
 
 }  // namespace nn
 }  // namespace android
+#endif

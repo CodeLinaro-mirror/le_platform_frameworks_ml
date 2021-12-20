@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #define LOG_TAG "Operations"
 
 #include "Operations.h"
@@ -81,3 +82,4 @@ bool splitInt32(const int32_t* inputData, const Shape& inputShape, int32_t axis,
 
 }  // namespace nn
 }  // namespace android
+#endif

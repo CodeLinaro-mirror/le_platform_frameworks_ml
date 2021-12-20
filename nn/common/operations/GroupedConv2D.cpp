@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "CpuOperationUtils.h"
 #include "Operations.h"
 
@@ -288,3 +289,4 @@ bool groupedConvFloat16(const _Float16* inputData, const Shape& inputShape,
 #undef ANDROID_NN_GROUPED_CONV_PARAMETERS
 }  // namespace nn
 }  // namespace android
+#endif

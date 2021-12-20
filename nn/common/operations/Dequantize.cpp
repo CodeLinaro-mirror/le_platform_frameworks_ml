@@ -31,6 +31,7 @@ constexpr uint32_t kInputTensor = 0;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename InputType, typename OutputType>
@@ -73,6 +74,7 @@ bool computePerChannel(const int8_t* inputData, const Shape& inputShape, OutputT
 }
 
 }  // namespace
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -96,6 +98,7 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     const Shape& input = context->getInputShape(kInputTensor);
     Shape output = context->getOutputShape(kOutputTensor);
@@ -140,6 +143,7 @@ bool execute(IOperationExecutionContext* context) {
     NN_RET_CHECK_FAIL() << "Unsupported tensor types combination for dequantize op. (input type: "
                         << toString(inputType) << " output type: " << toString(outputType) << ")";
 }
+#endif
 
 }  // namespace dequantize
 

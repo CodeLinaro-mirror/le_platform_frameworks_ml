@@ -38,6 +38,7 @@ constexpr uint32_t kNumOutputs = 2;
 constexpr uint32_t kOutputScoreTensor = 0;
 constexpr uint32_t kOutputKeypointTensor = 1;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 // This function uses Taylor expansion up to the quatratic term to approximate bicubic
@@ -198,6 +199,7 @@ inline bool heatmapMaxKeypointQuant(const uint8_t* heatmap, const Shape& heatmap
 }
 
 }  // namespace
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -221,6 +223,7 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     bool layout = context->getInputValue<bool>(kLayoutScalar);
     Shape heatmapShape = context->getInputShape(kHeatmapTensor);
@@ -308,6 +311,7 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
+#endif
 
 }  // namespace heatmap_max_keypoint
 
