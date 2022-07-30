@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #ifndef FRAMEWORKS_ML_NN_TOPK_V2_H
 #define FRAMEWORKS_ML_NN_TOPK_V2_H
 
@@ -34,4 +33,3 @@ bool eval(const void* inputData, const Shape& inputShape, const int32_t k, void*
 }  // namespace android
 
 #endif  // FRAMEWORKS_ML_NN_TOPK_V2_H
-#endif

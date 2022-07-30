@@ -598,11 +598,6 @@ int CpuExecutor::run(const Model& model, const Request& request,
     NNTRACE_CPU(NNTRACE_PHASE_EXECUTION, "run");
     VLOG(CPUEXE) << "CpuExecutor::run() with request(" << SHOW_IF_DEBUG(toString(request)) << ")";
 
-#ifndef NN_INCLUDE_CPU_IMPLEMENTATION
-    LOG(ERROR) << "CPU implementation is disabled";
-    return ANEURALNETWORKS_UNAVAILABLE_DEVICE;
-#endif
-
     // b/109953668, disable OpenMP
 #ifdef NNAPI_OPENMP
     ScopedOpenmpSettings openMpSettings;
@@ -732,7 +727,6 @@ void CpuExecutor::freeNoLongerUsedOperands(const std::vector<uint32_t>& inputs) 
     }
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 int CpuExecutor::executeOperation(const Operation& operation) {
     // VLOG(CPUEXE) << "CpuExecutor::executeOperation(" << toString(operation) << ")";
     const hidl_vec<uint32_t>& ins = operation.inputs;
@@ -1828,13 +1822,6 @@ int CpuExecutor::executeOperation(const Operation& operation) {
     freeNoLongerUsedOperands(ins);
     return ANEURALNETWORKS_NO_ERROR;
 }
-#else
-int CpuExecutor::executeOperation(const Operation& operation) {
-    (void)(operation);
-    LOG(ERROR) << "CPU implementation is disabled";
-    return ANEURALNETWORKS_UNAVAILABLE_DEVICE;
-}
-#endif
 
 void CpuExecutor::finish(int result) {
     // Free allocated temporary operands.

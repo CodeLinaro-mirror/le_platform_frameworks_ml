@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "EmbeddingLookup.h"
 
 #include "NeuralNetworksWrapper.h"
@@ -173,4 +172,3 @@ TEST(EmbeddingLookupOpTest, SimpleTest) {
 }  // namespace wrapper
 }  // namespace nn
 }  // namespace android
-#endif

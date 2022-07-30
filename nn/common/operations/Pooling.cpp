@@ -17,9 +17,7 @@
 #include "CpuOperationUtils.h"
 #include "OperationResolver.h"
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
-#endif
 
 #include "Tracing.h"
 
@@ -32,7 +30,6 @@ constexpr uint32_t kInputTensor = 0;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 struct PoolingParam {
@@ -249,7 +246,6 @@ bool maxPool(const T* inputData, const Shape& inputShape, const PoolingParam& pa
 }
 
 }  // namespace
-#endif
 
 bool validate(OperationType opType, const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumOutputs(), kNumOutputs);
@@ -302,7 +298,6 @@ bool validate(OperationType opType, const IOperationValidationContext* context) 
            validateOutputTypes(context, {inputType});
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape input = context->getInputShape(kInputTensor);
     NN_RET_CHECK_EQ(getNumberOfDimensions(input), 4);
@@ -380,7 +375,6 @@ bool executeMaxPool(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation MAX_POOL_2D";
     }
 }
-#endif
 
 #undef POOLING_DISPATCH_INPUT_TYPE
 

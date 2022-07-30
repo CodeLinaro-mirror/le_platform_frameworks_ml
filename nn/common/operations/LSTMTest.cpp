@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "LSTM.h"
 
 #include "NeuralNetworksWrapper.h"
@@ -1112,4 +1111,3 @@ TEST(LSTMOpTest, BlackBoxTestWithPeepholeWithProjectionNoClipping) {
 }  // namespace wrapper
 }  // namespace nn
 }  // namespace android
-#endif

@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "Multinomial.h"
 
 #include "HalInterfaces.h"
@@ -138,4 +137,3 @@ TEST(MultinomialOpTest, ProbabilityDeltaWithinTolerance) {
 }  // namespace wrapper
 }  // namespace nn
 }  // namespace android
-#endif

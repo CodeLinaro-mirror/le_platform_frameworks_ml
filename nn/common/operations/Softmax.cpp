@@ -17,10 +17,8 @@
 #include "CpuOperationUtils.h"
 #include "OperationResolver.h"
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
 #include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
-#endif
 
 #include "Tracing.h"
 #include <float.h>
@@ -40,7 +38,6 @@ constexpr uint32_t kAxisScalar = 2;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 inline bool softmaxSlowFloat32(const float* inputData, const Shape& inputShape, const float beta,
@@ -226,7 +223,6 @@ bool softmaxQuant8(const uint8_t* inputData, const Shape& inputShape, const floa
 }
 
 }  // namespace
-#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK(context->getNumInputs() == kNumInputs ||
@@ -256,7 +252,6 @@ bool validate(const IOperationValidationContext* context) {
            validateOutputTypes(context, {inputType});
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape input = context->getInputShape(kInputTensor);
     float beta = (input.type == OperandType::TENSOR_FLOAT16)
@@ -298,7 +293,6 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
-#endif
 
 }  // namespace softmax
 

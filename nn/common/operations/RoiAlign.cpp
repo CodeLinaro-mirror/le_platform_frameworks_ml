@@ -22,9 +22,7 @@
 #include <cmath>
 
 #include "Tracing.h"
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/common.h"
-#endif
 
 namespace android {
 namespace nn {
@@ -47,7 +45,6 @@ constexpr uint32_t kLayoutScalar = 9;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename T_Input, typename T_Roi>
@@ -329,7 +326,6 @@ inline bool roiAlign(const T_Input* inputData, const Shape& inputShape, const T_
 }
 
 }  // namespace
-#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -368,7 +364,6 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     bool useNchw = context->getInputValue<bool>(kLayoutScalar);
     Shape input = context->getInputShape(kInputTensor);
@@ -479,7 +474,6 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
-#endif
 
 }  // namespace roi_align
 

@@ -81,7 +81,6 @@ constexpr uint32_t kNumOutputs = 1;
 
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 inline bool hasTensor(IOperationExecutionContext* context, const uint32_t tensor) {
@@ -108,7 +107,6 @@ inline LSTMParams getLSTMParams(IOperationExecutionContext* context) {
 }
 
 }  // namespace
-#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -158,7 +156,6 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     // Check that none of the required inputs are omitted
     const std::vector<int> requiredInputs = {
@@ -465,7 +462,6 @@ bool execute(IOperationExecutionContext* context) {
     }
     return true;
 }
-#endif
 
 }  // namespace unidirectional_sequence_lstm
 
