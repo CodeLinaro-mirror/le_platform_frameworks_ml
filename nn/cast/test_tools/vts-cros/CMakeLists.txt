@@ -58,10 +58,13 @@ target_link_libraries(${NNHAL_TEST_1_0_TARGET_NAME}
     vts_hal_hidl_target_test_base
     gtest
     gtest_main
-    tensorflow-lite
     base
     log
 )
+
+if (NN_INCLUDE_CPU_IMPLEMENTATION)
+    target_link_libraries(${NNHAL_TEST_1_0_TARGET_NAME} ${TFLITE_LIBRARIES})
+endif ()
 
 install(
     TARGETS ${NNHAL_TEST_1_0_TARGET_NAME}
@@ -97,10 +100,13 @@ target_link_libraries(${NNHAL_TEST_1_1_TARGET_NAME}
     vts_hal_hidl_target_test_base
     gtest
     gtest_main
-    tensorflow-lite
     base
     log
 )
+
+if (NN_INCLUDE_CPU_IMPLEMENTATION)
+    target_link_libraries(${NNHAL_TEST_1_1_TARGET_NAME} ${TFLITE_LIBRARIES})
+endif ()
 
 install(
     TARGETS ${NNHAL_TEST_1_1_TARGET_NAME}
@@ -144,10 +150,13 @@ target_link_libraries(${NNHAL_TEST_1_2_TARGET_NAME}
     vts_hal_hidl_target_test_base
     gtest
     gtest_main
-    tensorflow-lite
     base
     log
 )
+
+if (NN_INCLUDE_CPU_IMPLEMENTATION)
+    target_link_libraries(${NNHAL_TEST_1_2_TARGET_NAME} ${TFLITE_LIBRARIES})
+endif ()
 
 install(
     TARGETS ${NNHAL_TEST_1_2_TARGET_NAME}

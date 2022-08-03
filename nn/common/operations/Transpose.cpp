@@ -17,8 +17,10 @@
 #include "CpuOperationUtils.h"
 #include "OperationResolver.h"
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
 #include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
+#endif
 
 #include "Tracing.h"
 
@@ -35,6 +37,7 @@ constexpr uint32_t kPermTensor = 1;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename T>
@@ -65,6 +68,7 @@ bool transposeGeneric(const T* inputData, const Shape& inputShape, const int32_t
 }
 
 }  // namespace
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -82,6 +86,7 @@ bool validate(const IOperationValidationContext* context) {
            validateOutputTypes(context, {inputType});
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     // Only the permutation tensor can be omitted.
     NN_RET_CHECK(!context->isOmittedInput(kInputTensor));
@@ -150,6 +155,7 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
+#endif
 
 }  // namespace transpose
 

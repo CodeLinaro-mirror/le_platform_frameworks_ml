@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "HashtableLookup.h"
 
 #include "NeuralNetworksWrapper.h"
@@ -187,3 +188,4 @@ TEST(HashtableLookupOpTest, BlackBoxTest) {
 }  // namespace wrapper
 }  // namespace nn
 }  // namespace android
+#endif

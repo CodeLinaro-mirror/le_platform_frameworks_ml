@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #ifndef FRAMEWORKS_ML_NN_COMMON_OPERATIONS_TILE_H
 #define FRAMEWORKS_ML_NN_COMMON_OPERATIONS_TILE_H
 
@@ -34,3 +35,4 @@ bool eval(const uint8_t* inputData, const Shape& inputShape, const int32_t* mult
 }  // namespace android
 
 #endif  // FRAMEWORKS_ML_NN_COMMON_OPERATIONS_TILE_H
+#endif

@@ -21,7 +21,9 @@
 #include <cmath>
 
 #include "Tracing.h"
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/common.h"
+#endif
 #include <mutex>
 
 namespace android {
@@ -37,6 +39,7 @@ constexpr uint32_t kBiasTensor = 2;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 // If possible we will use this static buffer for the tensor.
@@ -424,6 +427,7 @@ bool transposeConvQuant8PerChannel(const uint8_t* inputData, const Shape& inputS
 #undef ANDROID_NN_TRANSPOSE_CONV_PARAMETERS
 
 }  // namespace
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumOutputs(), kNumOutputs);
@@ -463,6 +467,7 @@ bool validate(const IOperationValidationContext* context) {
            validateOutputTypes(context, {inputType});
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape input = context->getInputShape(kInputTensor);
     Shape filter = context->getInputShape(kFilterTensor);
@@ -572,6 +577,7 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
+#endif
 
 }  // namespace transpose_conv_2d
 

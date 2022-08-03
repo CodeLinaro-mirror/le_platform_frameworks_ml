@@ -17,7 +17,9 @@
 #include "CpuOperationUtils.h"
 #include "OperationResolver.h"
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
+#endif
 
 #include "Tracing.h"
 
@@ -34,6 +36,7 @@ constexpr uint32_t kAxisScalar = 1;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 inline bool l2normFloat32Impl(const float* inputData, const Shape& inputShape, int32_t axis,
@@ -141,6 +144,7 @@ bool l2normQuant8(const uint8_t* inputData, const Shape& inputShape, int32_t axi
 }
 
 }  // namespace
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK(context->getNumInputs() == kNumInputs ||
@@ -166,6 +170,7 @@ bool validate(const IOperationValidationContext* context) {
            validateOutputTypes(context, {inputType});
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     const Shape& input = context->getInputShape(kInputTensor);
     int32_t numDimensions = getNumberOfDimensions(input);
@@ -212,6 +217,7 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
+#endif
 
 }  // namespace l2_norm
 
