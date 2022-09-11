@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #define LOG_TAG "Operations"
 
 #include "Pow.h"
@@ -88,4 +87,3 @@ bool eval(const void* baseData, const Shape& baseShape, const void* exponentData
 }  // namespace pow
 }  // namespace nn
 }  // namespace android
-#endif

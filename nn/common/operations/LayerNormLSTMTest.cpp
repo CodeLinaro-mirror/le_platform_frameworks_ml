@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "LSTM.h"
 
 #include <android-base/logging.h>
@@ -428,4 +426,3 @@ TEST(LSTMOpTest, LayerNormNoCifgPeepholeProjectionNoClipping) {
 }  // namespace wrapper
 }  // namespace nn
 }  // namespace android
-#endif

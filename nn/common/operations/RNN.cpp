@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "RNN.h"
 
 #include "CpuExecutor.h"
@@ -253,4 +252,3 @@ template bool RNN::RNNStep<_Float16>(const _Float16* inputData, const Shape& inp
 
 }  // namespace nn
 }  // namespace android
-#endif

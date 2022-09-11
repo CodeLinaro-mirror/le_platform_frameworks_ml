@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #define LOG_TAG "Operations"
 
 #include "ExpandDims.h"
@@ -48,4 +47,3 @@ bool eval(const uint8_t* inputData, const Shape& inputShape, int32_t axis, uint8
 }  // namespace expand_dims
 }  // namespace nn
 }  // namespace android
-#endif

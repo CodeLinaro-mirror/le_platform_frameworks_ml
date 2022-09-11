@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "EmbeddingLookup.h"
 
 #include "CpuExecutor.h"
@@ -55,4 +54,3 @@ bool EmbeddingLookup::Eval() {
 
 }  // namespace nn
 }  // namespace android
-#endif

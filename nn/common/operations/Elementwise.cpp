@@ -33,7 +33,6 @@ constexpr uint32_t kInputTensor = 0;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename T>
@@ -61,7 +60,6 @@ bool execute(IOperationExecutionContext* context, float func(float)) {
 }
 
 }  // namespace
-#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -75,7 +73,6 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape input = context->getInputShape(kInputTensor);
     Shape output = context->getOutputShape(kOutputTensor);
@@ -106,7 +103,6 @@ bool executeSin(IOperationExecutionContext* context) {
 bool executeSqrt(IOperationExecutionContext* context) {
     return execute(context, std::sqrt);
 }
-#endif
 
 }  // namespace elementwise
 

@@ -15,16 +15,9 @@ add_definitions(-flax-vector-conversions)
 add_definitions(-fomit-frame-pointer)
 
 include_directories(${SYSROOT_INCDIR})
+include_directories(${SYSROOT_INCDIR}/tflite)
 include_directories(${SYSROOT_INCDIR}/eigen3)
 link_directories(${SYSROOT_LIBDIR})
-
-option(NN_INCLUDE_CPU_IMPLEMENTATION "Include CPU Implementation" OFF)
-
-if (NN_INCLUDE_CPU_IMPLEMENTATION)
-  include_directories(${SYSROOT_INCDIR}/tensorflow)
-  find_package(PkgConfig)
-  pkg_check_modules(TFLITE REQUIRED tensorflow-lite)
-endif ()
 
 add_subdirectory(cast/include)
 add_subdirectory(cast/android/hardware/neuralnetworks/1.2)

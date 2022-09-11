@@ -17,10 +17,8 @@
 #include "CpuOperationUtils.h"
 #include "OperationResolver.h"
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
 #include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
-#endif
 
 #include "Tracing.h"
 #include <mutex>
@@ -40,7 +38,6 @@ constexpr uint32_t kActivationScalar = 3;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 // executionMutex is used to protect concurrent access of non-threadsafe resources
@@ -141,7 +138,6 @@ bool fullyConnectedQuant8(const uint8_t* inputData, const Shape& inputShape,
 }
 
 }  // namespace
-#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -195,7 +191,6 @@ bool validate(const IOperationValidationContext* context) {
     return true;
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape input = context->getInputShape(kInputTensor);
     Shape weights = context->getInputShape(kWeightsTensor);
@@ -267,7 +262,6 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
-#endif
 
 }  // namespace fully_connected
 

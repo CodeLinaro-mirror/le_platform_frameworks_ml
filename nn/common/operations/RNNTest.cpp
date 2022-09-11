@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "RNN.h"
 
 #include "NeuralNetworksWrapper.h"
@@ -336,4 +335,3 @@ TEST(RNNOpTest, BlackBoxTest) {
 }  // namespace wrapper
 }  // namespace nn
 }  // namespace android
-#endif

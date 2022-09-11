@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "CpuOperationUtils.h"
 #include "Operations.h"
 
@@ -246,4 +245,3 @@ bool depthwiseConvQuant8PerChannel(const uint8_t* inputData, const Shape& inputS
 #undef ANDROID_NN_DEPTHWISE_CONV_PARAMETERS
 }  // namespace nn
 }  // namespace android
-#endif

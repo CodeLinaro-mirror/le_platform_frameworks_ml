@@ -33,7 +33,6 @@ constexpr uint32_t kSizeTensor = 2;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename T>
@@ -75,7 +74,6 @@ bool evalGeneric(const T* inputData, const Shape& inputShape, const int32_t* beg
 }
 
 }  // namespace
-#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -124,7 +122,6 @@ bool prepare(IOperationExecutionContext* context) {
     return context->setOutputShape(kOutputTensor, outputShape);
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool execute(IOperationExecutionContext* context) {
     // Bypass execution in the case of zero-sized input.
     if (getNumberOfElements(context->getOutputShape(kOutputTensor)) == 0) return true;
@@ -169,7 +166,6 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
-#endif
 
 }  // namespace slice
 

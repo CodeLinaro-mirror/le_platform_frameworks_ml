@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #define LOG_TAG "Operations"
 
 #include "MaximumMinimum.h"
@@ -123,4 +122,3 @@ bool eval(const void* in1, const Shape& shape1, const void* in2, const Shape& sh
 }  // namespace maximum_minimum
 }  // namespace nn
 }  // namespace android
-#endif

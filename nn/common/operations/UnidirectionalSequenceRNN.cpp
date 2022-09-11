@@ -35,7 +35,6 @@ constexpr uint32_t kTimeMajorParam = 6;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename T>
@@ -113,7 +112,6 @@ bool executeTyped(IOperationExecutionContext* context) {
 }
 
 }  // namespace
-#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -130,7 +128,6 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape input = context->getInputShape(kInputTensor);
     Shape weights = context->getInputShape(kWeightsTensor);
@@ -176,7 +173,6 @@ bool execute(IOperationExecutionContext* context) {
     }
     return true;
 }
-#endif
 
 }  // namespace unidirectional_sequence_rnn
 
