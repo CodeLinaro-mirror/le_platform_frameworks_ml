@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #ifndef FRAMEWORKS_ML_NN_MAXIMUM_MINIMUM_H
 #define FRAMEWORKS_ML_NN_MAXIMUM_MINIMUM_H
 
@@ -33,3 +34,4 @@ bool eval(const void* in1, const Shape& shape1, const void* in2, const Shape& sh
 }  // namespace android
 
 #endif  // FRAMEWORKS_ML_NN_MAXIMUM_MINIMUM_H
+#endif

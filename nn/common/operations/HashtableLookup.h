@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #ifndef FRAMEWORKS_ML_NN_HASHTABLE_LOOKUP_H
 #define FRAMEWORKS_ML_NN_HASHTABLE_LOOKUP_H
 
@@ -54,3 +55,4 @@ class HashtableLookup {
 }  // namespace android
 
 #endif  // FRAMEWORKS_ML_NN_HASHTABLE_LOOKUP_H
+#endif

@@ -21,7 +21,9 @@
 #include "OperationResolver.h"
 #include "OperationsUtils.h"
 #include "Tracing.h"
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
+#endif
 
 namespace android {
 namespace nn {
@@ -36,6 +38,7 @@ constexpr uint32_t kAlphaTensor = 1;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 template <typename T>
 inline bool eval(const std::function<T(const T&, const T&)>& func, const T* aData,
                  const Shape& aShape, const T* bData, const Shape& bShape, T* outputData,
@@ -91,6 +94,7 @@ bool evalQuant8(const uint8_t* aData, const Shape& aShape, const uint8_t* bData,
             },
             aData, aShape, bData, bShape, outputData, outputShape);
 }
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -105,6 +109,7 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape input = context->getInputShape(kInputTensor);
     Shape alpha = context->getInputShape(kAlphaTensor);
@@ -150,6 +155,7 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
+#endif
 
 }  // namespace prelu
 

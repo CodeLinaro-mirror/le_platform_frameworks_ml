@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #ifndef FRAMEWORKS_ML_NN_SVDF_H
 #define FRAMEWORKS_ML_NN_SVDF_H
 
@@ -42,7 +43,6 @@ class SVDF {
     static bool Prepare(const Operation& operation, std::vector<RunTimeOperandInfo>& operands,
                         Shape* stateShape, Shape* outputShape);
     bool Eval();
-
     static constexpr int kInputTensor = 0;
     static constexpr int kWeightsFeatureTensor = 1;
     static constexpr int kWeightsTimeTensor = 2;
@@ -74,4 +74,5 @@ class SVDF {
 }  // namespace nn
 }  // namespace android
 
+#endif
 #endif

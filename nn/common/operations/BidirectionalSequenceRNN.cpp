@@ -47,6 +47,7 @@ constexpr uint32_t kMergeOutputsParam = 14;
 constexpr uint32_t kFwOutputTensor = 0;
 constexpr uint32_t kBwOutputTensor = 1;  // Only if mergeOutputs parameter is false
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename T>
@@ -245,6 +246,7 @@ bool executeTyped(IOperationExecutionContext* context) {
 }
 
 }  // namespace
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -269,6 +271,7 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     int32_t mergeOutputs = context->getInputValue<bool>(kMergeOutputsParam);
     if (mergeOutputs) {
@@ -383,6 +386,7 @@ bool execute(IOperationExecutionContext* context) {
     }
     return true;
 }
+#endif
 
 }  // namespace bidirectional_sequence_rnn
 

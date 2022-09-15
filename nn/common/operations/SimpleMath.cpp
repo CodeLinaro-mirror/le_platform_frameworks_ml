@@ -16,6 +16,7 @@
 
 // Contains the implementation of the operations.
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #define LOG_TAG "Operations"
 
 #include "CpuOperationUtils.h"
@@ -102,3 +103,4 @@ template bool meanGeneric<uint8_t, int32_t>(uint8_t* inputData, const Shape& inp
 
 }  // namespace nn
 }  // namespace android
+#endif

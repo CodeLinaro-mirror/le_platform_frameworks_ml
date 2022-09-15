@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "QuantizedLSTM.h"
 
 #include "NeuralNetworksWrapper.h"
@@ -375,3 +376,4 @@ TEST_F(QuantizedLstmTest, BasicQuantizedLstmTest) {
 }  // namespace wrapper
 }  // namespace nn
 }  // namespace android
+#endif

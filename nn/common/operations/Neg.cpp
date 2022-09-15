@@ -35,6 +35,7 @@ constexpr uint32_t kInputTensor = 0;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename T>
@@ -47,6 +48,7 @@ inline bool compute(const T* input, const Shape& shape, T* output) {
 }
 
 }  // namespace
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -60,6 +62,7 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape input = context->getInputShape(kInputTensor);
     Shape output = context->getOutputShape(kOutputTensor);
@@ -85,6 +88,7 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
+#endif
 
 }  // namespace neg
 

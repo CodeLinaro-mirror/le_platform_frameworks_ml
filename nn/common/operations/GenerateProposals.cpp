@@ -28,6 +28,7 @@ namespace android {
 namespace nn {
 namespace bbox_ops {
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 struct BoxEncodingCorner {
@@ -157,6 +158,7 @@ float getIoUAxisAligned(const float* roi1, const float* roi2) {
 }
 
 }  // namespace
+#endif
 
 namespace axis_aligned_bbox_transform {
 
@@ -190,6 +192,7 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape roiShape = context->getInputShape(kRoiTensor);
     Shape bboxDeltasShape = context->getInputShape(kDeltaTensor);
@@ -275,6 +278,7 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
+#endif
 
 }  // namespace axis_aligned_bbox_transform
 
@@ -299,6 +303,7 @@ constexpr uint32_t kOutputRoiTensor = 1;
 constexpr uint32_t kOutputClassTensor = 2;
 constexpr uint32_t kOutputBatchesTensor = 3;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 // TODO(xusongw): Reduce code duplication with hard/soft nms path.
@@ -628,6 +633,7 @@ bool boxWithNmsLimitQuant(const uint8_t* scoresData, const Shape& scoresShape,
 }
 
 }  // namespace
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -669,6 +675,7 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape scoreShape = context->getInputShape(kScoreTensor);
     Shape roiShape = context->getInputShape(kRoiTensor);
@@ -794,6 +801,7 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
+#endif
 
 }  // namespace box_with_nms_limit
 
@@ -819,6 +827,7 @@ constexpr uint32_t kOutputScoreTensor = 0;
 constexpr uint32_t kOutputRoiTensor = 1;
 constexpr uint32_t kOutputBatchesTensor = 2;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 void filterBoxes(const float* roiBase, const float* imageInfoBase, float minSize,
@@ -1104,6 +1113,7 @@ bool generateProposalsQuant(const uint8_t* scoresData, const Shape& scoresShape,
 }
 
 }  // namespace
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -1161,6 +1171,7 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     bool useNchw = context->getInputValue<bool>(kLayoutScalar);
     Shape scoreShape = context->getInputShape(kScoreTensor);
@@ -1273,6 +1284,7 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
+#endif
 
 }  // namespace generate_proposals
 
@@ -1302,6 +1314,7 @@ constexpr uint32_t kOutputRoiTensor = 1;
 constexpr uint32_t kOutputClassTensor = 2;
 constexpr uint32_t kOutputDetectionTensor = 3;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 bool detectionPostprocessFloat32(
@@ -1438,6 +1451,7 @@ bool detectionPostprocessFloat16(
 }
 
 }  // namespace
+#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -1470,6 +1484,7 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape scoreShape = context->getInputShape(kScoreTensor);
     Shape deltasShape = context->getInputShape(kDeltaTensor);
@@ -1606,6 +1621,7 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
+#endif
 
 }  // namespace detection_postprocess
 

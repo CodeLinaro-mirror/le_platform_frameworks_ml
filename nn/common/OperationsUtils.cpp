@@ -225,6 +225,7 @@ bool GetQuantizedConvolutionMultipler(const Shape& inputShape, const Shape& filt
     return true;
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 void CalculateActivationRangeUint8(int32_t activation,
                                    const Shape& outputShape,
                                    int32_t* act_min,
@@ -275,6 +276,7 @@ void CalculateActivationRangeFloat(int32_t activation,
         LOG(ERROR) << "Unsupported fused activation function.";
     }
 }
+#endif
 
 int32_t CalculateInputRadius(int input_integer_bits, int input_left_shift) {
     const double max_input_rescaled = 1.0 * ((1 << input_integer_bits) - 1) *

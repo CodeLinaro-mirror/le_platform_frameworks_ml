@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "CpuOperationUtils.h"
 #include "Operations.h"
 
@@ -92,3 +93,4 @@ bool localResponseNormFloat32(const float* inputData, const Shape& inputShape, i
 }
 }  // namespace nn
 }  // namespace android
+#endif

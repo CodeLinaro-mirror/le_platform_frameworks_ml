@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #ifndef FRAMEWORKS_ML_NN_BIDIRECTIONAL_SEQUENCE_LSTM_H
 #define FRAMEWORKS_ML_NN_BIDIRECTIONAL_SEQUENCE_LSTM_H
 
@@ -21,7 +22,9 @@
 #include "HalOperation.h"
 #include "LSTM.h"
 #include "OperationsUtils.h"
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/tensor_utils.h"
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -232,3 +235,4 @@ class BidirectionalSequenceLSTM {
 }  // namespace android
 
 #endif  // FRAMEWORKS_ML_NN_BIDIRECTIONAL_SEQUENCE_LSTM_H
+#endif

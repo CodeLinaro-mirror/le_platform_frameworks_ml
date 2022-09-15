@@ -1,6 +1,8 @@
 set (TARGET_NAME neuralnetworks_common)
 
-add_definitions(-DNN_INCLUDE_CPU_IMPLEMENTATION)
+if (NN_INCLUDE_CPU_IMPLEMENTATION)
+    add_definitions(-DNN_INCLUDE_CPU_IMPLEMENTATION)
+endif ()
 
 set (SOURCE_FILES
     OperationResolver.cpp
@@ -96,12 +98,15 @@ target_link_libraries(${TARGET_NAME}
     textclassifier_hash
     cast_nn_hidl_memory
     cast_nn_hidl_allocator
-    tensorflow-lite
     philox_random
     android.hardware.neuralnetworks_1_2
     fmq
     crypto
 )
+
+if (NN_INCLUDE_CPU_IMPLEMENTATION)
+    target_link_libraries(${TARGET_NAME} ${TFLITE_LIBRARIES})
+endif ()
 
 install(
     TARGETS ${TARGET_NAME}

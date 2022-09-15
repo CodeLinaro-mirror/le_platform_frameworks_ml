@@ -21,8 +21,10 @@
 #include "CpuOperationUtils.h"
 #include "OperationResolver.h"
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
 #include "tensorflow/lite/kernels/internal/reference/legacy_reference_ops.h"
+#endif
 
 #include "Tracing.h"
 
@@ -40,6 +42,7 @@ constexpr uint32_t kActivationScalar = 2;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 #define ANDROID_NN_MACRO_DISPATCH(macro)                                \
@@ -346,6 +349,7 @@ bool divFloat16(const _Float16* in1, const Shape& shape1, const _Float16* in2, c
 }
 
 }  // namespace
+#endif
 
 bool validate(OperationType opType, const IOperationValidationContext* context) {
     const HalVersion opIntroducedAt = (opType == OperationType::DIV || opType == OperationType::SUB)
@@ -379,6 +383,7 @@ bool validate(OperationType opType, const IOperationValidationContext* context) 
            validateOutputTypes(context, {inputType});
 }
 
+#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape input1 = context->getInputShape(kInputTensor1);
     Shape input2 = context->getInputShape(kInputTensor2);
@@ -512,6 +517,7 @@ bool executeDiv(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation DIV";
     }
 }
+#endif
 
 }  // namespace broadcast
 
