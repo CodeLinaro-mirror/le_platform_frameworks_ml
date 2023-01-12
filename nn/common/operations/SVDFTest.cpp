@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "SVDF.h"
 
 #include "NeuralNetworksWrapper.h"
@@ -448,4 +447,3 @@ TEST(SVDFOpTest, BlackBoxTestRank2) {
 }  // namespace wrapper
 }  // namespace nn
 }  // namespace android
-#endif

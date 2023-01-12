@@ -16,7 +16,6 @@
 
 // Contains the implementation of the operations.
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #define LOG_TAG "Operations"
 
 #include "CpuOperationUtils.h"
@@ -87,4 +86,3 @@ bool stridedSliceGeneric(const uint8_t* inputData, const Shape& inputShape,
 
 }  // namespace nn
 }  // namespace android
-#endif

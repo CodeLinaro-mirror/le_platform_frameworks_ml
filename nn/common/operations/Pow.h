@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #ifndef FRAMEWORKS_ML_NN_POW_H
 #define FRAMEWORKS_ML_NN_POW_H
 
@@ -34,4 +33,3 @@ bool eval(const void* baseData, const Shape& baseShape, const void* exponentData
 }  // namespace android
 
 #endif  // FRAMEWORKS_ML_NN_POW_H
-#endif

@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "BidirectionalSequenceLSTM.h"
 
 #include "CpuExecutor.h"
@@ -459,4 +458,3 @@ bool BidirectionalSequenceLSTM::Eval() {
 
 }  // namespace nn
 }  // namespace android
-#endif

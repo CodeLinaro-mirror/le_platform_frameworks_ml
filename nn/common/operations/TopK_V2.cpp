@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "TopK_V2.h"
 
 #include "OperationsUtils.h"
@@ -99,4 +97,3 @@ bool eval(const void* inputData, const Shape& inputShape, const int32_t k, void*
 }  // namespace topk_v2
 }  // namespace nn
 }  // namespace android
-#endif

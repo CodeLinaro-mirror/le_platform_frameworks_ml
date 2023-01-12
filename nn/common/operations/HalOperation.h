@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #ifndef FRAMEWORKS_ML_NN_HAL_OPERATION_H
 #define FRAMEWORKS_ML_NN_HAL_OPERATION_H
 
@@ -36,4 +35,3 @@ struct Operation;
 using ::android::hardware::neuralnetworks::V1_2::Operation;
 
 #endif  // FRAMEWORKS_ML_NN_HAL_OPERATION_H
-#endif

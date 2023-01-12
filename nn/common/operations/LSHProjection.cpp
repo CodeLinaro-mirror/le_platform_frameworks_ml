@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "LSHProjection.h"
 
 #include "CpuExecutor.h"
@@ -192,4 +191,3 @@ template void DenseLshProjection<_Float16>(const RunTimeOperandInfo* hash,
 
 }  // namespace nn
 }  // namespace android
-#endif

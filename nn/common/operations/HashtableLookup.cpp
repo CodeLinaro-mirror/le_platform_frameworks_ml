@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "HashtableLookup.h"
 
 #include "CpuExecutor.h"
@@ -73,4 +72,3 @@ bool HashtableLookup::Eval() {
 
 }  // namespace nn
 }  // namespace android
-#endif

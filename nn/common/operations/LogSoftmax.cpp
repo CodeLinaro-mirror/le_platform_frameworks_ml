@@ -37,7 +37,6 @@ constexpr uint32_t kInputAxis = 2;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 template <typename T>
 inline bool compute(const T* input, const Shape& shape, T beta, uint32_t axis, T* output) {
     const uint32_t outerSize = getNumberOfElements(shape, 0, axis);
@@ -69,7 +68,6 @@ inline bool compute(const T* input, const Shape& shape, T beta, uint32_t axis, T
     }
     return true;
 }
-#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -92,7 +90,6 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     return context->setOutputShape(kOutputTensor, context->getInputShape(kInputTensor));
 }
@@ -115,7 +112,6 @@ bool execute(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation " << kOperationName;
     }
 }
-#endif
 
 }  // namespace log_softmax
 

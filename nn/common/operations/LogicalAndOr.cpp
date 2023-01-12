@@ -32,7 +32,6 @@ constexpr uint32_t kInputTensor2 = 1;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 bool compute(const std::function<bool(bool, bool)>& func, const bool8* aData, const Shape& aShape,
@@ -58,7 +57,6 @@ bool compute(const std::function<bool(bool, bool)>& func, const bool8* aData, co
 }
 
 }  // namespace
-#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -71,7 +69,6 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape input1 = context->getInputShape(kInputTensor1);
     Shape input2 = context->getInputShape(kInputTensor2);
@@ -95,7 +92,6 @@ bool executeOr(IOperationExecutionContext* context) {
             context->getInputShape(kInputTensor2), context->getOutputBuffer<bool8>(kOutputTensor),
             context->getOutputShape(kOutputTensor));
 }
-#endif
 
 }  // namespace logical
 

@@ -16,7 +16,6 @@
 
 // Contains the implementation of the operations.
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #define LOG_TAG "Operations"
 
 #include "CpuOperationUtils.h"
@@ -234,4 +233,3 @@ template bool spaceToBatchGeneric<uint8_t>(const uint8_t* inputData, const Shape
 
 }  // namespace nn
 }  // namespace android
-#endif

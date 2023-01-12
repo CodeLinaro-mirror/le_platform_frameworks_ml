@@ -40,7 +40,6 @@ constexpr uint32_t kOutputTensor = 0;
 constexpr _Float16 kFloat16Max = 65504;
 constexpr _Float16 kFloat16Lowest = -kFloat16Max;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename T>
@@ -63,7 +62,6 @@ inline bool compute(IOperationExecutionContext* context, T init, T func(T, T)) {
 }
 
 }  // namespace
-#endif
 
 bool validateProdSum(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -104,7 +102,6 @@ bool validateLogical(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     Shape inputShape = context->getInputShape(kInputTensor);
     const uint32_t inputRank = getNumberOfDimensions(inputShape);
@@ -210,7 +207,6 @@ bool executeAll(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation REDUCE_ALL";
     }
 }
-#endif
 
 }  // namespace reduce
 

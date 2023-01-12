@@ -21,9 +21,7 @@
 #include "OperationResolver.h"
 #include "Tracing.h"
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
-#endif
 
 #include <functional>
 #include <vector>
@@ -44,7 +42,6 @@ constexpr uint32_t kLayoutScalar = 4;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename T>
@@ -103,7 +100,6 @@ bool resizeImageOp(OperationType opType, const T* inputData, const Shape& inputS
 }
 
 }  // namespace
-#endif
 
 bool validate(OperationType opType, const IOperationValidationContext* context) {
     if (opType == OperationType::RESIZE_BILINEAR) {
@@ -146,7 +142,6 @@ bool validate(OperationType opType, const IOperationValidationContext* context) 
            validateOutputTypes(context, {inputType});
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(OperationType opType, IOperationExecutionContext* context) {
     Shape input = context->getInputShape(kInputTensor);
     NN_RET_CHECK_EQ(getNumberOfDimensions(input), 4);
@@ -229,7 +224,6 @@ bool execute(OperationType opType, IOperationExecutionContext* context) {
                                 << getOperationName(opType);
     }
 }
-#endif
 
 }  // namespace resize_image
 

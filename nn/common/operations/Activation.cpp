@@ -18,10 +18,8 @@
 #include "CpuOperationUtils.h"
 #include "OperationResolver.h"
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #include "tensorflow/lite/kernels/internal/optimized/legacy_optimized_ops.h"
 #include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
-#endif
 
 #include "Tracing.h"
 
@@ -36,7 +34,6 @@ constexpr uint32_t kInputTensor = 0;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 template <typename T>
@@ -208,7 +205,6 @@ bool logisticQuant8(const uint8_t* inputData, const Shape& inputShape, uint8_t* 
 }
 
 }  // namespace
-#endif
 
 bool validate(OperationType opType, const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -230,7 +226,6 @@ bool validate(OperationType opType, const IOperationValidationContext* context) 
     return validateInputTypes(context, {inputType}) && validateOutputTypes(context, {inputType});
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(OperationType opType, IOperationExecutionContext* context) {
     Shape input = context->getInputShape(kInputTensor);
     NN_RET_CHECK_LE(getNumberOfDimensions(input), 4);
@@ -375,7 +370,6 @@ bool executeTanh(IOperationExecutionContext* context) {
             NN_RET_CHECK_FAIL() << "Unsupported tensor type for operation TANH";
     }
 }
-#endif
 
 }  // namespace activation
 

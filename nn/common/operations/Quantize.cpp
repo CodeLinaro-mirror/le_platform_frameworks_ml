@@ -34,7 +34,6 @@ constexpr uint32_t kInputTensor = 0;
 constexpr uint32_t kNumOutputs = 1;
 constexpr uint32_t kOutputTensor = 0;
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 namespace {
 
 bool quantizeFloat32ToQuant8(const float* inputData, uint8_t* outputData,
@@ -62,7 +61,6 @@ bool quantizeFloat16ToQuant8(const _Float16* inputData, uint8_t* outputData,
 }
 
 }  // namespace
-#endif
 
 bool validate(const IOperationValidationContext* context) {
     NN_RET_CHECK_EQ(context->getNumInputs(), kNumInputs);
@@ -79,7 +77,6 @@ bool validate(const IOperationValidationContext* context) {
     return validateHalVersion(context, HalVersion::V1_2);
 }
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 bool prepare(IOperationExecutionContext* context) {
     const Shape& input = context->getInputShape(kInputTensor);
     Shape output = context->getOutputShape(kOutputTensor);
@@ -106,7 +103,6 @@ bool execute(IOperationExecutionContext* context) {
                         << " output type: " << toString(context->getOutputType(kOutputTensor))
                         << ")";
 }
-#endif
 
 }  // namespace quantize
 

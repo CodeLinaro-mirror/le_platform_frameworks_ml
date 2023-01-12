@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef NN_INCLUDE_CPU_IMPLEMENTATION
 #define LOG_TAG "Operations"
 
 #include "Cast.h"
@@ -97,4 +96,3 @@ bool eval(const uint8_t* inputData, const Shape& inputShape, uint8_t* outputData
 }  // namespace cast
 }  // namespace nn
 }  // namespace android
-#endif
